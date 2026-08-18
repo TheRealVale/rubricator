@@ -1,0 +1,149 @@
+/* ── reader UX layer: outline modes, search, resize, shortcuts ────────── */
+:root{ --tray-w:352px; --tray-shift:0px; }
+
+/* ── outline / TOC modes ─────────────────────────────────────────────── */
+#toc{
+  transition:width .2s cubic-bezier(.4,0,.2,1), left .22s cubic-bezier(.4,0,.2,1),
+             padding .2s, background .2s;
+}
+#toc[data-mode="hidden"]{display:none}
+
+#toc[data-mode="mini"]{width:34px;overflow:visible;--toc-off:452px}
+#toc[data-mode="mini"] .toc-h{display:none}
+#toc[data-mode="mini"] a{
+  font-size:0; line-height:0; height:2px; width:16px; padding:0;
+  margin:9px 0 9px 8px; border-left:0; border-radius:2px;
+  background:var(--fg-dim); opacity:.4;
+  transition:background .15s, width .15s, opacity .15s;
+}
+#toc[data-mode="mini"] a.lvl3{width:9px;opacity:.26}
+#toc[data-mode="mini"] a:hover{opacity:.85}
+#toc[data-mode="mini"] a.active{background:var(--accent);width:22px;opacity:1}
+/* hovering the rail temporarily restores the full outline */
+#toc[data-mode="mini"]:hover{
+  --toc-off:620px; width:222px; margin-left:-10px; padding:12px 8px;
+  background:var(--bg-elev); border:1px solid var(--border);
+  border-radius:11px; box-shadow:var(--shadow); overflow-y:auto;
+}
+#toc[data-mode="mini"]:hover .toc-h{display:block}
+#toc[data-mode="mini"]:hover a{
+  font-size:12.5px; line-height:1.5; height:auto; width:auto; margin:0; opacity:1;
+  padding:3.5px 10px; border-radius:0; border-left:2px solid var(--border-soft);
+  background:none; color:var(--fg-dim);
+}
+#toc[data-mode="mini"]:hover a.lvl3{padding-left:22px;font-size:12px;opacity:1}
+#toc[data-mode="mini"]:hover a.active{color:var(--accent);border-left-color:var(--accent);background:none}
+
+/* narrow screens: the outline becomes an overlay drawer */
+@media (max-width:1180px){
+  #toc{display:none}
+  #toc[data-mode="full"].drawer{
+    display:block; left:0; top:0; bottom:0; width:264px; max-height:none;
+    padding:60px 14px 20px; background:var(--bg-elev);
+    border-right:1px solid var(--border); box-shadow:var(--shadow); z-index:58;
+  }
+  #scrim.on{display:block}
+}
+#scrim{
+  display:none; position:fixed; inset:0; z-index:57;
+  background:rgba(0,0,0,.34); backdrop-filter:blur(1.5px);
+}
+
+/* ── layout follows the tray width ───────────────────────────────────── */
+#tray{width:var(--tray-w)}
+@media (min-width:821px){
+  body.tray-open{padding-right:var(--tray-w)}
+  body.tray-open #toc{left:max(20px, calc((100% - var(--tray-w))/2 - var(--toc-off)))}
+}
+/* not enough room beside the text — the outline steps aside */
+body.cramped #toc{display:none}
+body.resizing{user-select:none;cursor:col-resize}
+body.resizing #tray, body.resizing #toc{transition:none}
+.rz{
+  position:absolute; left:-3px; top:0; bottom:0; width:7px; cursor:col-resize; z-index:2;
+}
+.rz::after{
+  content:''; position:absolute; left:2px; top:0; bottom:0; width:3px;
+  background:var(--accent); opacity:0; transition:opacity .15s;
+}
+.rz:hover::after, body.resizing .rz::after{opacity:.55}
+
+/* ── reading progress ────────────────────────────────────────────────── */
+.prog{
+  position:absolute; left:0; bottom:-1px; height:2px; width:0;
+  background:var(--accent); opacity:.75; transition:width .1s linear;
+}
+
+/* ── search ──────────────────────────────────────────────────────────── */
+.search{
+  position:fixed; top:58px; left:calc(50% - var(--tray-shift)/2);
+  transform:translateX(-50%) translateY(-8px); z-index:62;
+  display:none; align-items:center; gap:8px; padding:7px 8px 7px 13px;
+  width:min(520px, calc(100vw - 40px)); box-sizing:border-box;
+  background:var(--bg-elev); border:1px solid var(--border); border-radius:11px;
+  box-shadow:var(--shadow); opacity:0; transition:opacity .15s, transform .15s;
+}
+.search.show{display:flex; opacity:1; transform:translateX(-50%)}
+.search svg{width:15px;height:15px;color:var(--fg-dim);flex:none}
+.search input{
+  all:unset; flex:1; min-width:0; font-family:var(--font); font-size:14px; color:var(--fg);
+}
+.search input::placeholder{color:var(--fg-dim)}
+.search .s-count{
+  font-size:11.5px; color:var(--fg-dim); font-variant-numeric:tabular-nums;
+  white-space:nowrap; flex:none;
+}
+.search .s-count.none{color:var(--red)}
+.search button{
+  all:unset; cursor:pointer; width:24px; height:24px; border-radius:6px; flex:none;
+  display:flex; align-items:center; justify-content:center; color:var(--fg-dim);
+}
+.search button:hover{background:var(--bg-soft);color:var(--fg)}
+.search .sep{width:1px;align-self:stretch;background:var(--border-soft);margin:2px 1px}
+::highlight(md-search){ background:rgba(224,175,104,.30); }
+::highlight(md-search-cur){ background:var(--yellow); color:#0b0d11; }
+
+/* ── shortcuts sheet ─────────────────────────────────────────────────── */
+.sheet{
+  position:fixed; top:50%; left:calc(50% - var(--tray-shift)/2); z-index:72;
+  transform:translate(-50%,-50%) scale(.98); opacity:0; pointer-events:none;
+  width:min(560px, calc(100vw - 48px)); padding:22px 24px 20px;
+  background:var(--bg-elev); border:1px solid var(--border); border-radius:14px;
+  box-shadow:var(--shadow); transition:opacity .16s, transform .16s;
+}
+.sheet.show{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto}
+.sheet h3{margin:0 0 16px;font-size:15px;font-weight:640;letter-spacing:-.01em}
+.sheet .cols{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.sheet .grp b{
+  display:block;font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg-dim);margin-bottom:8px;font-weight:650;
+}
+.sheet .row{display:flex;align-items:center;gap:9px;margin:5px 0;font-size:12.5px;color:var(--fg-muted)}
+.sheet .row span{flex:1}
+.sheet kbd{
+  font-family:var(--mono); font-size:10.5px; padding:2px 6px; border-radius:5px;
+  background:var(--bg-soft); border:1px solid var(--border); border-bottom-width:2px;
+  color:var(--fg); white-space:nowrap;
+}
+.sheet .close{
+  all:unset; position:absolute; top:14px; right:14px; cursor:pointer; color:var(--fg-dim);
+  width:26px; height:26px; border-radius:6px; display:flex; align-items:center; justify-content:center;
+}
+.sheet .close:hover{background:var(--bg-soft);color:var(--fg)}
+.sheet-bg{
+  position:fixed;inset:0;z-index:71;background:rgba(0,0,0,.4);
+  opacity:0;pointer-events:none;transition:opacity .16s;
+}
+.sheet-bg.show{opacity:1;pointer-events:auto}
+
+/* toast + composer follow the content centre too */
+.toast{left:calc(50% - var(--tray-shift)/2)}
+
+/* ── quieter bar ─────────────────────────────────────────────────────── */
+.bar .grp{display:flex;align-items:center;gap:2px;flex:none}
+
+@media (prefers-reduced-motion:reduce){
+  *,::before,::after{transition-duration:.01ms!important;animation-duration:.01ms!important}
+  html{scroll-behavior:auto}
+}
+@media print{ .search,.sheet,.sheet-bg,.prog,#scrim,.rz{display:none!important} }

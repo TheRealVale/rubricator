@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# md — render a markdown file into a beautiful dark-mode page and open it.
+# Assets: <prefix>/share/{template.html,vendor/}   Output: ~/.cache/markside/
+set -euo pipefail
+
+# resolve our own path (following symlinks) so markside runs straight from a
+# checkout as well as from an install
+_self="${BASH_SOURCE[0]:-$0}"
+while [ -L "$_self" ]; do
+  _d="$(cd -P "$(dirname "$_self")" && pwd)"
+  _self="$(readlink "$_self")"
+  case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
+done
+_BIN="$(cd -P "$(dirname "$_self")" && pwd)"
+
+if [ -n "${MARKSIDE_HOME:-}" ]; then
+  SHARE="$MARKSIDE_HOME"
+elif [ -f "$_BIN/../share/template.html" ]; then
+  SHARE="$(cd "$_BIN/.." && pwd)/share"                    # running from a checkout
+elif [ -f "$_BIN/../share/markside/template.html" ]; then
+  SHARE="$(cd "$_BIN/../share/markside" && pwd)"           # installed under a prefix
+else
+  SHARE="$HOME/.local/share/markside"
+fi
+CACHE="${MARKSIDE_CACHE:-$HOME/.cache/markside}"
+TPL="$SHARE/template.html"
+VERSION="1.3.0"
+
+usage() {
+  cat <<'HELPTXT'
+markside — read markdown, mark it up, send the notes to your AI.
+
+USAGE
+  md [options] [file.md]
+
+  With no file, md looks for README.md in the current directory.
+  Use "-" to read markdown from stdin.
+
+OPTIONS
+  -b, --browser     open in your default browser tab (instead of a Chrome app window)
+  -t, --tab         same as --browser
+  -o, --out FILE    write the standalone .html to FILE and don't open anything
+  -p, --print       print the generated HTML to stdout
+  -n, --no-open     generate only; print the cache path
+      --light       start in light mode (default is dark)
+  -h, --help        show this help
+  -v, --version     show version
+      --vendor      re-download the render libraries and exit
+
+REVIEW
+      --review FILE opens the review window and waits; prints your feedback to
+                    stdout, so it composes:  claude "$(md --review plan.md)"
+      --hook plan   for a Claude Code PreToolUse/ExitPlanMode hook: finds the plan
+                    file, opens the review window, blocks, and returns the decision
+
+EXAMPLES
+  md README.md
+  md                       # README.md in this directory
+  git show HEAD:NOTES.md | md -
+  md -o /tmp/spec.html docs/spec.md    # self-contained, shareable HTML
+HELPTXT
+}
+
+die() { printf 'md: %s\n' "$1" >&2; exit 1; }
+
+# review modes hand off to the python runner (they block on a browser round-trip)
+case "${1:-}" in
+  --hook|--review)
+    # hooks do not source your shell profile, so PATH may be bare
+    PY="$(command -v python3 2>/dev/null || true)"
+    [ -x "$PY" ] || PY=/usr/bin/python3
+    MODE="$1"; shift
+    if [ ! -x "$PY" ]; then
+      # never break the caller: emit no decision and leave the normal flow alone
+      [ "$MODE" = "--hook" ] && printf '%s' '{"systemMessage":"md: python3 not found - review skipped"}'
+      exit 0
+    fi
+    if [ "$MODE" = "--hook" ]; then
+      # exit code 2 would BLOCK the tool call in Claude Code, so this path must
+      # never propagate a failure: no runner, or a crashing one, just means no review
+      if [ ! -f "$SHARE/hook.py" ]; then
+        printf '%s' '{"systemMessage":"md: review runner missing - skipped"}'
+        exit 0
+      fi
+      "$PY" "$SHARE/hook.py" "${1:-plan}" || true
+      exit 0
+    fi
+    [ -n "${1:-}" ] || die "--review needs a file"
+    exec "$PY" "$SHARE/hook.py" manual "$1" ;;
+esac
+
+OPEN_MODE="app"; OUT=""; THEME="dark"; TO_STDOUT=0
+FILE=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -b|--browser|-t|--tab) OPEN_MODE="browser" ;;
+    -n|--no-open)          OPEN_MODE="none" ;;
+    -p|--print)            TO_STDOUT=1; OPEN_MODE="none" ;;
+    -o|--out)              shift; [ $# -gt 0 ] || die "--out needs a path"; OUT="$1"; OPEN_MODE="none" ;;
+    --light)               THEME="light" ;;
+    --vendor)              VENDOR_FORCE=1 ;;
+    -h|--help)             usage; exit 0 ;;
+    -v|--version)          echo "md $VERSION"; exit 0 ;;
+    -)                     FILE="-" ;;
+    --)                    shift; FILE="${1:-}"; break ;;
+    -*)                    die "unknown option: $1 (try md --help)" ;;
+    *)                     FILE="$1" ;;
+  esac
+  shift
+done
+
+[ -f "$TPL" ] || die "template missing at $TPL (is markside installed?)"
+
+ensure_vendor() {
+  local manifest="$SHARE/vendor.txt" missing=0 f url sha got
+  [ -f "$manifest" ] || die "vendor manifest missing at $manifest"
+  mkdir -p "$SHARE/vendor"
+  while IFS="$(printf '\t')" read -r f url sha; do
+    case "$f" in \#*|"") continue ;; esac
+    if [ "${VENDOR_FORCE:-0}" = 1 ] || [ ! -s "$SHARE/vendor/$f" ]; then
+      [ "$missing" = 0 ] && printf 'markside: fetching render libraries (one time)…\n' >&2
+      missing=1
+      command -v curl >/dev/null || die "curl is required to fetch the render libraries"
+      curl -fsSL --retry 2 -o "$SHARE/vendor/$f.part" "$url" \
+        || die "could not download $f from $url"
+      if command -v shasum >/dev/null; then
+        got="$(shasum -a 256 "$SHARE/vendor/$f.part" | cut -d" " -f1)"
+        if [ -n "$sha" ] && [ "$got" != "$sha" ]; then
+          rm -f "$SHARE/vendor/$f.part"
+          die "checksum mismatch for $f (expected $sha, got $got)"
+        fi
+      fi
+      mv "$SHARE/vendor/$f.part" "$SHARE/vendor/$f"
+      printf '  %s\n' "$f" >&2
+    fi
+  done < "$manifest"
+  [ "$missing" = 1 ] && printf 'markside: ready.\n' >&2
+  return 0
+}
+ensure_vendor
+if [ "${VENDOR_FORCE:-0}" = 1 ] && [ -z "${FILE:-}" ]; then exit 0; fi
+
+# ── resolve input ────────────────────────────────────────────────────────────
+mkdir -p "$CACHE"
+TMP="$(mktemp -d "$CACHE/.tmp.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+if [ "${FILE:-}" = "-" ]; then
+  SRC="$TMP/stdin.md"; cat > "$SRC"
+  NAME="stdin"; DIR="$(pwd)"; BASEDIR="$(pwd)"; KEY="stdin-$(pwd)"
+  ABS=""; REL="stdin"
+else
+  if [ -z "${FILE:-}" ]; then
+    for cand in README.md readme.md README.markdown index.md; do
+      [ -f "$cand" ] && { FILE="$cand"; break; }
+    done
+    [ -n "${FILE:-}" ] || die "no file given and no README.md here (try md --help)"
+  fi
+  [ -e "$FILE" ] || die "no such file: $FILE"
+  [ -d "$FILE" ] && die "$FILE is a directory"
+  [ -r "$FILE" ] || die "cannot read: $FILE"
+  SRC="$FILE"
+  BASEDIR="$(cd "$(dirname "$FILE")" && pwd)"
+  NAME="$(basename "$FILE")"
+  DIR="$BASEDIR"
+  KEY="$BASEDIR/$NAME"
+  ABS="$BASEDIR/$NAME"; REL="$FILE"
+fi
+
+# collapse $HOME to ~ for the header
+DISPDIR="${DIR/#$HOME/~}"
+
+# ── metadata ─────────────────────────────────────────────────────────────────
+WORDS="$(wc -w < "$SRC" | tr -d ' ')"
+if [ -f "$SRC" ]; then MTIME="$(date -r "$SRC" '+%b %e, %H:%M' | tr -s ' ')"; else MTIME=""; fi
+
+# ── output path: stable per source file ──────────────────────────────────────
+HASH="$(printf '%s' "$KEY" | shasum -a 1 | cut -c1-10)"
+SLUG="$(printf '%s' "${NAME%.*}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+HTML="$CACHE/$SLUG-$HASH.html"
+
+# ── url-encode the base href ─────────────────────────────────────────────────
+urlenc() {
+  local s="$1" out="" c
+  while [ -n "$s" ]; do
+    c="${s%"${s#?}"}"; s="${s#?}"
+    case "$c" in
+      [A-Za-z0-9._~/-]) out="$out$c" ;;
+      *) out="$out$(printf '%%%02X' "'$c")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+BASE="file://$(urlenc "$BASEDIR")/"
+
+# ── json/html escaping ───────────────────────────────────────────────────────
+jesc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+hesc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+HOOKJSON="${MARKSIDE_HOOK:-null}"
+META="{\"hook\":$HOOKJSON,\"name\":\"$(jesc "$NAME")\",\"path\":\"$(jesc "$ABS")\",\"rel\":\"$(jesc "$REL")\",\"base\":\"$(jesc "$BASE")\",\"dir\":\"$(jesc "$DISPDIR")\",\"words\":$WORDS,\"mtime\":\"$(jesc "$MTIME")\"}"
+
+# ── payload ──────────────────────────────────────────────────────────────────
+base64 < "$SRC" > "$TMP/payload.b64"
+
+WANT_MERMAID=0
+grep -qE '^[[:space:]]*(```|~~~)[[:space:]]*mermaid' "$SRC" && WANT_MERMAID=1
+
+# ── assemble ─────────────────────────────────────────────────────────────────
+awk -v vdir="$SHARE" -v payload="$TMP/payload.b64" -v title="$(hesc "$NAME")" \
+    -v base="$BASE" -v meta="$META" -v theme="$THEME" -v mermaid="$WANT_MERMAID" '
+function emit(p,   line) { while ((getline line < p) > 0) print line; close(p) }
+function rep(s, tok, val,   i, out) {
+  out = ""
+  while ((i = index(s, tok)) > 0) { out = out substr(s, 1, i-1) val; s = substr(s, i + length(tok)) }
+  return out s
+}
+{
+  line = $0
+  if (line ~ /^<!--@include /) {
+    f = line; sub(/^<!--@include /, "", f); sub(/-->[[:space:]]*$/, "", f)
+    if (f !~ /^\//) f = vdir "/" f
+    emit(f); next
+  }
+  if (line ~ /^<!--@payload-->/) { emit(payload); next }
+  if (line ~ /^<!--@mermaid-->/) {
+    if (mermaid == 1) { print "<script>"; emit(vdir "/vendor/mermaid.min.js"); print "</" "script>" }
+    next
+  }
+  line = rep(line, "__TITLE__", title)
+  line = rep(line, "__META__",  meta)
+  if (line ~ /^<html /) line = rep(line, "data-theme=\"dark\"", "data-theme=\"" theme "\"")
+  print line
+}' "$TPL" > "$TMP/out.html"
+
+if [ $TO_STDOUT -eq 1 ]; then cat "$TMP/out.html"; exit 0; fi
+if [ -n "$OUT" ]; then cp "$TMP/out.html" "$OUT"; printf 'md: wrote %s\n' "$OUT"; exit 0; fi
+
+mv "$TMP/out.html" "$HTML"
+
+# prune renders older than a week
+find "$CACHE" -maxdepth 1 -name '*.html' -mtime +7 -delete 2>/dev/null || true
+
+# ── open ─────────────────────────────────────────────────────────────────────
+FILEURL="file://$(urlenc "$HTML")"
+CHROME="/Applications/Google Chrome.app"
+
+case "$OPEN_MODE" in
+  none)    printf '%s\n' "$HTML" ;;
+  browser) open "$FILEURL" ;;
+  app)
+    if [ -d "$CHROME" ]; then
+      open -na "$CHROME" --args --app="$FILEURL" --window-size=1120,900 >/dev/null 2>&1 \
+        || open "$FILEURL"
+    else
+      open "$FILEURL"
+    fi ;;
+esac

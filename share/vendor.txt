@@ -1,0 +1,7 @@
+# markside render libraries — fetched once, then used offline.
+# file<TAB>url<TAB>sha256
+marked.min.js	https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js	3e7e7d7feb3e5d58cb6c804f68ab5c24cc7e5eb6270fd6e5cbb9124739217d0c
+highlight.min.js	https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/highlight.min.js	8ab71eb09c51f501e5e25157d9cff100e46cc29bcbfc744d0b746d451fca7f53
+hljs-dark.css	https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/styles/github-dark.min.css	9f208d022102b1d0c7aebfecd8e42ca7997d5de636649d2b31ea63093d809019
+hljs-light.css	https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/styles/github.min.css	3a9a5def8b9c311e5ae43abde85c63133185eed4f0d9f67fea4b00a8308cf066
+mermaid.min.js	https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js	18327bef70d96fb505fe7287d9f6a7362ebf07ff6576ddfaffb1a06f3e1a2954
