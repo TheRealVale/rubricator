@@ -24,7 +24,7 @@ else
 fi
 CACHE="${MARKSIDE_CACHE:-$HOME/.cache/markside}"
 TPL="$SHARE/template.html"
-VERSION="1.4.0"
+VERSION="1.4.1"
 
 usage() {
   cat <<'HELPTXT'

@@ -1,244 +1,318 @@
 ---
 title: markside — workspace mode
-status: proposal
-date: 2026-08-18
+status: plan
+date: 2026-08-20
 ---
 
 # Workspace mode
 
-> Point markside at a repo root. Index every markdown file in it, search across all of
-> them, see which are alive, and find the ones that talk about the same thing.
+> Point markside at your work — the markdown, the git history, and your own past sessions —
+> and answer the question a file-by-file reader cannot: **where did I note, discuss or decide
+> that?**
 
-The driving need is one sentence from the brief: **"often I ask myself where I noted
-something, so I can search."** That is the real problem. Everything else in this plan is
-in service of it or should be cut.
+The whole plan comes from one sentence: *"often I ask myself where I noted something."* The
+uncomfortable half of that is that frequently **you didn't note it** — you discussed it in a
+session, decided, and moved on. Your markdown can't answer that. Your history can.
 
-## The take
-
-**Search across files: yes, unreservedly.** It is the strongest idea here, it has an
-obvious daily use, and markside is already the thing you read those files in. Today's
-search is per-document; making it per-repo is a natural extension rather than a new
-product.
-
-**Usage statistics: yes, but not as described.** "Which files are used most" isn't
-observable — markside can't see you reading a file in your editor, and neither can
-anything else. What *is* observable, precisely and for free:
-
-- `git log` per file — commits, recency, churn, who touched it
-- file mtime
-- markside's own open counts (it can record what you opened in it)
-- annotation counts — which documents you argued with most
-
-That's a genuinely useful "what's alive in this repo" view. Framed as *traffic* it would be
-a vanity dashboard measuring nothing; framed as **activity**, backed by git, it's real. Be
-honest about the source and it earns its place.
-
-**Correlation and mindmaps: yes to the correlation, careful with the map.** A graph view is
-the classic feature that looks superb in a screenshot and gets opened twice. Obsidian's
-graph is the cautionary tale. The useful 90% is a *list*: "these six files mention
-`Migrationswächter`", "these four link to this one". Build that first; it's cheap, exact and
-immediately useful. Render it as a graph afterwards, once you know which edges you actually
-care about.
-
-Crucially, edges must **mean something concrete**. Three honest edge types, no model needed:
-
-| Edge | Signal | Cost |
-|---|---|---|
-| A links to B | markdown links between files | trivial, exact |
-| A and B share a heading | normalised heading text | trivial, exact |
-| A and B share rare terms | TF-IDF cosine over the corpus | ~80 lines, deterministic, offline |
-
-TF-IDF is the right tool here: no API, no model download, no network, explainable ("these
-files are linked because they both talk about *Migrationswächter*, a term that appears
-almost nowhere else"). Embeddings would be better at synonyms and worse at everything
-else — a dependency, a cost, and an unexplainable edge. Don't reach for them until the
-cheap version demonstrably fails.
-
-## What makes this markside's, and not a worse Obsidian
-
-This space is crowded: Obsidian, Foam, Dendron, `rg` + `fzf`. The honest question is what
-markside adds. Two things nothing else has:
-
-1. **Search results feed the review loop.** Find the paragraph, annotate it on the spot,
-   `⌘⏎`, paste into the agent. Search and act, not search and copy.
-2. **Annotations are themselves searchable.** *"Where did I mark something as Cut?"*
-   *"Which plans have open questions I never resolved?"* markside is the only tool that
-   knows your notes, because it made them.
-
-That second one is the feature I'd build the whole mode around. It's a genuinely new answer
-to "where did I note that", because the thing you're looking for is often *your reaction*,
-not the text.
-
-## The architectural fork — worth naming
-
-markside today is a hard rule: one file in, one self-contained page out, no server, no
-state. Workspace mode breaks it. Indexing N files means a build step; keeping the index
-fresh means watching; searching lazily means a server.
-
-So it must be a **second mode, not a change to the first**. `md file.md` stays exactly what
-it is. `md --workspace [dir]` is a different door into the same renderer. If workspace mode
-ever forces a compromise on the single-file path, the answer is no.
-
-Sizing: a repo with 200 markdown files at ~8 KB each is 1.6 MB of text. That inlines into a
-single page without trouble. **The whole index can be a static page**, no server, if we
-accept a rebuild on demand. That preserves the tool's character — and rebuilding takes
-milliseconds.
-
-## Phases
-
-Each phase is independently useful. Stop after any of them.
-
-### Phase 1 — the index and cross-file search
-
-`md --workspace ~/repo` walks the tree (respecting `.gitignore`), reads every `.md`, and
-emits one page: a file list with title, heading outline, word count and mtime, plus a
-search box that searches **all files at once** and shows matches in context, grouped by
-file. Click a result to open that file in the normal reader, at that line.
-
-- reuse: the existing search machinery, the renderer, the whole design system
-- new: a walker, an inlined index, a results view
-- effort: **one session**. This is the 80%.
-
-### Phase 2 — annotation search
-
-The review store already knows every note you've made, keyed by absolute path. Surface it:
-filter by verb, by file, by "unresolved". *"Show me every open Question across the repo."*
-
-- reuse: the review store, unchanged
-- new: a cross-document view of it
-- effort: **half a session**, and it's the most distinctive feature in the plan
-
-### Phase 3 — activity
-
-Per file: last commit, commits in the last 90 days, churn, your open count, annotation
-count. Sort by any of them. Sourced from `git log --numstat`, parsed once at index time.
-
-- effort: **half a session**. Cheap because git already knows.
-
-### Phase 4 — correlation, as a list
-
-For a given file or a given term: which other files share links, headings or rare terms.
-TF-IDF over the corpus built at index time.
-
-- effort: **one session**, mostly the scoring and making the output trustworthy.
-
-### Phase 5 — the graph, only if phase 4 gets used
-
-Force-directed view of the phase-4 edges, filtered by edge type, clicking through to files.
-Inline SVG, no library.
-
-- effort: **one to two sessions**
-- gate: build it only if you actually used phase 4 for a month. If you didn't, the graph
-  won't save it.
-
-## Open questions
-
-- [ ] Where does the index live — rebuilt on demand, or cached in `~/.cache/markside`
-      with an mtime check?
-- [ ] Does `md` with no arguments in a repo root become workspace mode, or stay README?
-- [ ] Should the index follow `docs/**` only, or the whole tree? (`.gitignore` plus a
-      `--include` glob is probably enough.)
-- [ ] Cross-repo: one workspace per repo, or a saved list of roots to search at once?
+Every number below was measured on a real machine, not estimated.
 
 ---
 
-# Session archaeology
+## 1. What we have to work with
 
-> Join the markdown corpus with your own Claude Code history: which topic touched which
-> files, across which sessions.
-
-This is the strongest idea in the plan, and measurement made it stronger — it is far
-cheaper than it sounds. Numbers below are from a real machine, not estimates.
-
-## What is actually on disk
-
-| Store | Size | Contains |
+| Source | Size | What it gives |
 |---|---|---|
-| `~/.claude/projects/*/*.jsonl` | 640 MB, 56 sessions, 11 projects | full transcripts, incl. every `file_path` a tool touched |
-| `~/.claude/history.jsonl` | 2.1 MB, **4,556 prompts** | every prompt you typed, with `sessionId`, `project`, `timestamp` |
-| `~/.claude/plans/*.md` | 40 KB | the plan files |
-| `~/.claude/file-history/` | 108 MB | Claude Code's before-edit backups |
+| repo `*.md` | varies | the corpus: headings, terms, links |
+| `~/.claude/history.jsonl` | 2.1 MB · **4,556 prompts** | every prompt, keyed by session + project + time |
+| `~/.claude/projects/*/*.jsonl` | 640 MB · 56 sessions · 11 projects | every `file_path` a tool touched, with timestamps |
+| `~/.claude/plans/*.md` | 40 KB | the plans themselves |
+| `git log` | — | what actually shipped, and churn per file |
 
-`history.jsonl` is the find. Two megabytes holding every question you have asked, already
-keyed by session and project — the cheapest possible index of *what you were thinking
-about*, with no parsing of the 640 MB behind it.
+**The find is `history.jsonl`.** Two megabytes holding every question you have asked,
+already keyed by session and project, with no need to parse the 640 MB behind it.
 
-## It is fast enough to need no daemon
+### It is fast enough to need no daemon
 
-Measured, single-threaded Python with a `"file_path"` string prefilter:
+| Operation | Measured |
+|---|---|
+| extract file-touches from 478 MB across 56 sessions | **0.6 s** |
+| full *topic → sessions → files* join | **0.13 s** |
+| resulting index | 1,588 files, 4,556 prompts — a few hundred KB |
 
-- extracting file-touches from **478 MB across 56 sessions: 0.6 s**
-- a full *topic → sessions → files* join: **0.13 s**
-- result: 1,588 distinct files, with their session counts
+So there is **no index to maintain, no watcher, no staleness**. Rebuild on demand, every
+time. That preserves the property that makes markside markside.
 
-So: **no index to maintain, no watcher, no staleness.** Rebuild on demand, every time. That
-keeps the property that makes markside markside.
+---
 
-The inverse index is immediately legible — `hypergol/index.html` was touched in 12 separate
-sessions, `src/ui/shipyard.ts` in 9. "Which sessions worked on this file?" is a lookup.
+## 2. Shape of the thing
 
-## The finding that decides the design
+```mermaid
+flowchart LR
+  MD["markdown corpus"]:::s --> DOCS["doc index<br/>headings · terms · links"]:::i
+  HIST["history.jsonl<br/>4,556 prompts"]:::s --> PROMPTS["prompt index"]:::i
+  TR["transcripts<br/>56 sessions"]:::s --> TOUCH["file touches<br/>session ↔ file"]:::i
+  GIT["git log"]:::s --> CHURN["churn + recency"]:::i
+  ANNO["your annotations<br/>already stored"]:::s --> ASEARCH["annotation search"]:::v
 
-The naive join is **useless noise**. Searching `migration` matched 22 sessions, and those
-sessions touched **523 files** between them — nearly everything, because a session touches
-whatever it touches.
+  DOCS --> SEARCH["cross-file search"]:::v
+  DOCS --> STALE["stale-doc detector"]:::v
+  CHURN --> STALE
+  PROMPTS --> JOIN["topic join"]:::v
+  TOUCH --> JOIN
+  DOCS --> JOIN
+  JOIN --> DOSSIER["topic dossier → agent"]:::v
+  SEARCH --> DOSSIER
+  ASEARCH --> DOSSIER
 
-The fix is the same trick as the correlation work: rank by **specificity**, not presence.
-Score each file by how concentrated it is in the matching sessions versus everywhere:
-
+  classDef s fill:#1b2029,stroke:#3a4356,color:#e7eaf0
+  classDef i fill:#12151b,stroke:#7aa2f7,color:#e7eaf0
+  classDef v fill:#141b17,stroke:#7ec699,color:#e7eaf0
 ```
-score(file) = Σ over matching sessions ( 1 / sessions_that_ever_touched(file) )
+
+Four indexes, rebuilt in under a second, feeding five views. Nothing is stored that cannot
+be recomputed.
+
+---
+
+## 3. The join, and the finding that decides it
+
+The naive version is **useless noise**: searching `migration` matched 22 sessions, and those
+sessions touched **523 files** between them — a session touches whatever it touches.
+
+The fix is to rank by **specificity**, not presence:
+
+```mermaid
+flowchart TD
+  T["term · pdf"] --> P["prompts containing it<br/>45 across 4 repos"]
+  P --> S["their sessions"]
+  S --> F["every file those sessions touched<br/>730 · mostly noise"]
+  F --> SC["score = Σ 1 / sessions_that_ever_touched(file)"]
+  SC --> R["ranked<br/>pdfFormRenderer · PDF form components<br/>supabase/migrations/…"]
+  classDef n fill:#161a21,stroke:#232833,color:#e7eaf0
+  class T,P,S,F,SC,R n
 ```
 
 A file touched in every session is background; a file touched only in the matching ones is
-signal. Verified on real data: `pdf` then surfaces `pdfFormRenderer` and the PDF form
-components; `migration` surfaces `supabase/migrations/…`. The routing is correct.
+signal. Verified: `pdf` routes to `pdfFormRenderer`, `migration` to `supabase/migrations/`.
 
-Two refinements the measurement also exposed:
+Three refinements the measurement exposed:
 
-- **Filter scratch paths.** Session temp directories (`/private/tmp/claude-*`) dominate the
-  raw results and are never the answer.
-- **The score saturates.** A file touched once in one matching session ties with one touched
-  in all three. Tie-break by match count, or require ≥ 2 matches before ranking.
-- **History outlives transcripts.** Many `sessionId`s in `history.jsonl` have no transcript
-  left on disk. Degrade to "prompt only, files unknown" rather than dropping the hit.
+- **Filter scratch paths.** `/private/tmp/claude-*` session scratch dominates raw results
+  and is never the answer.
+- **The score saturates.** One touch in one matching session ties with three in three.
+  Tie-break by match count, or require ≥ 2 before ranking.
+- **History outlives transcripts.** Many `sessionId`s have no transcript left on disk.
+  Degrade to *"prompt only, files unknown"* rather than dropping the hit.
 
-## The rule this feature must not break
+---
+
+## 4. The trust boundary
 
 Transcripts contain **everything**: file contents, command output, pasted credentials,
-client data. markside's whole architecture inlines its data into a self-contained page, and
-`-o` makes that page shareable.
+client data. markside inlines its data into a self-contained page, and `-o` makes that page
+shareable. Getting this wrong turns a memory aid into a leak with a share button.
 
-So, a hard constraint, not a preference:
+```mermaid
+flowchart LR
+  subgraph NEVER[never leaves the machine]
+    TO[tool output · file contents]
+    CMD[command output]
+    RAW[raw transcripts]
+  end
+  subgraph SCRUB[redaction pass]
+    R[key-shaped strings · .env blocks<br/>auth headers · 113 pasted blobs]
+  end
+  subgraph MAY[may enter a dossier or an -o export]
+    Q[doc quotes]
+    L[file paths + line refs]
+    N[your own notes]
+    PT[prompt text · scrubbed]
+  end
+  RAW -.->|blocked| MAY
+  TO -.->|blocked| MAY
+  CMD -.->|blocked| MAY
+  R --> PT
+  classDef bad fill:#1b1416,stroke:#f7768e,color:#e7eaf0
+  classDef ok fill:#141b17,stroke:#7ec699,color:#e7eaf0
+  classDef mid fill:#1b1a14,stroke:#e0af68,color:#e7eaf0
+  class TO,CMD,RAW bad
+  class Q,L,N,PT ok
+  class R mid
+```
 
-1. Session data **never enters an exportable page**. `--workspace --sessions` refuses `-o`.
+Rules, not preferences:
+
+1. The session index is **local-only**. `--workspace --sessions` refuses `-o`.
 2. Index **metadata and prompt text only** — never tool output, never file contents.
-3. Prompt text is itself sensitive (`pastedContents` exists in the history schema); treat
-   the whole session index as local-only.
+3. Prompt text is itself sensitive (113 of your prompts carry pasted blobs), so it passes
+   the scrubber before it can reach a dossier.
 
-Getting this wrong turns a memory aid into a leak with a share button. It is the single
-biggest risk in this document.
+**Build the scrubber early.** The dossier is worth more than everything else here and is
+blocked without it.
 
-## Brittleness
+---
 
-The transcript JSONL schema is undocumented and moves with Claude Code versions. The
-extractor leans on `"file_path":"…"` appearing in tool calls — stable in practice, not
-guaranteed. It must degrade to fewer results, never to a crash or a wrong answer.
+## 5. The features
 
-## Why it is worth it
+### 5.1 Cross-file search — *the foundation*
 
-The other half of "where did I note that" is: **you did not note it.** You discussed it. The
-markdown corpus cannot answer that; the history can. Combined with cross-file search, one
-query returns *these documents mention it, these sessions discussed it, and this is the code
-that changed while they did.*
+Walk the tree (respecting `.gitignore`), index every `.md`, and search all of them at once,
+with matches in context grouped by file. Click through to the normal reader at that line.
 
-Nothing else can do this, because nothing else has both your notes and your sessions.
+Reuses the existing search machinery, renderer and design system. New: a walker, an inlined
+index, a results view. **One session.**
 
-## Effort and sequencing
+### 5.2 Annotation search — *the distinctive one*
 
-- session index (history + file-touch extraction + specificity ranking): **~150 lines,
-  one session**
-- joining it into workspace search results: **half a session**
+The review store already knows every note you have made, keyed by path. Surface it across
+documents: filter by verb, by file, by unresolved. *"Show me every open Question."*
+*"Where did I mark something Cut?"*
 
-Sequence it **after** workspace phase 1. On its own this is a session browser, which is
-much less useful than the join it enables.
+What you are hunting is often **your own reaction**, not the text — and nothing else can do
+this, because nothing else made your notes. **Half a session.**
+
+### 5.3 Stale-doc detector — *the one that pays immediately*
+
+For each document: how much did the code it describes change since the doc was last touched?
+Scope churn to the files the doc **mentions or links**, not the whole repo.
+
+A crude repo-wide version already found real hits here:
+
+| Doc | Untouched | Commits since |
+|---|---|---|
+| `lattisfy/requirements.md` | 152 days | 604 |
+| `lattisfy/ROADMAP.md` | 125 days | 586 |
+| `Conventum-Hub/public-docs/features/*` | 210+ days | ~2,300 |
+
+Pure git plus the corpus — **no session data needed**, so it can ship before any of the
+archaeology. **Half a session.**
+
+### 5.4 Session index + topic join — *the engine*
+
+Extract prompts from `history.jsonl` and file-touches from the transcripts, apply the
+specificity ranking from §3, and answer: *these documents mention it, these sessions
+discussed it, this is the code that changed while they did.* **One session.**
+
+### 5.5 Topic dossier — *the reason this is markside and not a browser*
+
+Take everything the join returned and export it as agent context: the specs, the decisions,
+the files, and your unresolved questions on the topic. The tool already exists to feed an
+agent; this makes your corpus and your history feed it too.
+
+Gated on the scrubber. **Half a session** on top of the join.
+
+### 5.6 Cross-repo recall — *"have I solved this before?"*
+
+`history.jsonl` never split by project, so this is nearly free. Topics genuinely recur here:
+
+| Term | Prompts | Repos |
+|---|---|---|
+| `cloudflare` | 37 | **7** |
+| `email` | 118 | 5 |
+| `pdf` | 45 | 4 |
+| `migration` | 30 | 3 |
+
+For someone running many small repos solo, *"where did I do this last time, and what did it
+end up looking like?"* is worth more than searching one repo well. **A quarter of a session**
+once the index exists.
+
+### 5.7 Per-file timeline
+
+Open a file, see its life in one column: git commits, the sessions that touched it, the
+prompts from those sessions, any plan that named it. The detail view the join implies.
+**Half a session.**
+
+### 5.8 Abandoned threads
+
+Sessions that touched files but were followed by no commit — work you started and dropped.
+Computable exactly from session timestamps against `git log`. Pair with recency so a topic
+reads as *hot* or *cold*. **Half a session.**
+
+### 5.9 Correlation list, then maybe a graph
+
+For a document or a term: which others share links, headings, or rare terms (TF-IDF over the
+corpus — deterministic, offline, explainable). Ship it as a **list** first.
+
+The graph view is the classic feature that looks superb in a screenshot and gets opened
+twice; Obsidian's is the cautionary tale. **Gate it**: build the visual only after the list
+has earned a month of use.
+
+### 5.10 Deliberately not building
+
+- **Rhythm and usage dashboards** — sessions per week, time of day, streaks. Measures
+  something real, tells you nothing you would act on.
+- **"This plan is 60% implemented"** — the plan → session → files → commits *link* is exact
+  and useful; the percentage is a guess dressed as a metric. Ship the link, not the number.
+- **Embeddings** — better at synonyms, worse at everything else: a dependency, a cost, and
+  an edge you cannot justify. Not until TF-IDF demonstrably fails.
+
+---
+
+## 6. Order of work
+
+```mermaid
+flowchart TD
+  P1["1 · cross-file search — 1 session"]:::a
+  P3["3 · stale docs — ½ · needs only git"]:::a
+  P2["2 · annotation search — ½"]:::b
+  P4["4 · session index + topic join — 1"]:::b
+  SC["scrubber — ½"]:::c
+  P5["5 · dossier → agent — ½"]:::c
+  P6["6 · cross-repo recall — ¼"]:::b
+  P7["7 · per-file timeline — ½"]:::d
+  P8["8 · abandoned threads — ½"]:::d
+  P9["9 · correlation list — 1"]:::d
+  P10["10 · graph view — 1–2"]:::e
+
+  P1 --> P3
+  P1 --> P2
+  P2 --> P4
+  P4 --> P6
+  P4 --> P7
+  P4 --> P8
+  P4 --> P9
+  P4 --> P5
+  SC -->|blocks| P5
+  P9 -.->|only if the list earns a month of use| P10
+
+  classDef a fill:#141b17,stroke:#7ec699,color:#e7eaf0
+  classDef b fill:#12151b,stroke:#7aa2f7,color:#e7eaf0
+  classDef c fill:#1b1a14,stroke:#e0af68,color:#e7eaf0
+  classDef d fill:#161a21,stroke:#3a4356,color:#98a2b3
+  classDef e fill:#1b1416,stroke:#f7768e,color:#98a2b3
+```
+
+Each step is independently useful — **stop after any of them**. If only three get built:
+**§5.3 stale docs** (pays off immediately, needs no session data), **§5.5 dossier** (makes
+the whole thing markside-shaped), **§5.6 cross-repo recall** (the cheapest genuine surprise).
+
+Roughly **3½ sessions** to the dossier; ~6 for everything except the graph.
+
+---
+
+## 7. The architectural fork
+
+markside today is a hard rule: one file in, one self-contained page out, no server, no state.
+Workspace mode breaks it — indexing means a build step, and staying fresh means watching.
+
+So it is a **second door, not a change to the first**. `md file.md` stays exactly what it is.
+`md --workspace [dir]` is a different entry point into the same renderer. If workspace mode
+ever forces a compromise on the single-file path, the answer is no.
+
+The sizing lets us keep the character: 200 documents at 8 KB is 1.6 MB, which inlines into
+one static page. **Workspace mode can stay serverless**, rebuilt on demand in well under a
+second — with the exception of watch mode, which has its own plan.
+
+---
+
+## 8. Open questions
+
+- [ ] Index cached in `~/.cache/markside` with an mtime check, or rebuilt every time? At
+      0.6 s, rebuilding may simply be simpler than invalidating.
+- [ ] Does `md` with no arguments in a repo root become workspace mode, or stay README?
+- [ ] Whole tree, or `docs/**` plus a `--include` glob?
+- [ ] One workspace per repo, or a saved set of roots searched together? Cross-repo recall
+      (§5.6) argues for the latter.
+- [ ] The transcript JSONL schema is undocumented and moves with releases. The extractor
+      leans on `"file_path":"…"` — stable in practice, not guaranteed. It must degrade to
+      fewer results, never to a crash or a wrong answer.
