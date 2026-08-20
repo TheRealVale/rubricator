@@ -24,7 +24,7 @@ else
 fi
 CACHE="${MARKSIDE_CACHE:-$HOME/.cache/markside}"
 TPL="$SHARE/template.html"
-VERSION="1.4.1"
+VERSION="1.5.0"
 
 usage() {
   cat <<'HELPTXT'
@@ -47,6 +47,14 @@ OPTIONS
   -v, --version     show version
       --vendor      re-download the render libraries and exit
 
+WORKSPACE
+  -w, --workspace [DIR]   index every markdown file in DIR (default: here) and open
+                          a page to search them, see which have gone stale, and read
+                          your notes across all of them
+      --sessions          also index your own Claude Code history, so a topic resolves
+                          to the sessions that discussed it and the files they changed.
+                          Local only — cannot be combined with --out.
+
 REVIEW
       --review FILE opens the review window and waits; prints your feedback to
                     stdout, so it composes:  claude "$(md --review plan.md)"
@@ -63,8 +71,51 @@ HELPTXT
 
 die() { printf 'md: %s\n' "$1" >&2; exit 1; }
 
+urlenc() {
+  local s="$1" out="" c
+  while [ -n "$s" ]; do
+    c="${s%"${s#?}"}"; s="${s#?}"
+    case "$c" in
+      [A-Za-z0-9._~/-]) out="$out$c" ;;
+      *) out="$out$(printf '%%%02X' "'$c")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 # review modes hand off to the python runner (they block on a browser round-trip)
 case "${1:-}" in
+  --workspace|-w)
+    # a second door into the same renderer: index a tree instead of one file
+    PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
+    [ -x "$PY" ] || die "python3 is required for workspace mode"
+    shift
+    WS_DIR="."; WS_SESSIONS=""; WS_OUT=""; WS_OPEN=1
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --sessions) WS_SESSIONS="--sessions" ;;
+        -o|--out)   shift; WS_OUT="${1:?--out needs a path}" ;;
+        -n|--no-open) WS_OPEN=0 ;;
+        -*)         die "unknown workspace option: $1" ;;
+        *)          WS_DIR="$1" ;;
+      esac
+      shift
+    done
+    if [ -n "$WS_OUT" ] && [ -n "$WS_SESSIONS" ]; then
+      die "refusing --out with --sessions: your history stays on this machine"
+    fi
+    mkdir -p "$CACHE"
+    WS_FILE="${WS_OUT:-$CACHE/workspace-$(printf '%s' "$(cd "$WS_DIR" && pwd)" | shasum -a 1 | cut -c1-10).html}"
+    MARKSIDE_HOME="$SHARE" MARKSIDE_OUT="$WS_FILE" "$PY" "$SHARE/workspace.py" "$WS_DIR" $WS_SESSIONS >/dev/null || exit 1
+    if [ "$WS_OPEN" = 1 ] && [ -z "$WS_OUT" ]; then
+      FILEURL="file://$(urlenc "$WS_FILE")"
+      if [ -d "/Applications/Google Chrome.app" ]; then
+        open -na "/Applications/Google Chrome.app" --args --app="$FILEURL" --window-size=1280,960 >/dev/null 2>&1 || open "$FILEURL"
+      else open "$FILEURL"; fi
+    else
+      printf '%s\n' "$WS_FILE"
+    fi
+    exit 0 ;;
   --hook|--review)
     # hooks do not source your shell profile, so PATH may be bare
     PY="$(command -v python3 2>/dev/null || true)"
@@ -180,18 +231,7 @@ HASH="$(printf '%s' "$KEY" | shasum -a 1 | cut -c1-10)"
 SLUG="$(printf '%s' "${NAME%.*}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
 HTML="$CACHE/$SLUG-$HASH.html"
 
-# ── url-encode the base href ─────────────────────────────────────────────────
-urlenc() {
-  local s="$1" out="" c
-  while [ -n "$s" ]; do
-    c="${s%"${s#?}"}"; s="${s#?}"
-    case "$c" in
-      [A-Za-z0-9._~/-]) out="$out$c" ;;
-      *) out="$out$(printf '%%%02X' "'$c")" ;;
-    esac
-  done
-  printf '%s' "$out"
-}
+# ── url-encode ─────────────────────────────────────────────────────────────
 BASE="file://$(urlenc "$BASEDIR")/"
 
 # ── json/html escaping ───────────────────────────────────────────────────────

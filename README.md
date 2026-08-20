@@ -109,6 +109,39 @@ number. After the agent rewrites the document, reopen it: untouched notes follow
 to its new lines, and notes whose text is gone are marked *resolved* and greyed out. What's
 left is your open-items list.
 
+## Workspace mode
+
+`md --workspace` points markside at a whole repo instead of one file.
+
+```bash
+md -w                    # index this repo and open it
+md -w ~/code/thing       # somewhere else
+md -w --sessions         # also index your own agent history (local only)
+```
+
+It walks every markdown file the repo tracks, reads `git log`, and builds one static page
+— 328 documents and 3,800 prompts index in about a second, so there is nothing to cache
+and nothing to invalidate.
+
+**Search** every document at once, with matches in context. Click a result to read it.
+
+**Stale** lists documents whose code moved on without them. Churn is counted only in the
+files each document actually mentions or links, so it flags *"this spec describes code that
+changed 392 times since you last touched it"* rather than *"this repo is busy"*.
+
+**Notes** collects your annotations across every document — every open Question, everything
+marked Cut — because what you are hunting is often your own reaction, not the text.
+
+**With `--sessions`** a topic also resolves to the sessions that discussed it and the code
+those sessions changed, ranked by how specific each file is to the topic rather than by
+whether it was touched. Then **Copy dossier** puts the whole picture — documents, your open
+notes, what you asked before, the files — on the clipboard for your agent.
+
+> [!IMPORTANT]
+> Session data never leaves the machine. Prompt text is scrubbed of keys, tokens, JWTs,
+> private keys, `.env` lines and connection strings at index time, and `--sessions` refuses
+> `--out` outright so it cannot be written to a shareable file.
+
 ## The Claude Code loop
 
 With the hook installed you never copy anything.
