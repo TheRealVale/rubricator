@@ -1,5 +1,5 @@
 ---
-title: markside — review mode
+title: rubricator — review mode
 status: tier 0 shipped
 date: 2026-08-18
 ---

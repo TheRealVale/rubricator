@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-markside review server — opens the review window and blocks until the human decides.
+rubricator review server — opens the review window and blocks until the human decides.
 
 Used two ways:
   md --hook plan   (from a Claude Code PreToolUse/ExitPlanMode hook; JSON on stdin,
@@ -14,11 +14,11 @@ import http.server, json, os, re, secrets, socket, subprocess, sys, threading, t
 from pathlib import Path
 
 HOME    = Path.home()
-SHARE   = Path(os.environ.get("MARKSIDE_HOME", HOME / ".local/share/markside"))
-MD_BIN  = os.environ.get("MARKSIDE_BIN", str(HOME / ".local/bin/md"))
+SHARE   = Path(os.environ.get("RUBRICATOR_HOME", HOME / ".local/share/rubricator"))
+MD_BIN  = os.environ.get("RUBRICATOR_BIN", str(HOME / ".local/bin/md"))
 PLANS   = HOME / ".claude" / "plans"
 CHROME  = "/Applications/Google Chrome.app"
-WAIT    = int(os.environ.get("MARKSIDE_TIMEOUT", "540"))    # under the hook's 600s ceiling
+WAIT    = int(os.environ.get("RUBRICATOR_TIMEOUT", "540"))    # under the hook's 600s ceiling
 
 TOKEN   = secrets.token_urlsafe(9)
 RESULT  = {}
@@ -139,7 +139,7 @@ def close_window(port):
 
 # ── rendering ────────────────────────────────────────────────────────────────
 def render(path, hook_meta, out):
-    env = dict(os.environ, MARKSIDE_HOOK=json.dumps(hook_meta))
+    env = dict(os.environ, RUBRICATOR_HOOK=json.dumps(hook_meta))
     r = subprocess.run([MD_BIN, "-o", out, path], env=env,
                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     if r.returncode != 0 or not os.path.isfile(out):
@@ -156,13 +156,13 @@ def emit(obj):
 
 def hook_decision(action, text, label):
     if action == "approve":
-        ctx = "The plan was reviewed and approved in markside."
+        ctx = "The plan was reviewed and approved in rubricator."
         if (text or "").strip():
             ctx += "\n\n" + text.strip()
         return {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "allow",
             "additionalContext": ctx},
-            "systemMessage": f"markside: {label} approved" +
+            "systemMessage": f"rubricator: {label} approved" +
                              (" with notes" if (text or "").strip() else "")}
     if action == "feedback" and (text or "").strip():
         return {"hookSpecificOutput": {
@@ -220,7 +220,7 @@ def main():
         try: os.unlink(tmp)
         except Exception: pass
 
-    if os.environ.get("MARKSIDE_DEBUG"):
+    if os.environ.get("RUBRICATOR_DEBUG"):
         sys.stderr.write(base + "/\n"); sys.stderr.flush()
     open_window(base + "/")
     DONE.wait(timeout=max(5, deadline - time.time()))

@@ -1,12 +1,15 @@
-# markside
+# rubricator
 
 Read markdown in a beautiful window, mark it up like a document reviewer, and send the
 notes straight to your AI coding agent.
 
+*A rubricator was the scribe who went through a finished manuscript adding the red marks —
+the headings, the corrections, the notes in the margin. Same job, different century.*
+
 Built for one job: an agent writes a plan, you read it, and you need to say *"this bit —
 no"* without retyping it into a terminal.
 
-![markside reviewing a plan](docs/review.png)
+![rubricator reviewing a plan](docs/review.png)
 
 ```bash
 md README.md          # render and open
@@ -23,8 +26,8 @@ single self-contained file you can send to someone.
 ## Install
 
 ```bash
-git clone https://github.com/TheRealVale/markside.git
-cd markside
+git clone https://github.com/TheRealVale/rubricator.git
+cd rubricator
 ./install.sh            # or: ./install.sh --link   (edits here take effect immediately)
 ```
 
@@ -33,7 +36,7 @@ render libraries (pinned and checksum-verified), and adds a small block to `~/.z
 tab completion.
 
 > [!NOTE]
-> oh-my-zsh binds `md` to `mkdir -p`. markside takes the name and gives you `mkd` instead,
+> oh-my-zsh binds `md` to `mkdir -p`. rubricator takes the name and gives you `mkd` instead,
 > so you lose nothing. Prefer to keep it? `./install.sh --no-shell` and alias it yourself.
 
 Requires macOS, bash and curl. `python3` is needed only for the review modes below.
@@ -111,7 +114,7 @@ left is your open-items list.
 
 ## Workspace mode
 
-`md --workspace` points markside at a whole repo instead of one file.
+`md --workspace` points rubricator at a whole repo instead of one file.
 
 ```bash
 md -w                    # index this repo and open it
@@ -196,7 +199,7 @@ agents, team sharing. [md-annotator](https://github.com/konradmichalik/md-annota
 [Imark](https://imarkmd.com) solve neighbouring problems; Imark's approach of storing notes
 inside the `.md` file is better than local storage if you move between machines.
 
-markside's bet is different: no server, no daemon, no install beyond a script, and small
+rubricator's bet is different: no server, no daemon, no install beyond a script, and small
 enough that you can read all of it and change the parts you don't like. The palette is one
 CSS block at the top of `share/template.html`.
 

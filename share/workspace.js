@@ -1,4 +1,4 @@
-/* markside workspace — search a repo's markdown, its git activity and your own sessions. */
+/* rubricator workspace — search a repo's markdown, its git activity and your own sessions. */
 (function(){
 "use strict";
 var D = JSON.parse(document.getElementById('wsdata').textContent);

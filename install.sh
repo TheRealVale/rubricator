@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# markside installer.  Safe to re-run; nothing here needs root.
+# rubricator installer.  Safe to re-run; nothing here needs root.
 set -euo pipefail
 
 REPO="$(cd -P "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -10,7 +10,7 @@ WITH_HOOK=0
 
 usage() {
   cat <<'USAGE'
-markside installer
+rubricator installer
 
   ./install.sh [options]
 
@@ -36,9 +36,9 @@ while [ $# -gt 0 ]; do
 done
 
 say() { printf '  %s\n' "$*"; }
-die() { printf 'markside: %s\n' "$*" >&2; exit 1; }
+die() { printf 'rubricator: %s\n' "$*" >&2; exit 1; }
 
-echo "markside → $PREFIX"
+echo "rubricator → $PREFIX"
 
 # ── prerequisites ────────────────────────────────────────────────────────────
 command -v curl >/dev/null || die "curl is required (to fetch the render libraries)"
@@ -48,20 +48,20 @@ fi
 [ "$(uname -s)" = "Darwin" ] || say "note: built for macOS; on other systems 'open' must exist to launch a browser"
 
 # ── files ────────────────────────────────────────────────────────────────────
-mkdir -p "$PREFIX/bin" "$PREFIX/share/markside"
+mkdir -p "$PREFIX/bin" "$PREFIX/share/rubricator"
 if [ "$MODE" = "link" ]; then
   ln -sfn "$REPO/bin/md" "$PREFIX/bin/md"
-  rm -rf "$PREFIX/share/markside"
+  rm -rf "$PREFIX/share/rubricator"
   say "linked $PREFIX/bin/md → $REPO/bin/md"
   SHARE="$REPO/share"
 else
   install -m 0755 "$REPO/bin/md" "$PREFIX/bin/md"
   for f in template.html review.css review.js ui.css ui.js md.zsh vendor.txt; do
-    install -m 0644 "$REPO/share/$f" "$PREFIX/share/markside/$f"
+    install -m 0644 "$REPO/share/$f" "$PREFIX/share/rubricator/$f"
   done
-  install -m 0755 "$REPO/share/hook.py" "$PREFIX/share/markside/hook.py"
-  say "installed $PREFIX/bin/md and $PREFIX/share/markside"
-  SHARE="$PREFIX/share/markside"
+  install -m 0755 "$REPO/share/hook.py" "$PREFIX/share/rubricator/hook.py"
+  say "installed $PREFIX/bin/md and $PREFIX/share/rubricator"
+  SHARE="$PREFIX/share/rubricator"
 fi
 
 # ── render libraries (pinned + checksummed; see share/vendor.txt) ────────────
@@ -74,15 +74,15 @@ if [ "$SHELL_RC" = 1 ] && [ -n "${HOME:-}" ]; then
   RC="$HOME/.zshrc"
   if [ -f "$RC" ]; then
     tmp="$(mktemp)"
-    grep -v 'md-render/md\.zsh\|markside/md\.zsh\|markside/share/md\.zsh' "$RC" \
-      | awk 'BEGIN{skip=0} /^# >>> markside >>>$/{skip=1} skip==0{print} /^# <<< markside <<<$/{skip=0}' > "$tmp"
+    grep -v 'md-render/md\.zsh\|rubricator/md\.zsh\|rubricator/share/md\.zsh' "$RC" \
+      | awk 'BEGIN{skip=0} /^# >>> rubricator >>>$/{skip=1} skip==0{print} /^# <<< rubricator <<<$/{skip=0}' > "$tmp"
     { echo ""
-      echo "# >>> markside >>>"
+      echo "# >>> rubricator >>>"
       echo "[ -f \"$SHARE/md.zsh\" ] && source \"$SHARE/md.zsh\""
-      echo "# <<< markside <<<"
+      echo "# <<< rubricator <<<"
     } >> "$tmp"
     mv "$tmp" "$RC"
-    say "added the markside block to ~/.zshrc (alias fix + tab completion)"
+    say "added the rubricator block to ~/.zshrc (alias fix + tab completion)"
   else
     say "no ~/.zshrc found — add:  source \"$SHARE/md.zsh\""
   fi
@@ -106,7 +106,7 @@ cat <<EOF
     md                    README.md in the current directory
     md --help             everything else
 
-  oh-my-zsh binds 'md' to 'mkdir -p'; markside takes the name and gives you 'mkd' instead.
+  oh-my-zsh binds 'md' to 'mkdir -p'; rubricator takes the name and gives you 'mkd' instead.
 EOF
 [ "$WITH_HOOK" = 1 ] || cat <<'EOF'
   Claude Code users: ./install-hook.sh wires up plan review (see the README).

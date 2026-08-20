@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install (or remove) the Claude Code hook that opens markside's review window
+# Install (or remove) the Claude Code hook that opens rubricator's review window
 # when Claude finishes a plan.   Usage:  ./install-hook.sh [--remove]
 set -euo pipefail
 
@@ -19,12 +19,12 @@ REPO="$(cd -P "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MD="$(command -v md 2>/dev/null || true)"
 case "$MD" in "") MD="$HOME/.local/bin/md" ;; esac
 [ -x "$MD" ] || MD="$REPO/bin/md"
-[ -x "$MD" ] || { echo "markside: cannot find the md command — run ./install.sh first" >&2; exit 1; }
+[ -x "$MD" ] || { echo "rubricator: cannot find the md command — run ./install.sh first" >&2; exit 1; }
 
-[ -f "$SETTINGS" ] || { echo "markside: no Claude Code settings at $SETTINGS" >&2; exit 1; }
-command -v python3 >/dev/null || { echo "markside: python3 required" >&2; exit 1; }
+[ -f "$SETTINGS" ] || { echo "rubricator: no Claude Code settings at $SETTINGS" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "rubricator: python3 required" >&2; exit 1; }
 
-BACKUP="$SETTINGS.bak-markside-$(date +%Y%m%d%H%M%S)"
+BACKUP="$SETTINGS.bak-rubricator-$(date +%Y%m%d%H%M%S)"
 cp "$SETTINGS" "$BACKUP"
 
 python3 - "$SETTINGS" "$REMOVE" "$MD" <<'PY'

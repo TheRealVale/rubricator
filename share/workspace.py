@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-markside workspace indexer — walks a repo, reads git, optionally reads your own
+rubricator workspace indexer — walks a repo, reads git, optionally reads your own
 Claude Code history, and emits one self-contained page.
 
 Everything here is recomputed on every run: at ~0.6s for 500 MB there is nothing
@@ -251,14 +251,14 @@ def main():
     args = [a for a in args if not a.startswith("--")]
     root = Path(args[0]).resolve() if args else Path.cwd()
     if not root.is_dir():
-        sys.stderr.write(f"markside: not a directory: {root}\n")
+        sys.stderr.write(f"rubricator: not a directory: {root}\n")
         return 1
     data = build(root, with_sessions)
-    if os.environ.get("MARKSIDE_JSON"):
+    if os.environ.get("RUBRICATOR_JSON"):
         json.dump(data, sys.stdout)
         return 0
-    share = Path(os.environ.get("MARKSIDE_HOME", Path(__file__).resolve().parent))
-    out = os.environ.get("MARKSIDE_OUT")
+    share = Path(os.environ.get("RUBRICATOR_HOME", Path(__file__).resolve().parent))
+    out = os.environ.get("RUBRICATOR_OUT")
     page = emit_html(data, share)
     if out:
         Path(out).write_text(page, encoding="utf-8")

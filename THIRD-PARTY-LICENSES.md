@@ -1,6 +1,6 @@
 # Third-party licenses
 
-markside itself is MIT licensed (see `LICENSE`). It renders pages in the browser using
+rubricator itself is MIT licensed (see `LICENSE`). It renders pages in the browser using
 three libraries, which `install.sh` downloads at pinned versions (`share/vendor.txt`,
 checksum-verified) and inlines into every page it generates. Their notices travel inside
 the generated HTML; their full licence texts are reproduced here.
@@ -16,7 +16,7 @@ redistribution is **DOMPurify** (© Cure53), dual-licensed Apache-2.0 **or** MPL
 Apache-2.0 text is included below. The bundle also carries KaTeX (MIT), cytoscape (MIT),
 dagre (MIT), d3 (ISC) and lodash (MIT).
 
-If you redistribute pages that markside generated, you are redistributing these libraries
+If you redistribute pages that rubricator generated, you are redistributing these libraries
 too — leave the notices in the HTML intact and ship this file alongside.
 
 ---

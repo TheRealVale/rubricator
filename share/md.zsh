@@ -1,4 +1,4 @@
-# markside — the `md` command: alias fix + completion.  Sourced from ~/.zshrc.
+# rubricator — the `md` command: alias fix + completion.  Sourced from ~/.zshrc.
 
 # oh-my-zsh's lib/directories.zsh binds md='mkdir -p'; hand the name to the renderer
 # and keep the mkdir shortcut as `mkd`.

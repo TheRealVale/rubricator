@@ -1,4 +1,4 @@
-# markside render libraries — fetched once, then used offline.
+# rubricator render libraries — fetched once, then used offline.
 # file<TAB>url<TAB>sha256
 marked.min.js	https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js	3e7e7d7feb3e5d58cb6c804f68ab5c24cc7e5eb6270fd6e5cbb9124739217d0c
 highlight.min.js	https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/highlight.min.js	8ab71eb09c51f501e5e25157d9cff100e46cc29bcbfc744d0b746d451fca7f53

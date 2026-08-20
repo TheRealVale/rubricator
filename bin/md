@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # md — render a markdown file into a beautiful dark-mode page and open it.
-# Assets: <prefix>/share/{template.html,vendor/}   Output: ~/.cache/markside/
+# Assets: <prefix>/share/{template.html,vendor/}   Output: ~/.cache/rubricator/
 set -euo pipefail
 
-# resolve our own path (following symlinks) so markside runs straight from a
+# resolve our own path (following symlinks) so rubricator runs straight from a
 # checkout as well as from an install
 _self="${BASH_SOURCE[0]:-$0}"
 while [ -L "$_self" ]; do
@@ -13,22 +13,22 @@ while [ -L "$_self" ]; do
 done
 _BIN="$(cd -P "$(dirname "$_self")" && pwd)"
 
-if [ -n "${MARKSIDE_HOME:-}" ]; then
-  SHARE="$MARKSIDE_HOME"
+if [ -n "${RUBRICATOR_HOME:-}" ]; then
+  SHARE="$RUBRICATOR_HOME"
 elif [ -f "$_BIN/../share/template.html" ]; then
   SHARE="$(cd "$_BIN/.." && pwd)/share"                    # running from a checkout
-elif [ -f "$_BIN/../share/markside/template.html" ]; then
-  SHARE="$(cd "$_BIN/../share/markside" && pwd)"           # installed under a prefix
+elif [ -f "$_BIN/../share/rubricator/template.html" ]; then
+  SHARE="$(cd "$_BIN/../share/rubricator" && pwd)"           # installed under a prefix
 else
-  SHARE="$HOME/.local/share/markside"
+  SHARE="$HOME/.local/share/rubricator"
 fi
-CACHE="${MARKSIDE_CACHE:-$HOME/.cache/markside}"
+CACHE="${RUBRICATOR_CACHE:-$HOME/.cache/rubricator}"
 TPL="$SHARE/template.html"
 VERSION="1.5.0"
 
 usage() {
   cat <<'HELPTXT'
-markside — read markdown, mark it up, send the notes to your AI.
+rubricator — read markdown, mark it up, send the notes to your AI.
 
 USAGE
   md [options] [file.md]
@@ -106,7 +106,7 @@ case "${1:-}" in
     fi
     mkdir -p "$CACHE"
     WS_FILE="${WS_OUT:-$CACHE/workspace-$(printf '%s' "$(cd "$WS_DIR" && pwd)" | shasum -a 1 | cut -c1-10).html}"
-    MARKSIDE_HOME="$SHARE" MARKSIDE_OUT="$WS_FILE" "$PY" "$SHARE/workspace.py" "$WS_DIR" $WS_SESSIONS >/dev/null || exit 1
+    RUBRICATOR_HOME="$SHARE" RUBRICATOR_OUT="$WS_FILE" "$PY" "$SHARE/workspace.py" "$WS_DIR" $WS_SESSIONS >/dev/null || exit 1
     if [ "$WS_OPEN" = 1 ] && [ -z "$WS_OUT" ]; then
       FILEURL="file://$(urlenc "$WS_FILE")"
       if [ -d "/Applications/Google Chrome.app" ]; then
@@ -161,7 +161,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-[ -f "$TPL" ] || die "template missing at $TPL (is markside installed?)"
+[ -f "$TPL" ] || die "template missing at $TPL (is rubricator installed?)"
 
 ensure_vendor() {
   local manifest="$SHARE/vendor.txt" missing=0 f url sha got
@@ -170,7 +170,7 @@ ensure_vendor() {
   while IFS="$(printf '\t')" read -r f url sha; do
     case "$f" in \#*|"") continue ;; esac
     if [ "${VENDOR_FORCE:-0}" = 1 ] || [ ! -s "$SHARE/vendor/$f" ]; then
-      [ "$missing" = 0 ] && printf 'markside: fetching render libraries (one time)…\n' >&2
+      [ "$missing" = 0 ] && printf 'rubricator: fetching render libraries (one time)…\n' >&2
       missing=1
       command -v curl >/dev/null || die "curl is required to fetch the render libraries"
       curl -fsSL --retry 2 -o "$SHARE/vendor/$f.part" "$url" \
@@ -186,7 +186,7 @@ ensure_vendor() {
       printf '  %s\n' "$f" >&2
     fi
   done < "$manifest"
-  [ "$missing" = 1 ] && printf 'markside: ready.\n' >&2
+  [ "$missing" = 1 ] && printf 'rubricator: ready.\n' >&2
   return 0
 }
 ensure_vendor
@@ -238,7 +238,7 @@ BASE="file://$(urlenc "$BASEDIR")/"
 jesc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 hesc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
-HOOKJSON="${MARKSIDE_HOOK:-null}"
+HOOKJSON="${RUBRICATOR_HOOK:-null}"
 META="{\"hook\":$HOOKJSON,\"name\":\"$(jesc "$NAME")\",\"path\":\"$(jesc "$ABS")\",\"rel\":\"$(jesc "$REL")\",\"base\":\"$(jesc "$BASE")\",\"dir\":\"$(jesc "$DISPDIR")\",\"words\":$WORDS,\"mtime\":\"$(jesc "$MTIME")\"}"
 
 # ── payload ──────────────────────────────────────────────────────────────────

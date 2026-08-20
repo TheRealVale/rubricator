@@ -1,5 +1,5 @@
 ---
-title: markside — watch mode
+title: rubricator — watch mode
 status: proposal
 date: 2026-08-19
 ---

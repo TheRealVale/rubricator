@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove markside.  Leaves your annotations (they live in the browser) alone.
+# Remove rubricator.  Leaves your annotations (they live in the browser) alone.
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local}"
 KEEP_CACHE=0
@@ -14,17 +14,17 @@ done
 say() { printf '  %s\n' "$*"; }
 
 [ -e "$PREFIX/bin/md" ] && { rm -f "$PREFIX/bin/md"; say "removed $PREFIX/bin/md"; }
-[ -d "$PREFIX/share/markside" ] && { rm -rf "$PREFIX/share/markside"; say "removed $PREFIX/share/markside"; }
-if [ "$KEEP_CACHE" = 0 ] && [ -d "$HOME/.cache/markside" ]; then
-  rm -rf "$HOME/.cache/markside"; say "removed the render cache"
+[ -d "$PREFIX/share/rubricator" ] && { rm -rf "$PREFIX/share/rubricator"; say "removed $PREFIX/share/rubricator"; }
+if [ "$KEEP_CACHE" = 0 ] && [ -d "$HOME/.cache/rubricator" ]; then
+  rm -rf "$HOME/.cache/rubricator"; say "removed the render cache"
 fi
 RC="$HOME/.zshrc"
-if [ -f "$RC" ] && grep -q '>>> markside >>>' "$RC"; then
+if [ -f "$RC" ] && grep -q '>>> rubricator >>>' "$RC"; then
   tmp="$(mktemp)"
-  awk 'BEGIN{skip=0} /^# >>> markside >>>$/{skip=1} skip==0{print} /^# <<< markside <<<$/{skip=0}' "$RC" > "$tmp"
+  awk 'BEGIN{skip=0} /^# >>> rubricator >>>$/{skip=1} skip==0{print} /^# <<< rubricator <<<$/{skip=0}' "$RC" > "$tmp"
   # drop the blank line the installer added, so the file is byte-identical again
   awk 'NF{last=NR}{l[NR]=$0}END{for(i=1;i<=last;i++)print l[i]}' "$tmp" > "$tmp.2" && mv "$tmp.2" "$tmp"
-  mv "$tmp" "$RC"; say "removed the markside block from ~/.zshrc"
+  mv "$tmp" "$RC"; say "removed the rubricator block from ~/.zshrc"
 fi
 echo
 say "If you installed the Claude Code hook, remove it with: ./install-hook.sh --remove"

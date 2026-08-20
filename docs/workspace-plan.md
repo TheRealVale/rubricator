@@ -1,12 +1,12 @@
 ---
-title: markside — workspace mode
+title: rubricator — workspace mode
 status: plan
 date: 2026-08-20
 ---
 
 # Workspace mode
 
-> Point markside at your work — the markdown, the git history, and your own past sessions —
+> Point rubricator at your work — the markdown, the git history, and your own past sessions —
 > and answer the question a file-by-file reader cannot: **where did I note, discuss or decide
 > that?**
 
@@ -40,7 +40,7 @@ already keyed by session and project, with no need to parse the 640 MB behind it
 | resulting index | 1,588 files, 4,556 prompts — a few hundred KB |
 
 So there is **no index to maintain, no watcher, no staleness**. Rebuild on demand, every
-time. That preserves the property that makes markside markside.
+time. That preserves the property that makes rubricator rubricator.
 
 ---
 
@@ -109,7 +109,7 @@ Three refinements the measurement exposed:
 ## 4. The trust boundary
 
 Transcripts contain **everything**: file contents, command output, pasted credentials,
-client data. markside inlines its data into a self-contained page, and `-o` makes that page
+client data. rubricator inlines its data into a self-contained page, and `-o` makes that page
 shareable. Getting this wrong turns a memory aid into a leak with a share button.
 
 ```mermaid
@@ -193,7 +193,7 @@ Extract prompts from `history.jsonl` and file-touches from the transcripts, appl
 specificity ranking from §3, and answer: *these documents mention it, these sessions
 discussed it, this is the code that changed while they did.* **One session.**
 
-### 5.5 Topic dossier — *the reason this is markside and not a browser*
+### 5.5 Topic dossier — *the reason this is rubricator and not a browser*
 
 Take everything the join returned and export it as agent context: the specs, the decisions,
 the files, and your unresolved questions on the topic. The tool already exists to feed an
@@ -284,7 +284,7 @@ flowchart TD
 
 Each step is independently useful — **stop after any of them**. If only three get built:
 **§5.3 stale docs** (pays off immediately, needs no session data), **§5.5 dossier** (makes
-the whole thing markside-shaped), **§5.6 cross-repo recall** (the cheapest genuine surprise).
+the whole thing rubricator-shaped), **§5.6 cross-repo recall** (the cheapest genuine surprise).
 
 Roughly **3½ sessions** to the dossier; ~6 for everything except the graph.
 
@@ -292,7 +292,7 @@ Roughly **3½ sessions** to the dossier; ~6 for everything except the graph.
 
 ## 7. The architectural fork
 
-markside today is a hard rule: one file in, one self-contained page out, no server, no state.
+rubricator today is a hard rule: one file in, one self-contained page out, no server, no state.
 Workspace mode breaks it — indexing means a build step, and staying fresh means watching.
 
 So it is a **second door, not a change to the first**. `md file.md` stays exactly what it is.
@@ -307,7 +307,7 @@ second — with the exception of watch mode, which has its own plan.
 
 ## 8. Open questions
 
-- [ ] Index cached in `~/.cache/markside` with an mtime check, or rebuilt every time? At
+- [ ] Index cached in `~/.cache/rubricator` with an mtime check, or rebuilt every time? At
       0.6 s, rebuilding may simply be simpler than invalidating.
 - [ ] Does `md` with no arguments in a repo root become workspace mode, or stay README?
 - [ ] Whole tree, or `docs/**` plus a `--include` glob?
