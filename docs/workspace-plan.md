@@ -139,3 +139,106 @@ Inline SVG, no library.
 - [ ] Should the index follow `docs/**` only, or the whole tree? (`.gitignore` plus a
       `--include` glob is probably enough.)
 - [ ] Cross-repo: one workspace per repo, or a saved list of roots to search at once?
+
+---
+
+# Session archaeology
+
+> Join the markdown corpus with your own Claude Code history: which topic touched which
+> files, across which sessions.
+
+This is the strongest idea in the plan, and measurement made it stronger — it is far
+cheaper than it sounds. Numbers below are from a real machine, not estimates.
+
+## What is actually on disk
+
+| Store | Size | Contains |
+|---|---|---|
+| `~/.claude/projects/*/*.jsonl` | 640 MB, 56 sessions, 11 projects | full transcripts, incl. every `file_path` a tool touched |
+| `~/.claude/history.jsonl` | 2.1 MB, **4,556 prompts** | every prompt you typed, with `sessionId`, `project`, `timestamp` |
+| `~/.claude/plans/*.md` | 40 KB | the plan files |
+| `~/.claude/file-history/` | 108 MB | Claude Code's before-edit backups |
+
+`history.jsonl` is the find. Two megabytes holding every question you have asked, already
+keyed by session and project — the cheapest possible index of *what you were thinking
+about*, with no parsing of the 640 MB behind it.
+
+## It is fast enough to need no daemon
+
+Measured, single-threaded Python with a `"file_path"` string prefilter:
+
+- extracting file-touches from **478 MB across 56 sessions: 0.6 s**
+- a full *topic → sessions → files* join: **0.13 s**
+- result: 1,588 distinct files, with their session counts
+
+So: **no index to maintain, no watcher, no staleness.** Rebuild on demand, every time. That
+keeps the property that makes markside markside.
+
+The inverse index is immediately legible — `hypergol/index.html` was touched in 12 separate
+sessions, `src/ui/shipyard.ts` in 9. "Which sessions worked on this file?" is a lookup.
+
+## The finding that decides the design
+
+The naive join is **useless noise**. Searching `migration` matched 22 sessions, and those
+sessions touched **523 files** between them — nearly everything, because a session touches
+whatever it touches.
+
+The fix is the same trick as the correlation work: rank by **specificity**, not presence.
+Score each file by how concentrated it is in the matching sessions versus everywhere:
+
+```
+score(file) = Σ over matching sessions ( 1 / sessions_that_ever_touched(file) )
+```
+
+A file touched in every session is background; a file touched only in the matching ones is
+signal. Verified on real data: `pdf` then surfaces `pdfFormRenderer` and the PDF form
+components; `migration` surfaces `supabase/migrations/…`. The routing is correct.
+
+Two refinements the measurement also exposed:
+
+- **Filter scratch paths.** Session temp directories (`/private/tmp/claude-*`) dominate the
+  raw results and are never the answer.
+- **The score saturates.** A file touched once in one matching session ties with one touched
+  in all three. Tie-break by match count, or require ≥ 2 matches before ranking.
+- **History outlives transcripts.** Many `sessionId`s in `history.jsonl` have no transcript
+  left on disk. Degrade to "prompt only, files unknown" rather than dropping the hit.
+
+## The rule this feature must not break
+
+Transcripts contain **everything**: file contents, command output, pasted credentials,
+client data. markside's whole architecture inlines its data into a self-contained page, and
+`-o` makes that page shareable.
+
+So, a hard constraint, not a preference:
+
+1. Session data **never enters an exportable page**. `--workspace --sessions` refuses `-o`.
+2. Index **metadata and prompt text only** — never tool output, never file contents.
+3. Prompt text is itself sensitive (`pastedContents` exists in the history schema); treat
+   the whole session index as local-only.
+
+Getting this wrong turns a memory aid into a leak with a share button. It is the single
+biggest risk in this document.
+
+## Brittleness
+
+The transcript JSONL schema is undocumented and moves with Claude Code versions. The
+extractor leans on `"file_path":"…"` appearing in tool calls — stable in practice, not
+guaranteed. It must degrade to fewer results, never to a crash or a wrong answer.
+
+## Why it is worth it
+
+The other half of "where did I note that" is: **you did not note it.** You discussed it. The
+markdown corpus cannot answer that; the history can. Combined with cross-file search, one
+query returns *these documents mention it, these sessions discussed it, and this is the code
+that changed while they did.*
+
+Nothing else can do this, because nothing else has both your notes and your sessions.
+
+## Effort and sequencing
+
+- session index (history + file-touch extraction + specificity ranking): **~150 lines,
+  one session**
+- joining it into workspace search results: **half a session**
+
+Sequence it **after** workspace phase 1. On its own this is a session browser, which is
+much less useful than the join it enables.
