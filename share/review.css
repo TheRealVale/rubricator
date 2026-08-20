@@ -1,7 +1,7 @@
 /* ── review layer ────────────────────────────────────── */
 :root{
   --v-change:var(--accent); --v-question:var(--purple); --v-cut:var(--red);
-  --v-expand:var(--yellow); --v-approve:var(--green);
+  --v-expand:var(--yellow); --v-approve:var(--green); --v-note:var(--fg-dim);
   --focus-bg:rgba(255,255,255,.035);
 }
 html[data-theme="light"]{ --focus-bg:rgba(0,0,0,.032) }

@@ -248,6 +248,7 @@ var SHEET = [
   ['Review', [
     ['c', 'change — rewrite this'], ['?', 'question — explain this'],
     ['x', 'cut — remove this'], ['e', 'expand — go deeper'],
+    ['n', 'note — context, no change asked'],
     ['a', 'approve — keep as-is'], ['f', 'feedback panel'],
     ['⌘ ⏎', 'copy feedback'], ['esc', 'close what is open']
   ]]

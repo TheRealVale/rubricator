@@ -156,10 +156,14 @@ def emit(obj):
 
 def hook_decision(action, text, label):
     if action == "approve":
+        ctx = "The plan was reviewed and approved in markside."
+        if (text or "").strip():
+            ctx += "\n\n" + text.strip()
         return {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "allow",
-            "additionalContext": "The plan was reviewed and approved in md."},
-            "systemMessage": f"md: {label} approved"}
+            "additionalContext": ctx},
+            "systemMessage": f"markside: {label} approved" +
+                             (" with notes" if (text or "").strip() else "")}
     if action == "feedback" and (text or "").strip():
         return {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -231,7 +235,10 @@ def main():
         if action == "feedback" and text.strip():
             sys.stdout.write(text.strip() + "\n")
         elif action == "approve":
-            sys.stdout.write(f"Approved {label} with no changes requested.\n")
+            if (text or "").strip():
+                sys.stdout.write(f"Approved {label} — no changes requested.\n\n" + text.strip() + "\n")
+            else:
+                sys.stdout.write(f"Approved {label} with no changes requested.\n")
         else:
             sys.stderr.write("md: no feedback given\n")
             return 1

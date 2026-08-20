@@ -61,6 +61,7 @@ Select any text for the verb popover, or hover a block and press a key:
 | `?` | Question | explain or justify this |
 | `x` | Cut | remove this |
 | `e` | Expand | too thin, go deeper |
+| `n` | Note | context you want recorded — asks for nothing |
 | `a` | Approve | explicitly keep as-is |
 
 `a` and `x` save instantly; the rest open a note box. Press a verb on a **heading** and it
@@ -86,6 +87,22 @@ Apply this feedback. Don't restructure anything I didn't mention.
 
 Paste that into any agent. Line numbers are exact: they come from the markdown parser's
 own token offsets, not guesswork.
+
+**Notes are different.** A `n` Note records context rather than asking for a change, so it
+never appears as a numbered instruction — it rides along in an appendix:
+
+```
+Notes — context, not change requests:
+
+— plan.md:17-23 — "1. Data model"
+   > ```sql
+   > CREATE TABLE applications (
+   > … (7 lines)
+   Ties into the migration guard work from #211.
+```
+
+Which means a note can't accidentally reject a plan: with only notes outstanding the button
+reads **Approve with notes**, and the approval carries them along as context.
 
 **Across revisions.** Notes are stored per file and re-anchored by *content*, not line
 number. After the agent rewrites the document, reopen it: untouched notes follow their text

@@ -12,11 +12,18 @@ var VERBS = {
   question:{ label:'Question', color:'var(--v-question)', key:'?' },
   cut:     { label:'Cut',      color:'var(--v-cut)',      key:'x' },
   expand:  { label:'Expand',   color:'var(--v-expand)',   key:'e' },
+  note:    { label:'Note',     color:'var(--v-note)',     key:'n' },
   approve: { label:'Approve',  color:'var(--v-approve)',  key:'a' }
 };
-var ORDER = ['change','question','cut','expand','approve'];
+var ORDER = ['change','question','cut','expand','note','approve'];
 var TYPES = { change:'CHANGE', question:'QUESTION', cut:'CUT', expand:'EXPAND', approve:'APPROVE' };
 var SILENT = { approve:1, cut:1 };   // verbs that don't need a note
+/* a Note records context; it asks for nothing. It rides along as an appendix
+   rather than as a numbered instruction, and it never turns an approval into a
+   rejection. */
+function isAsk(it){ return it.verb !== 'note' && it.verb !== 'approve'; }
+function askItems(){ return exportItems().filter(isAsk); }
+function noteItems(){ return exportItems().filter(function(i){ return i.verb === 'note'; }); }
 
 /* ── storage ─────────────────────────────────────────── */
 function hash(s){ var h=5381,i=s.length; while(i) h=(h*33^s.charCodeAt(--i))>>>0; return h.toString(36); }
@@ -27,6 +34,7 @@ try {
   var saved = localStorage.getItem(KEY);
   if (saved) { var o = JSON.parse(saved); for (var k in o) store[k] = o[k]; }
 } catch(e){}
+if (store.template === 'notes') store.template = 'raw';   // renamed, freeing the word for the verb
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(store)); } catch(e){} }
 
 /* ── source helpers ──────────────────────────────────── */
@@ -325,7 +333,7 @@ function renderTray(){
     trayList.innerHTML = '<div class="empty">Nothing yet.<br><br>' +
       'Select any text for the verb popover, or hover a block and press ' +
       '<kbd>c</kbd> change · <kbd>?</kbd> question · <kbd>x</kbd> cut · ' +
-      '<kbd>e</kbd> expand · <kbd>a</kbd> approve.</div>';
+      '<kbd>e</kbd> expand · <kbd>n</kbd> note · <kbd>a</kbd> approve.</div>';
     return;
   }
   if (window.__mdHookSync) window.__mdHookSync();
@@ -379,7 +387,7 @@ function syncTpl(){
   [].forEach.call(document.querySelectorAll('#tray .tpl button'), function(b){
     b.classList.toggle('on', b.dataset.tpl === store.template);
   });
-  preBox.style.display = store.template === 'notes' ? 'none' : '';
+  preBox.style.display = store.template === 'apply' ? '' : 'none';
 }
 
 /* ── export ──────────────────────────────────────────── */
@@ -396,28 +404,58 @@ function exportQuote(it){
   if (lines.length <= 4 && q.length <= 320) return lines;
   return lines.slice(0, 2).concat('… (' + n + ' lines)');
 }
-function buildExport(){
-  var items = exportItems();
-  if (!items.length) return '';
-  var out = [], n = 0;
-  var head = store.template === 'questions'
-    ? 'Questions about ' + PATH + ' — ' + items.length + '. Answer them; don\'t edit the file yet.'
-    : store.template === 'notes'
-      ? 'Notes on ' + PATH + ' — ' + items.length + ' items.'
-      : 'Feedback on ' + PATH + ' — ' + items.length + ' item' + (items.length > 1 ? 's' : '') + '.';
-  out.push(head);
-  if (store.template !== 'notes' && store.preamble.trim()) out.push(store.preamble.trim());
+function locOf(it){
+  return SHORT + ':' + it.lineStart + (it.lineEnd > it.lineStart ? '-' + it.lineEnd : '');
+}
+function appendNotes(out, notes){
+  if (!notes.length) return;
+  out.push('Notes — context, not change requests:');
   out.push('');
-  items.forEach(function(it){
-    n++;
-    var loc = SHORT + ':' + it.lineStart + (it.lineEnd > it.lineStart ? '-' + it.lineEnd : '');
-    var line = n + '. ' + TYPES[it.verb] + ' — ' + loc;
+  notes.forEach(function(it){
+    var line = '— ' + locOf(it);
     if (it.heading) line += ' — "' + it.heading + '"';
     out.push(line);
     exportQuote(it).forEach(function(q){ out.push('   > ' + q); });
     if (it.note.trim()) it.note.trim().split('\n').forEach(function(l){ out.push('   ' + l); });
     out.push('');
   });
+}
+/* the notes appendix on its own — what an approval carries along */
+function buildNotes(){
+  var notes = noteItems();
+  if (!notes.length) return '';
+  var out = [];
+  appendNotes(out, notes);
+  return out.join('\n').replace(/\n+$/, '\n');
+}
+function buildExport(){
+  var items = exportItems();
+  if (!items.length) return '';
+  var notes = store.template === 'questions' ? [] : noteItems();
+  var main  = items.filter(function(i){ return notes.indexOf(i) < 0; });
+  var out = [], n = 0;
+  var head;
+  if (store.template === 'questions')
+    head = 'Questions about ' + PATH + ' — ' + items.length + '. Answer them; don\'t edit the file yet.';
+  else if (!main.length)
+    head = 'Notes on ' + PATH + ' — ' + notes.length + '. Nothing to change.';
+  else if (store.template === 'raw')
+    head = PATH + ' — ' + main.length + ' item' + (main.length > 1 ? 's' : '') + '.';
+  else
+    head = 'Feedback on ' + PATH + ' — ' + main.length + ' item' + (main.length > 1 ? 's' : '') + '.';
+  out.push(head);
+  if (store.template === 'apply' && main.length && store.preamble.trim()) out.push(store.preamble.trim());
+  out.push('');
+  main.forEach(function(it){
+    n++;
+    var line = n + '. ' + TYPES[it.verb] + ' — ' + locOf(it);
+    if (it.heading) line += ' — "' + it.heading + '"';
+    out.push(line);
+    exportQuote(it).forEach(function(q){ out.push('   > ' + q); });
+    if (it.note.trim()) it.note.trim().split('\n').forEach(function(l){ out.push('   ' + l); });
+    out.push('');
+  });
+  appendNotes(out, notes);
   return out.join('\n').replace(/\n+$/, '\n');
 }
 function copy(text){
@@ -514,12 +552,13 @@ syncTpl(); paint(); renderTray();
   /* the primary action follows what you've actually done:
      nothing marked up -> approving is the obvious move; marked up -> sending is */
   window.__mdHookSync = function(){
-    var n = exportItems().length;
+    var n = askItems().length, notes = noteItems().length;
     sendBtn.disabled = expired || !n;
     approveBtn.disabled = expired;
     approveBtn.classList.toggle('primary', !expired && !n);
     sendBtn.classList.toggle('primary', !expired && !!n);
     sendBtn.firstChild.nodeValue = n ? 'Send ' + n + ' item' + (n > 1 ? 's ' : ' ') : 'Send feedback ';
+    approveBtn.firstChild.nodeValue = (!n && notes) ? 'Approve with notes ' : 'Approve ';
   };
   window.__mdHookSync();
 
@@ -539,7 +578,7 @@ syncTpl(); paint(); renderTray();
   function verdict(action){
     if (sent || expired && action !== 'closed') return;
     sent = true;
-    var text = action === 'feedback' ? buildExport() : '';
+    var text = action === 'feedback' ? buildExport() : (action === 'approve' ? buildNotes() : '');
     done(action);
     try {
       fetch(H.url, { method:'POST', headers:{'Content-Type':'application/json'},
@@ -547,7 +586,7 @@ syncTpl(); paint(); renderTray();
     } catch(e){}
   }
   approveBtn.addEventListener('click', function(){ verdict('approve'); });
-  sendBtn.addEventListener('click', function(){ if (exportItems().length) verdict('feedback'); });
+  sendBtn.addEventListener('click', function(){ if (askItems().length) verdict('feedback'); });
 
   /* closing the window is not consent — hand it back to the terminal prompt */
   addEventListener('pagehide', function(){
@@ -562,7 +601,7 @@ syncTpl(); paint(); renderTray();
     if (!(e.metaKey || e.ctrlKey) || e.key !== 'Enter') return;
     e.preventDefault(); e.stopPropagation();
     if (e.shiftKey) verdict('approve');
-    else if (exportItems().length) verdict('feedback');
+    else if (askItems().length) verdict('feedback');
   }, true);
 
   function tick(){
@@ -585,5 +624,5 @@ syncTpl(); paint(); renderTray();
   toggleTray(true);
 })();
 
-window.__mdReview = { store: store, build: buildExport };
+window.__mdReview = { store: store, build: buildExport, notes: buildNotes };
 })();
