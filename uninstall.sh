@@ -19,9 +19,12 @@ if [ "$KEEP_CACHE" = 0 ] && [ -d "$HOME/.cache/rubricator" ]; then
   rm -rf "$HOME/.cache/rubricator"; say "removed the render cache"
 fi
 RC="$HOME/.zshrc"
-if [ -f "$RC" ] && grep -q '>>> rubricator >>>' "$RC"; then
+if [ -f "$RC" ] && grep -qE '>>> (rubricator|markside|md-render) >>>' "$RC"; then
   tmp="$(mktemp)"
-  awk 'BEGIN{skip=0} /^# >>> rubricator >>>$/{skip=1} skip==0{print} /^# <<< rubricator <<<$/{skip=0}' "$RC" > "$tmp"
+  awk 'BEGIN{skip=0}
+       /^# >>> (rubricator|markside|md-render) >>>$/{skip=1}
+       skip==0{print}
+       /^# <<< (rubricator|markside|md-render) <<<$/{skip=0}' "$RC" > "$tmp"
   # drop the blank line the installer added, so the file is byte-identical again
   awk 'NF{last=NR}{l[NR]=$0}END{for(i=1;i<=last;i++)print l[i]}' "$tmp" > "$tmp.2" && mv "$tmp.2" "$tmp"
   mv "$tmp" "$RC"; say "removed the rubricator block from ~/.zshrc"

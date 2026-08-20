@@ -74,8 +74,13 @@ if [ "$SHELL_RC" = 1 ] && [ -n "${HOME:-}" ]; then
   RC="$HOME/.zshrc"
   if [ -f "$RC" ]; then
     tmp="$(mktemp)"
-    grep -v 'md-render/md\.zsh\|rubricator/md\.zsh\|rubricator/share/md\.zsh' "$RC" \
-      | awk 'BEGIN{skip=0} /^# >>> rubricator >>>$/{skip=1} skip==0{print} /^# <<< rubricator <<<$/{skip=0}' > "$tmp"
+    # strip ANY previous block of ours, including ones written under an older
+    # name — otherwise a rename leaves a dead source line behind
+    grep -v '/md\.zsh"' "$RC" \
+      | awk 'BEGIN{skip=0}
+             /^# >>> (rubricator|markside|md-render) >>>$/{skip=1}
+             skip==0{print}
+             /^# <<< (rubricator|markside|md-render) <<<$/{skip=0}' > "$tmp"
     { echo ""
       echo "# >>> rubricator >>>"
       echo "[ -f \"$SHARE/md.zsh\" ] && source \"$SHARE/md.zsh\""
