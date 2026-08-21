@@ -6,6 +6,76 @@ var $ = function(id){ return document.getElementById(id); };
 var DAY = 86400;
 var now = Math.floor(Date.now() / 1000);
 
+/* ── the live tier ─────────────────────────────────────────────────────────
+   Served from 127.0.0.1, the page can fetch what it needs instead of carrying
+   it. Everything below degrades to the static behaviour when there is no
+   server, so one code path covers both. */
+var CAPS = D.caps || {}, BASE = D.base || '';
+function can(c){ return !!CAPS[c]; }
+function api(path, body, cb, fail){
+  if (!BASE) return fail && fail();
+  var o = { method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type':'application/json'} };
+  if (body !== undefined) o.body = JSON.stringify(body);
+  fetch(BASE + '/' + path, o)
+    .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+    /* two-argument then, not .catch: a bug thrown inside cb must not be
+       reported back as "the server failed" and run the failure path too */
+    .then(function(j){ try { cb && cb(j); } catch(e){ console.error('rubricator:', e); } },
+          function(){ try { fail && fail(); } catch(e){} });
+}
+
+/* document bodies are left on disk in the live tier and pulled in when a
+   document is actually opened — or all at once, the first time you search */
+var textAll = false;
+function ensureText(rels, cb){
+  var need = rels.filter(function(r){
+    var d = docBy(r);
+    return d && d.text == null;
+  });
+  if (!can('text') || !need.length) return cb();
+  api('text', { rels: need }, function(j){
+    for (var rel in j){ var d = docBy(rel); if (d) d.text = j[rel]; }
+    cb();
+  }, cb);
+}
+function ensureAllText(cb){
+  if (textAll || !can('text')) { textAll = true; return cb(); }
+  api('text', { rels: [] }, function(j){
+    D.docs.forEach(function(d){ if (j[d.rel] != null) d.text = j[d.rel]; });
+    textAll = true; cb();
+  }, cb);
+}
+function docBy(rel){ return D.docs.filter(function(x){ return x.rel === rel; })[0]; }
+
+/* notes: the server owns them when there is one, and the browser's copy is
+   kept in step so the same notes show up if you open the file on its own */
+var DISK = D.notes || {};
+if (can('notes') && window.MDReview){
+  window.MDReview.storage.get = function(key, path){
+    var mine = null, theirs = DISK[path] || null;
+    try { mine = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){}
+    if (!theirs) { if (mine) pushUp(path, mine); return mine; }
+    if (!mine) return theirs;
+    if ((mine.saved || 0) > (theirs.saved || 0)){ pushUp(path, mine); return mine; }
+    return theirs;
+  };
+  /* notes taken in the standalone reader only reach the browser; the first time
+     the workspace sees a newer local copy it carries it up to the repo */
+  function pushUp(path, store){
+    if (!store || !store.items || !store.items.length) return;
+    DISK[path] = store;
+    api('notes', { path: path, store: store });
+  }
+  window.MDReview.storage.set = function(key, val, path){
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){}
+    DISK[path] = val;
+    clearTimeout(window.__noteT);
+    window.__noteT = setTimeout(function(){
+      api('notes', { path: path, store: val }, null, function(){ toast('note not saved to disk'); });
+    }, 400);
+  };
+}
+
 /* annotations live in the reader's local storage, keyed by a hash of the abs path */
 function hash(s){ var h=5381,i=s.length; while(i) h=(h*33^s.charCodeAt(--i))>>>0; return h.toString(36); }
 function annosFor(doc){
@@ -41,6 +111,8 @@ function copy(text){
     try{ document.execCommand('copy'); }catch(e){} a.remove(); }
 }
 function snippet(text, q, len){
+  text = text || '';
+  if (!q) return esc(text.slice(0, len || 150).trim());
   var i = text.toLowerCase().indexOf(q.toLowerCase());
   if (i < 0) return esc(text.slice(0, len || 150).trim());
   var a = Math.max(0, i - 60), b = Math.min(text.length, i + q.length + (len || 110));
@@ -48,7 +120,7 @@ function snippet(text, q, len){
          '</mark>' + esc(text.slice(i+q.length, b)) + (b < text.length ? '…' : '');
 }
 function count(text, q){
-  if (!q) return 0;
+  if (!q || !text) return 0;
   var n = 0, i = 0, t = text.toLowerCase(), s = q.toLowerCase();
   while ((i = t.indexOf(s, i)) >= 0){ n++; i += s.length; }
   return n;
@@ -88,6 +160,9 @@ function docScore(d, q){
   return count(d.title, q) * 8 + d.headings.reduce(function(a,h){ return a + count(h.text, q) * 4; }, 0)
        + count(d.text, q);
 }
+/* headings and titles are in the page from the start, so a search answers
+   immediately and deepens once the bodies land */
+function searching(){ return can('text') && !textAll && !!query; }
 
 /* ── views ────────────────────────────────────────────────────────────── */
 var VIEWS = [], view = 'search', query = '';
@@ -118,6 +193,8 @@ function viewSearch(){
   var elsewhere = ranked.filter(function(f){ return !f.here; }).slice(0, 6);
   var projects = {}; prompts.forEach(function(p){ projects[p.project.split('/').pop() || '?'] = 1; });
 
+  if (searching()) out.push('<div class="qnote">Searching titles and headings — ' +
+    'fetching the full text…</div>');
   out.push('<div class="qnote">' + docs.length + ' documents · ' + prompts.length + ' prompts · ' +
     Object.keys(sids).length + ' sessions' +
     (Object.keys(projects).length > 1 ? ' · <b>' + Object.keys(projects).length + ' repos</b>' : '') + '</div>');
@@ -475,8 +552,9 @@ function buildDossier(){
 
 /* ── reader ───────────────────────────────────────────────────────────── */
 function openDoc(rel, q, side){
-  var d = D.docs.filter(function(x){ return x.rel === rel; })[0];
+  var d = docBy(rel);
   if (!d) return;
+  if (d.text == null) return ensureText([rel], function(){ if (d.text != null) openDoc(rel, q, side); });
   libSel = rel;
   $('rpath').textContent = d.rel;
 
@@ -501,6 +579,13 @@ function openDoc(rel, q, side){
     });
   }
 
+  if (can('asset')){
+    var pre = 'file://' + D.root + '/';
+    doc.querySelectorAll('img[src],video[src],source[src]').forEach(function(el){
+      var v = el.getAttribute('src') || '';
+      if (v.indexOf(pre) === 0) el.setAttribute('src', BASE + '/asset?p=' + encodeURIComponent(v.slice(pre.length)));
+    });
+  }
   if (q) markHits(doc, q);
   $('reader').classList.toggle('side', !!side);
   document.body.classList.toggle('split', !!side);
@@ -552,6 +637,7 @@ function render(){
   }).join('');
   $('page').innerHTML = ({search:viewSearch, docs:viewLibrary, stale:viewStale,
                           notes:viewNotes, sessions:viewSessions}[view])();
+  needText();
   var q = $('q');
   if (q){
     q.addEventListener('input', function(){ query = q.value; var p = q.selectionStart; render();
@@ -564,6 +650,12 @@ function render(){
   if (dw) dw.onclick = function(){ toast('documents, your open notes, past prompts (scrubbed) and the code most specific to them'); };
 }
 function setView(v){ view = v; render(); }
+
+/* the first search is the moment the page needs every document body */
+function needText(){
+  if (!query || textAll || !can('text')) return;
+  ensureAllText(function(){ render(); });
+}
 
 if (D.withSessions){
   var anyHere = false;
@@ -579,10 +671,53 @@ VIEWS = [
   { id:'sessions', label:'Sessions', n: D.withSessions ? Object.keys(D.sessions).length : null }
 ];
 
+/* ── reindex, and the heartbeat that decides how long the server lives ───── */
+function reindex(done){
+  if (!can('reindex')) return done && done();
+  var b = $('reidx'); if (b) b.classList.add('busy');
+  api('reindex', {}, function(j){
+    ['docs','stale','prompts','sessions','touches','hasGit','took','notes'].forEach(function(k){
+      if (j[k] !== undefined) D[k] = j[k];
+    });
+    textAll = false;
+    if (D.notes && window.MDReview) DISK = D.notes;
+    if (b) b.classList.remove('busy');
+    stat(); render();
+    if (window.MDReview && $('reader').classList.contains('on') && libSel){
+      var d = docBy(libSel);
+      if (d) { d.text = null; openDoc(libSel, '', $('reader').classList.contains('side')); }
+    }
+    toast('reindexed — ' + D.docs.length + ' documents');
+    done && done();
+  }, function(){ if (b) b.classList.remove('busy'); toast('reindex failed'); done && done(); });
+}
+function stat(){
+  $('wstat').textContent = D.docs.length + ' docs · indexed in ' + D.took + 's' +
+    (D.withSessions ? ' · ' + D.prompts.length + ' prompts' : '');
+}
+if (can('live')){
+  var bar = document.querySelector('.wsbar'), themeBtn = $('theme');
+  var rb = document.createElement('button');
+  rb.id = 'reidx'; rb.className = 'btn'; rb.title = 'Reindex (r)';
+  rb.setAttribute('aria-label', 'Reindex');
+  rb.style.cssText = 'all:unset;cursor:pointer;padding:6px;border-radius:7px;color:var(--fg-muted)';
+  rb.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>';
+  bar.insertBefore(rb, themeBtn);
+  rb.addEventListener('click', function(){ reindex(); });
+
+  /* the server exits when this stops, so closing the window cleans up after
+     itself and a crashed page cannot leave a process behind */
+  setInterval(function(){ api('ping', {}); }, 30000);
+  addEventListener('pagehide', function(){
+    try { navigator.sendBeacon(BASE + '/bye', new Blob(['{}'], {type:'application/json'})); } catch(e){}
+  });
+}
+
 $('wname').textContent = D.name;
 $('wpath').textContent = D.root.replace(/^\/Users\/[^/]+/, '~');
-$('wstat').textContent = D.docs.length + ' docs · indexed in ' + D.took + 's' +
-  (D.withSessions ? ' · ' + D.prompts.length + ' prompts' : '');
+stat();
 
 document.addEventListener('click', function(e){
   var tab = e.target.closest('#tabs button');
@@ -628,6 +763,7 @@ document.addEventListener('keydown', function(e){
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === '/'){ e.preventDefault(); if (view !== 'search') setView('search'); var q=$('q'); if (q) q.focus(); }
+  if (e.key === 'r' && can('reindex')){ e.preventDefault(); reindex(); return; }
   if (e.key === 't'){
     var r = document.documentElement, t = r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     r.setAttribute('data-theme', t); try { localStorage.setItem('md-theme', t); } catch(e2){}
@@ -641,7 +777,8 @@ try { var th = localStorage.getItem('md-theme'); if (th) document.documentElemen
 marked.setOptions({ gfm:true });
 render();
 if (D.open) openDoc(D.open, '');
-window.__ws = { data: D, dossier: buildDossier, setView: setView,
+window.__ws = { data: D, dossier: buildDossier, setView: setView, caps: CAPS,
+                reindex: reindex, ensureText: ensureText, ensureAllText: ensureAllText,
                 openDoc: openDoc, closeDoc: closeReader,
                 openSession: openSession, closeSession: closeSession,
                 related: relatedDocs,

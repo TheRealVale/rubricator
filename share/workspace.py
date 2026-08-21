@@ -10,6 +10,7 @@ import html, json, os, re, subprocess, sys, time
 from pathlib import Path
 
 HOME = Path.home()
+CACHE = Path(os.environ.get("RUBRICATOR_CACHE", HOME / ".cache/rubricator"))
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", "vendor",
              ".venv", "venv", "__pycache__", ".cache", "coverage", ".turbo"}
 MD_EXT = {".md", ".markdown", ".mdown", ".mdx"}
@@ -224,6 +225,59 @@ def load_sessions(limit_project=None):
     return prompts, meta, touches
 
 
+# ── caching ──────────────────────────────────────────────────────────────────
+def _cache_read(name, stamp):
+    f = CACHE / "index" / name
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+        return d["data"] if d.get("stamp") == stamp else None
+    except Exception:
+        return None
+
+
+def _cache_write(name, stamp, data):
+    try:
+        (CACHE / "index").mkdir(parents=True, exist_ok=True)
+        tmp = CACHE / "index" / (name + ".part")
+        tmp.write_text(json.dumps({"stamp": stamp, "data": data}, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(CACHE / "index" / name)
+    except Exception:
+        pass
+
+
+def session_stamp():
+    """History grows by appending and transcripts by rewriting, so size plus the
+    newest mtime is enough to know whether a re-scan would find anything new."""
+    parts = []
+    h = HOME / ".claude/history.jsonl"
+    if h.is_file():
+        st = h.stat()
+        parts.append(f"{st.st_size}:{int(st.st_mtime)}")
+    root = HOME / ".claude/projects"
+    n, newest = 0, 0
+    if root.is_dir():
+        for p in root.glob("*/*.jsonl"):
+            try:
+                n += 1
+                newest = max(newest, int(p.stat().st_mtime))
+            except Exception:
+                pass
+    parts.append(f"{n}:{newest}")
+    return "|".join(parts)
+
+
+def cached_sessions():
+    stamp = session_stamp()
+    hit = _cache_read("sessions.json", stamp)
+    if hit is not None:
+        return hit["prompts"], hit["sessions"], hit["touches"]
+    prompts, meta, touches = load_sessions()
+    _cache_write("sessions.json", stamp,
+                 {"prompts": prompts, "sessions": meta, "touches": touches})
+    return prompts, meta, touches
+
+
 # ── assembly ─────────────────────────────────────────────────────────────────
 def build(root, with_sessions):
     t0 = time.time()
@@ -239,7 +293,7 @@ def build(root, with_sessions):
         "sessions": {}, "prompts": [], "touches": {}, "withSessions": with_sessions,
     }
     if with_sessions:
-        prompts, sessions, touches = load_sessions()
+        prompts, sessions, touches = cached_sessions()
         data["prompts"] = prompts
         data["sessions"] = sessions
         data["touches"] = touches
@@ -259,7 +313,9 @@ def design_css(share):
     return blocks[1] if len(blocks) > 1 else ""
 
 
-def emit_html(data, share):
+def emit_html(data, share, base=None):
+    """base set → the live tier: the libraries and the document bodies are
+    fetched from the local server instead of being carried in the page."""
     page = (share / "workspace.html").read_text(encoding="utf-8")
     vendor = share / "vendor"
     def v(name):
@@ -268,14 +324,18 @@ def emit_html(data, share):
     def sh(name):
         return (share / name).read_text(encoding="utf-8")
     # mermaid is 3 MB — carry it only when a document in this tree actually needs it
-    wants_mermaid = any(MERMAID_FENCE.search(d["text"]) for d in data["docs"])
+    wants_mermaid = any(MERMAID_FENCE.search(d.get("text") or "") for d in data["docs"])
+    libs = ["marked.min.js", "highlight.min.js"] + (["mermaid.min.js"] if wants_mermaid else [])
+    if base:
+        libs_html = "".join(f'<script src="{base}/lib/{n}"></script>' for n in libs)
+        data = dict(data, docs=[{k: x for k, x in d.items() if k != "text"} for d in data["docs"]])
+    else:
+        libs_html = "".join("<script>" + v(n) + "</script>" for n in libs)
     parts = {
         "__NAME__": html.escape(data["name"]),
         "__BASECSS__": design_css(share),
         "__REVIEWCSS__": sh("review.css"),
-        "__MARKED__": v("marked.min.js"),
-        "__HLJS__": v("highlight.min.js"),
-        "__MERMAID__": "<script>" + v("mermaid.min.js") + "</script>" if wants_mermaid else "",
+        "__LIBS__": libs_html,
         "__RENDERJS__": sh("render.js"),
         "__REVIEWJS__": sh("review.js"),
         "__WSJS__": sh("workspace.js"),
@@ -290,14 +350,133 @@ def emit_html(data, share):
     return page
 
 
+# ── notes on disk ────────────────────────────────────────────────────────────
+def notes_file(root):
+    return root / ".rubricator" / "notes.json"
+
+
+def read_notes(root):
+    try:
+        d = json.loads(notes_file(root).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def write_notes(root, path, store):
+    """One file per repo, keyed by absolute document path. Kept out of git's way
+    via .git/info/exclude rather than .gitignore, so nothing tracked is touched
+    and committing it stays your choice."""
+    f = notes_file(root)
+    all_notes = read_notes(root)
+    if store and store.get("items"):
+        all_notes[path] = store
+    else:
+        all_notes.pop(path, None)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".part")
+    tmp.write_text(json.dumps(all_notes, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(f)
+    ex = root / ".git" / "info" / "exclude"
+    try:
+        if ex.parent.is_dir():
+            body = ex.read_text(encoding="utf-8") if ex.is_file() else ""
+            if ".rubricator/" not in body:
+                ex.write_text(body.rstrip("\n") + "\n.rubricator/\n", encoding="utf-8")
+    except Exception:
+        pass
+    return len(all_notes)
+
+
+# ── the live tier ────────────────────────────────────────────────────────────
+def serve_workspace(root, with_sessions, share, open_rel):
+    sys.path.insert(0, str(share))
+    import serve as S
+
+    state = {"data": build(root, with_sessions)}
+    state["data"]["open"] = open_rel or ""
+
+    def page(method, query, body):
+        data = dict(state["data"])
+        data["base"] = srv.base
+        data["caps"] = {"live": 1, "text": 1, "reindex": 1, "notes": 1, "asset": 1, "launch": 0}
+        data["notes"] = read_notes(root)
+        html_out = emit_html(data, share, base=srv.base)
+        inject = os.environ.get("RUBRICATOR_INJECT")     # a seam for driving the live page
+        if inject and os.path.isfile(inject):
+            html_out = html_out.replace("</body>", Path(inject).read_text(encoding="utf-8") + "</body>", 1)
+        return 200, "text/html; charset=utf-8", html_out
+
+    def text(method, query, body):
+        want = set(S.json_body(body).get("rels") or [])
+        out = {}
+        for d in state["data"]["docs"]:
+            if not want or d["rel"] in want:
+                out[d["rel"]] = d.get("text", "")
+        return S.J(out)
+
+    def asset(method, query, body):
+        rel = (query.get("p") or [""])[0]
+        try:
+            f = (root / rel).resolve()
+            f.relative_to(root)                    # never serve outside the tree
+            if not f.is_file() or f.stat().st_size > 40_000_000:
+                raise ValueError
+        except Exception:
+            return 404, "text/plain", b"no"
+        import mimetypes
+        ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+        return 200, ctype, f.read_bytes()
+
+    def reindex(method, query, body):
+        state["data"] = build(root, with_sessions)
+        d = dict(state["data"])
+        d["docs"] = [{k: x for k, x in doc.items() if k != "text"} for doc in d["docs"]]
+        d["notes"] = read_notes(root)
+        return S.J(d)
+
+    def notes(method, query, body):
+        if method == "GET":
+            return S.J(read_notes(root))
+        b = S.json_body(body)
+        path, store = b.get("path") or "", b.get("store")
+        if not path or not isinstance(store, dict):
+            return S.J({"error": "bad note"}, 400)
+        n = write_notes(root, path, store)
+        return S.J({"ok": True, "documents": n})
+
+    routes = {"": page, "text": text, "asset": asset, "reindex": reindex, "notes": notes}
+    srv = S.Server(routes)
+    for name in ("marked.min.js", "highlight.min.js", "mermaid.min.js"):
+        def one(method, query, body, _n=name):
+            f = share / "vendor" / _n
+            if not f.is_file():
+                return 404, "text/plain", b"no"
+            return 200, "application/javascript; charset=utf-8", f.read_bytes()
+        routes["lib/" + name] = one
+    routes.update(S.lifecycle_routes(srv))
+    srv.start()
+    return srv
+
+
 def main():
     args = sys.argv[1:]
     with_sessions = "--sessions" in args
+    live = "--serve" in args
     args = [a for a in args if not a.startswith("--")]
     root = Path(args[0]).resolve() if args else Path.cwd()
     if not root.is_dir():
         sys.stderr.write(f"rubricator: not a directory: {root}\n")
         return 1
+
+    if live:
+        share = Path(os.environ.get("RUBRICATOR_HOME", Path(__file__).resolve().parent))
+        srv = serve_workspace(root, with_sessions, share, os.environ.get("RUBRICATOR_OPEN") or "")
+        sys.stdout.write(srv.base + "/\n")
+        sys.stdout.flush()
+        srv.wait()
+        return 0
+
     data = build(root, with_sessions)
     # a document to open straight away — bare `md` passes the README this way
     want = os.environ.get("RUBRICATOR_OPEN") or ""

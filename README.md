@@ -23,10 +23,17 @@ The argument decides which door you come in by: a file opens the reader, a direc
 or nothing at all — opens the workspace. Documents opened from the workspace carry the
 full review layer, so you can mark them up without leaving it.
 
-One bash script and a static HTML file. No daemon, no server, no build step, no runtime
-dependency beyond what macOS ships. Rendering happens in the browser from pinned local
-copies of the libraries, so it works offline and the page you generate with `-o` is a
-single self-contained file you can send to someone.
+One bash script and a page. No build step, no runtime dependency beyond what macOS ships.
+Rendering happens in the browser from pinned local copies of the libraries, so it works
+offline and the page you generate with `-o` is a single self-contained file you can send
+to someone.
+
+**Two tiers.** A single file opens as a static page — self-contained, shareable, no server.
+The workspace starts a small local server instead, which is what lets it fetch documents as
+you open them, reindex without regenerating, and keep your notes in the repo. It listens on
+127.0.0.1 with a per-run token, refuses anything cross-site, and exits by itself when you
+close the window — nothing is left running. `md --static` opts out and gives you a file
+again; `-o` and `-n` always do.
 
 ## Install
 
@@ -214,7 +221,11 @@ share/workspace.*   the repo index and its views
 share/hook.py       blocking review server for --review and --hook
 ```
 
-Annotations live in the browser's local storage, keyed by the document's absolute path —
+In the live tier, annotations are written to `.rubricator/notes.json` in the repo, so they
+survive a cleared browser and can be grepped, diffed or committed. Rubricator adds that path
+to `.git/info/exclude` rather than your `.gitignore`: nothing tracked is touched, the file
+never shows up as untracked noise, and committing it stays your choice. In the static tier
+they live in the browser's local storage, keyed by the document's absolute path —
 the same key from either page, so a note written in the workspace is there when you open
 the file on its own. Nothing is written into your files and nothing leaves the machine.
 

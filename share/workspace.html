@@ -125,6 +125,9 @@ body.split .page{padding-right:calc(min(62%,880px) + 28px)}
 .cmd{font-family:var(--mono);font-size:11.5px;padding:9px 12px;border:1px solid var(--border);
   border-radius:9px;background:var(--bg-soft);overflow-x:auto;white-space:nowrap;cursor:pointer}
 .cmd:hover{border-color:var(--fg-dim)}
+#reidx.busy svg{animation:spin .7s linear infinite}
+#reidx:hover{color:var(--fg)}
+@keyframes spin{to{transform:rotate(360deg)}}
 .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(6px);z-index:70;
   padding:9px 16px;border-radius:9px;background:var(--bg-elev);border:1px solid var(--border);
   box-shadow:var(--shadow);font-size:12.5px;opacity:0;pointer-events:none;transition:.18s}
@@ -193,10 +196,8 @@ body.split .page{padding-right:calc(min(62%,880px) + 28px)}
   <div class="body sdet" id="sbody"></div>
 </div>
 <div class="toast" id="toast"></div>
-<script>__MARKED__</script>
-<script>__HLJS__</script>
+__LIBS__
 <script id="wsdata" type="application/json">__DATA__</script>
-__MERMAID__
 <script>__RENDERJS__</script>
 <!-- the review layer wires its chrome first, so a document can be opened on load -->
 <script>__REVIEWJS__</script>

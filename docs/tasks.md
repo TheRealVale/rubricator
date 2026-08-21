@@ -77,21 +77,22 @@ is honest about which sessions can still be picked up.
 
 ---
 
-## Phase C — the live tier
+## Phase C — the live tier ✅
 
-- [ ] **C1 · Extract `serve.py`** from `hook.py`: ephemeral port, per-run token,
+- [x] **C1 · Extract `serve.py`** from `hook.py`: ephemeral port, per-run token,
       origin and `Sec-Fetch-Site` checks, `Referrer-Policy: no-referrer`, idle exit.
-- [ ] **C2 · Capability handshake.** The page is told what it may do
+- [x] **C2 · Capability handshake.** The page is told what it may do
       (`META.caps`); every action-bearing control is hidden without its capability.
-- [ ] **C3 · Tier selection in `bin/md`** — live when python3 is present, static
+- [x] **C3 · Tier selection in `bin/md`** — live when python3 is present, static
       otherwise, `--static` to force. Static stays shareable.
-- [ ] **C4 · Live reindex.** `POST /reindex` rebuilds and the page refreshes in
+- [x] **C4 · Live reindex.** `POST /reindex` rebuilds and the page refreshes in
       place, no regeneration round-trip.
-- [ ] **C5 · Documents fetched on open** in the live tier, so the page stops
-      embedding every document body.
-- [ ] **C6 · Notes on disk.** `.rubricator/notes.json` at the repo root, with
+- [x] **C5 · Documents fetched on open** in the live tier, so the page stops
+      embedding every document body — and the libraries are served too. Search
+      answers from titles and headings immediately, then pulls every body once.
+- [x] **C6 · Notes on disk.** `.rubricator/notes.json` at the repo root, with
       `localStorage` as the static-tier fallback and a one-time migration.
-- [ ] **C7 · Index cache.** `~/.cache/rubricator/index/<roothash>.json`,
+- [x] **C7 · Index cache.** `~/.cache/rubricator/index/<roothash>.json`,
       invalidated by mtime + git HEAD; sessions cached separately.
 
 ---
@@ -136,5 +137,5 @@ Carried from the plan; unresolved ones block the tasks that depend on them.
 |---|---|---|---|
 | 1 | Bare `md` opens the workspace with the README pre-opened | A1 | **accepted** |
 | 2 | Launch is opt-in behind a flag | D6 | proposed |
-| 3 | Notes move to `.rubricator/notes.json` | C6 | proposed |
+| 3 | Notes move to `.rubricator/notes.json` | C6 | **accepted** — kept out of git via `.git/info/exclude`, so nothing tracked is touched and committing it stays a choice |
 | 4 | A+B ships as its own release before C+D | — | proposed |

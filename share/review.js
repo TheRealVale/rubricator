@@ -30,16 +30,28 @@ function hash(s){ var h=5381,i=s.length; while(i) h=(h*33^s.charCodeAt(--i))>>>0
 var DEFAULT_PRE = "Apply this feedback. Don't restructure anything I didn't mention.";
 var KEY = '';
 var store = { seq:1, preamble:DEFAULT_PRE, template:'apply', items:[] };
+/* where notes live. The default is this browser; a host that has somewhere
+   better — a served workspace with a repo to write into — replaces these two. */
+var Storage = {
+  get: function(key){
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){ return null; }
+  },
+  set: function(key, val){
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){}
+  }
+};
 function loadStore(){
   KEY = 'md-review:' + hash(META.path || (META.dir + '/' + META.name));
   store = { seq:1, preamble:DEFAULT_PRE, template:'apply', items:[] };
-  try {
-    var saved = localStorage.getItem(KEY);
-    if (saved) { var o = JSON.parse(saved); for (var k in o) store[k] = o[k]; }
-  } catch(e){}
+  var saved = null;
+  try { saved = Storage.get(KEY, META.path); } catch(e){}
+  if (saved && typeof saved === 'object'){ for (var k in saved) store[k] = saved[k]; }
   if (store.template === 'notes') store.template = 'raw';   // renamed, freeing the word for the verb
 }
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(store)); } catch(e){} }
+function save(){
+  store.saved = Date.now();          // lets two stores be merged by recency
+  try { Storage.set(KEY, store, META.path); } catch(e){}
+}
 
 /* ── source helpers ──────────────────────────────────── */
 function srcSlice(a, b){ return rawLines.slice(a-1, b).join('\n').replace(/\s+$/,''); }
@@ -555,7 +567,9 @@ function openDoc(m){
   if (!booted){ booted = true; hookMode(); }
 }
 
-window.MDReview = { open: openDoc, count: openCount };
+window.MDReview = { open: openDoc, count: openCount, storage: Storage,
+                    reload: function(){ if (doc) openDoc({ doc: doc, META: META, raw: raw,
+                                                           body: body, fmLines: fmLines }); } };
 if (window.__md) openDoc(window.__md);
 
 /* ── hook mode: an agent is blocked on this window ───────────────────── */
