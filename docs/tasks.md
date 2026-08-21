@@ -53,23 +53,26 @@ a document is opened.
 
 ---
 
-## Phase B — the browsers
+## Phase B — the browsers ✅
 
-Data the indexer already produces, presented as something you can move through.
+Data the indexer already produced, now presented as something you can move
+through: a Library you can navigate and read from, and a Sessions browser that
+is honest about which sessions can still be picked up.
 
-- [ ] **B1 · Library view.** Directory tree with a flat mode, note counts,
+- [x] **B1 · Library view.** Directory tree with a flat mode, note counts,
       staleness marks, sort by recency · staleness · notes · size · title,
       facets for has-notes · stale · untracked · front-matter tag.
-- [ ] **B2 · Library detail.** Selecting a row opens it in the reader pane beside
+- [x] **B2 · Library detail.** Selecting a row opens it in the reader pane beside
       the tree, rather than as a full-screen overlay.
-- [ ] **B3 · Session metadata.** Extend `sessions.py`: per session — title (first
+- [x] **B3 · Session metadata.** Extend `sessions.py`: per session — title (first
       non-slash prompt), project, first/last timestamp, prompt count, and whether
       a transcript still exists.
-- [ ] **B4 · Sessions browser.** Grouped by day, filterable to this repo,
+- [x] **B4 · Sessions browser.** Grouped by recency, filterable to this repo
+      (falling back to everywhere when the repo has no history of its own),
       `● resumable` / `○ archived` computed from transcript presence.
-- [ ] **B5 · Session detail.** Scrubbed prompts, files touched, correlated
+- [x] **B5 · Session detail.** Scrubbed prompts, files touched, correlated
       documents, copyable session id.
-- [ ] **B6 · Reverse correlation.** Given a session, rank this repo's documents;
+- [x] **B6 · Reverse correlation.** Given a session, rank this repo's documents;
       the existing ranking run the other way round.
 
 ---

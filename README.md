@@ -133,6 +133,22 @@ It walks every markdown file the repo tracks, reads `git log`, and builds one st
 — 328 documents and 3,800 prompts index in about a second, so there is nothing to cache
 and nothing to invalidate.
 
+**Library** is the tree: every document, with its note count and a mark where the code it
+describes has moved on. Sort by recency, staleness, notes, size or name; filter to the ones
+you have annotated. Selecting a document opens it beside the tree, with the full review
+layer — so marking something up never means leaving the workspace.
+
+**Sessions** is your own history as something you can walk through. Every session you have
+run, newest first, scoped to this repo by default. Each one shows what you asked, which
+files it changed, and which documents it bears on — worked out from the overlap between the
+files a session touched and the files each document describes.
+
+A session is **resumable** while its transcript is still on disk and **archived** once it is
+gone: the prompts survive far longer than the transcripts, so most of your history can be
+read and searched but not picked up again. The browser says which is which instead of
+offering you a resume command that would fail — for the live ones it hands you
+`cd <project> && claude -r <id>`, ready to paste.
+
 **Search** every document at once, with matches in context. Click a result to read it.
 
 **Stale** lists documents whose code moved on without them. Churn is counted only in the

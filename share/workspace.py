@@ -151,7 +151,15 @@ def scrub(s):
 
 
 def load_sessions(limit_project=None):
+    """Two records of the same history, joined on the session id.
+
+    history.jsonl remembers every prompt you have ever typed and outlives the
+    transcripts. The transcripts know which files a session touched — but only
+    while they are still on disk. A session with no transcript can still be read
+    and searched; it cannot be resumed. The page has to say which is which, or
+    the resume button lies."""
     prompts, hist = [], HOME / ".claude/history.jsonl"
+    meta = {}
     if hist.is_file():
         with hist.open(encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -162,30 +170,58 @@ def load_sessions(limit_project=None):
                 txt = d.get("display") or ""
                 if not txt or txt.startswith("/"):        # slash commands aren't topics
                     continue
-                prompts.append({"sid": d.get("sessionId"), "project": d.get("project") or "",
-                                "t": int((d.get("timestamp") or 0) / 1000),
-                                "text": scrub(txt)[:600]})
-    touches, sessions = {}, {}
+                sid = d.get("sessionId") or ""
+                t = int((d.get("timestamp") or 0) / 1000)
+                text = scrub(txt)[:600]
+                prompts.append({"sid": sid, "project": d.get("project") or "",
+                                "t": t, "text": text})
+                if not sid:
+                    continue
+                m = meta.get(sid)
+                if m is None:
+                    m = meta[sid] = {"p": d.get("project") or "", "t": "", "n": 0,
+                                     "a": t, "b": t, "live": 0, "files": []}
+                m["n"] += 1
+                if t:
+                    if not m["a"] or t < m["a"]:
+                        m["a"] = t
+                    if t > m["b"]:
+                        m["b"] = t
+                if not m["t"]:
+                    m["t"] = text[:120]                   # the first thing you asked names it
+
+    touches = {}
     root = HOME / ".claude/projects"
     if root.is_dir():
-        for p in root.glob("*/*.jsonl"):
+        for p in root.glob("*/*.jsonl"):                  # subagent runs live deeper; not ours
             sid = p.stem
-            seen = set()
+            seen, cwd = set(), ""
             try:
                 with p.open(encoding="utf-8", errors="replace") as f:
                     for line in f:
+                        if not cwd and '"cwd"' in line:
+                            m = re.search(r'"cwd":"([^"]+)"', line)
+                            if m:
+                                cwd = m.group(1)
                         if '"file_path"' not in line:
                             continue
                         seen.update(re.findall(r'"file_path":"([^"]+)"', line))
             except Exception:
                 continue
             seen = {f for f in seen if not SCRATCH.search(f)}
-            if not seen:
-                continue
-            sessions[sid] = sorted(seen)
+            m = meta.get(sid)
+            if m is None:
+                st = p.stat()
+                m = meta[sid] = {"p": cwd, "t": "", "n": 0,
+                                 "a": int(st.st_mtime), "b": int(st.st_mtime),
+                                 "live": 0, "files": []}
+            m["live"] = 1                                 # a transcript exists: resumable
+            if cwd and not m["p"]:
+                m["p"] = cwd
+            m["files"] = sorted(seen)
             for f_ in seen:
                 touches.setdefault(f_, []).append(sid)
-    return prompts, sessions, touches
+    return prompts, meta, touches
 
 
 # ── assembly ─────────────────────────────────────────────────────────────────

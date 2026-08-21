@@ -91,6 +91,8 @@ function docScore(d, q){
 
 /* ── views ────────────────────────────────────────────────────────────── */
 var VIEWS = [], view = 'search', query = '';
+var libSort = 'recent', libFlat = false, libFacet = {}, libOpen = {}, libSel = '';
+var sesScope = 'here', sesLive = false, sesSel = '';
 
 function shortPath(p){ return p.replace(D.root + '/', '').replace(/^\/Users\/[^/]+/, '~'); }
 
@@ -157,21 +159,78 @@ function viewSearch(){
   return out.join('');
 }
 
-function viewDocs(){
-  var rows = D.docs.slice().sort(function(a,b){ return b.mtime - a.mtime; });
-  var out = ['<table class="ws"><thead><tr><th data-sort="title">Document</th>' +
-    '<th class="num" data-sort="words">words</th><th class="num" data-sort="mtime">touched</th>' +
-    (D.hasGit ? '<th class="num" data-sort="commits">commits</th>' : '') +
-    '<th class="num">notes</th></tr></thead><tbody>'];
-  rows.forEach(function(d){
-    var s = D.stale[d.rel] || {}, an = annosFor(d).filter(function(i){ return i.state!=='stale'; }).length;
-    out.push('<tr data-doc="' + esc(d.rel) + '"><td><b>' + esc(d.title) + '</b><br>' +
-      '<span class="f" style="color:var(--fg-dim)">' + esc(d.rel) + '</span></td>' +
-      '<td class="num">' + d.words + '</td><td class="num">' + ago(d.mtime) + '</td>' +
-      (D.hasGit ? '<td class="num">' + (s.commits||0) + '</td>' : '') +
-      '<td class="num">' + (an || '') + '</td></tr>');
+function noteCount(d){
+  return annosFor(d).filter(function(i){ return i.state !== 'stale'; }).length;
+}
+function isStale(d){
+  var s = D.stale[d.rel];
+  return !!(s && s.targetChurn > 0);
+}
+var LIBSORT = {
+  recent: function(a,b){ return b.mtime - a.mtime; },
+  stale:  function(a,b){ return ((D.stale[b.rel]||{}).targetChurn||0) - ((D.stale[a.rel]||{}).targetChurn||0); },
+  notes:  function(a,b){ return noteCount(b) - noteCount(a); },
+  size:   function(a,b){ return b.words - a.words; },
+  title:  function(a,b){ return a.rel.localeCompare(b.rel); }
+};
+function libDocs(){
+  var out = D.docs.slice();
+  if (libFacet.notes) out = out.filter(function(d){ return noteCount(d) > 0; });
+  if (libFacet.stale) out = out.filter(isStale);
+  if (libFacet.recent) out = out.filter(function(d){ return now - d.mtime < 14 * DAY; });
+  return out.sort(LIBSORT[libSort] || LIBSORT.recent);
+}
+function fileRow(d){
+  var n = noteCount(d), st = D.stale[d.rel] || {};
+  return '<div class="tfile' + (libSel === d.rel ? ' on' : '') + '" data-doc="' + esc(d.rel) + '">' +
+    '<span class="nm">' + esc(d.rel.split('/').pop()) + '</span>' +
+    (n ? '<span class="n">' + n + '</span>' : '') +
+    (isStale(d) ? '<span class="sub w" title="code it describes moved on">⚠ ' + st.targetChurn + '</span>' : '') +
+    '<span class="sub">' + d.words + 'w</span>' +
+    '<span class="sub">' + ago(d.mtime) + '</span></div>';
+}
+function libTree(docs){
+  var root = { dirs:{}, files:[] };
+  docs.forEach(function(d){
+    var parts = d.rel.split('/'), node = root;
+    for (var i = 0; i < parts.length - 1; i++){
+      var key = parts.slice(0, i + 1).join('/');
+      node = node.dirs[parts[i]] || (node.dirs[parts[i]] = { dirs:{}, files:[], path:key });
+      node.n = (node.n || 0) + 1;
+    }
+    node.files.push(d);
   });
-  return out.join('') + '</tbody></table>';
+  function walk(node){
+    var out = [];
+    Object.keys(node.dirs).sort().forEach(function(name){
+      var dir = node.dirs[name], shut = libOpen[dir.path] === false;
+      out.push('<div class="tdir' + (shut ? ' closed' : '') + '" data-dir="' + esc(dir.path) + '">' +
+        '<span class="caret">▼</span>' + esc(name) + '<span class="c">' + dir.n + '</span></div>');
+      if (!shut) out.push('<div class="tkids">' + walk(dir) + '</div>');
+    });
+    node.files.forEach(function(d){ out.push(fileRow(d)); });
+    return out.join('');
+  }
+  return walk(root);
+}
+function viewLibrary(){
+  var docs = libDocs();
+  var sorts = [['recent','recent'],['stale','stale'],['notes','notes'],['size','size'],['title','name']];
+  var out = ['<div class="ctl">' +
+    '<div class="seg">' +
+      '<button data-lmode="tree" class="' + (libFlat ? '' : 'on') + '">tree</button>' +
+      '<button data-lmode="flat" class="' + (libFlat ? 'on' : '') + '">flat</button>' +
+    '</div><div class="seg">' +
+      sorts.map(function(x){ return '<button data-lsort="' + x[0] + '" class="' +
+        (libSort === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') +
+    '</div>' +
+    '<button class="chip' + (libFacet.notes ? ' on' : '') + '" data-lfacet="notes">has notes</button>' +
+    '<button class="chip' + (libFacet.stale ? ' on' : '') + '" data-lfacet="stale">stale</button>' +
+    '<button class="chip' + (libFacet.recent ? ' on' : '') + '" data-lfacet="recent">last 14 days</button>' +
+    '<span class="sp">' + docs.length + ' of ' + D.docs.length + '</span></div>'];
+  if (!docs.length) return out.join('') + '<div class="empty">No document matches those filters.</div>';
+  out.push('<div class="tree">' + (libFlat ? docs.map(fileRow).join('') : libTree(docs)) + '</div>');
+  return out.join('');
 }
 
 function viewStale(){
@@ -217,18 +276,160 @@ function viewNotes(){
   return out.join('');
 }
 
+function inRepo(path){
+  return path === D.root || (path || '').indexOf(D.root + '/') === 0;
+}
+function sessionList(){
+  var out = [];
+  for (var sid in D.sessions){
+    var m = D.sessions[sid];
+    if (sesLive && !m.live) continue;
+    if (sesScope === 'here' && !inRepo(m.p)) continue;
+    out.push({ sid: sid, m: m });
+  }
+  return out.sort(function(a, b){ return b.m.b - a.m.b; });
+}
+function dayLabel(ts){
+  var d = Math.floor((now - ts) / DAY);
+  if (d < 1) return 'Today';
+  if (d < 2) return 'Yesterday';
+  if (d < 8) return 'This week';
+  if (d < 31) return 'This month';
+  if (d < 366) return Math.round(d / 30) + ' months ago';
+  return 'Older';
+}
+function span(m){
+  if (!m.a || !m.b || m.b - m.a < 3600) return ago(m.b) + ' ago';
+  var days = Math.round((m.b - m.a) / DAY);
+  return days >= 1 ? days + 'd span' : Math.round((m.b - m.a) / 3600) + 'h span';
+}
 function viewSessions(){
   if (!D.withSessions) return '<div class="empty">Session data was not indexed.<br><br>' +
-    'Re-run with <span class="f">md --workspace --sessions</span> to include your own history. ' +
+    'Re-run with <span class="f">md --sessions</span> to include your own history. ' +
     'It stays on this machine and cannot be written to a shareable file.</div>';
-  var byProj = {};
-  D.prompts.forEach(function(p){ var k = (p.project||'?').split('/').pop(); byProj[k] = (byProj[k]||0)+1; });
-  var keys = Object.keys(byProj).sort(function(a,b){ return byProj[b]-byProj[a]; });
-  var out = ['<div class="qnote">' + D.prompts.length + ' prompts · ' + Object.keys(D.sessions).length +
-    ' sessions with file activity · ' + Object.keys(D.touches).length + ' files touched</div>',
-    '<div class="grp">Across repos</div><table class="ws"><thead><tr><th>Project</th><th class="num">prompts</th></tr></thead><tbody>'];
-  keys.forEach(function(k){ out.push('<tr><td class="f">' + esc(k) + '</td><td class="num">' + byProj[k] + '</td></tr>'); });
-  return out.join('') + '</tbody></table>';
+  var all = sessionList(), live = 0;
+  all.forEach(function(x){ if (x.m.live) live++; });
+  var total = Object.keys(D.sessions).length;
+  var out = ['<div class="ctl">' +
+    '<div class="seg">' +
+      '<button data-sscope="here" class="' + (sesScope === 'here' ? 'on' : '') + '">this repo</button>' +
+      '<button data-sscope="all" class="' + (sesScope === 'all' ? 'on' : '') + '">everywhere</button>' +
+    '</div>' +
+    '<button class="chip' + (sesLive ? ' on' : '') + '" data-slive="1">resumable only</button>' +
+    '<span class="sp">' + all.length + ' of ' + total + ' sessions · ' + live + ' resumable</span></div>'];
+
+  if (!all.length) return out.join('') +
+    '<div class="empty">No sessions recorded for this directory.<br><br>' +
+    'Switch to <b>everywhere</b> to see the ' + total + ' sessions on this machine.</div>';
+
+  out.push('<div class="qnote">A session is <span class="dot live"></span> resumable while its ' +
+    'transcript is still on disk, and <span class="dot arch"></span> archived once it is gone — ' +
+    'the prompts survive, the files it touched and <span class="f">claude -r</span> do not.</div>');
+
+  var group = '';
+  all.forEach(function(x){
+    var g = dayLabel(x.m.b);
+    if (g !== group){ group = g; out.push('<div class="grp">' + g + '</div>'); }
+    out.push('<div class="srow' + (sesSel === x.sid ? ' on' : '') + '" data-ses="' + esc(x.sid) + '">' +
+      '<span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
+      '<span class="ttl">' + esc(x.m.t || '(no prompt recorded)') + '</span>' +
+      (sesScope === 'all' ? '<span class="sub">' + esc((x.m.p || '?').split('/').pop()) + '</span>' : '') +
+      '<span class="sub">' + x.m.n + 'p</span>' +
+      '<span class="sub">' + span(x.m) + '</span></div>');
+  });
+  return out.join('');
+}
+
+/* B6 — the correlation run backwards: a session touched files, and documents
+   name the files they describe, so the overlap says which docs it bears on */
+function relatedDocs(sid){
+  var m = D.sessions[sid];
+  if (!m || !m.files || !m.files.length) return [];
+  var here = {}, pre = D.root + '/';
+  m.files.forEach(function(f){ if (f.indexOf(pre) === 0) here[f.slice(pre.length)] = 1; });
+  var out = [];
+  D.docs.forEach(function(d){
+    var t = (D.stale[d.rel] || {}).targets || [], hit = 0;
+    t.forEach(function(x){ if (here[x]) hit++; });
+    var own = here[d.rel] ? 3 : 0;              // the session edited the document itself
+    if (hit || own) out.push({ d: d, hit: hit, own: !!own, s: hit + own });
+  });
+  return out.sort(function(a, b){ return b.s - a.s; }).slice(0, 8);
+}
+
+function openSession(sid){
+  var m = D.sessions[sid];
+  if (!m) return;
+  sesSel = sid;
+  var mine = D.prompts.filter(function(p){ return p.sid === sid; })
+                      .sort(function(a, b){ return a.t - b.t; });
+  var docs = relatedDocs(sid);
+  var pre = D.root + '/';
+  var here = (m.files || []).filter(function(f){ return f.indexOf(pre) === 0; });
+  var away = (m.files || []).filter(function(f){ return f.indexOf(pre) !== 0; });
+
+  var out = ['<h3>' + esc(m.t || '(no prompt recorded)') + '</h3>',
+    '<div class="who">' +
+      '<span><span class="dot ' + (m.live ? 'live' : 'arch') + '"></span> ' +
+        (m.live ? 'resumable' : 'archived — transcript gone') + '</span>' +
+      '<span>' + esc((m.p || 'unknown project').replace(/^\/Users\/[^/]+/, '~')) + '</span>' +
+      '<span>' + m.n + ' prompts</span><span>' + span(m) + '</span>' +
+      '<span>last active ' + ago(m.b) + ' ago</span></div>'];
+
+  if (m.live){
+    out.push('<div class="grp">Pick it up</div>',
+      '<div class="cmd" data-copy="cd ' + esc(m.p || D.root) + ' && claude -r ' + esc(sid) + '">' +
+        'cd ' + esc((m.p || D.root).replace(/^\/Users\/[^/]+/, '~')) + ' &amp;&amp; claude -r ' + esc(sid.slice(0, 8)) + '…' +
+        '<span style="color:var(--fg-dim)">  ⌘ click to copy</span></div>',
+      '<div class="qnote" style="margin-top:8px">Add <span class="f">--fork-session</span> to branch off it ' +
+        'without disturbing the original.</div>');
+  } else {
+    out.push('<div class="grp">Pick it up</div>',
+      '<div class="qnote">The transcript for this session is no longer on disk, so it cannot be resumed. ' +
+      'What survives is below — copy it into a new session instead.</div>');
+  }
+
+  if (docs.length){
+    out.push('<div class="grp">Documents it bears on <span class="c">by the files they describe</span></div>');
+    docs.forEach(function(x){
+      out.push('<div class="tfile" data-doc="' + esc(x.d.rel) + '">' +
+        '<span class="nm">' + esc(x.d.title) + '</span>' +
+        '<span class="sub">' + esc(x.d.rel) + '</span>' +
+        '<span class="sub">' + (x.own ? 'edited here' : x.hit + ' file' + (x.hit > 1 ? 's' : '')) + '</span></div>');
+    });
+  }
+  if (here.length){
+    out.push('<div class="grp">Files it changed here <span class="c">' + here.length + '</span></div>',
+      '<div class="flist">' + here.slice(0, 40).map(function(f){
+        return '<div>' + esc(f.slice(pre.length)) + '</div>'; }).join('') +
+      (here.length > 40 ? '<div style="color:var(--fg-dim)">…and ' + (here.length - 40) + ' more</div>' : '') +
+      '</div>');
+  }
+  if (away.length){
+    out.push('<div class="grp">Elsewhere <span class="c">' + away.length + '</span></div>',
+      '<div class="flist">' + away.slice(0, 12).map(function(f){
+        return '<div>' + esc(shortPath(f)) + '</div>'; }).join('') +
+      (away.length > 12 ? '<div style="color:var(--fg-dim)">…and ' + (away.length - 12) + ' more</div>' : '') +
+      '</div>');
+  }
+  if (mine.length){
+    out.push('<div class="grp">What you asked <span class="c">' + mine.length + '</span></div>',
+      '<div class="plist">' + mine.map(function(p){
+        return '<div class="pitem"><span class="when">' + ago(p.t) + ' ago</span>' + esc(p.text) + '</div>';
+      }).join('') + '</div>');
+  }
+  $('spath').textContent = 'session ' + sid.slice(0, 8);
+  $('sbody').innerHTML = out.join('');
+  $('spane').classList.add('on', 'side');
+  document.body.classList.add('split');
+  $('spane').scrollTop = 0;
+  render();
+}
+function closeSession(){
+  sesSel = '';
+  $('spane').classList.remove('on', 'side');
+  if (!$('reader').classList.contains('on')) document.body.classList.remove('split');
+  render();
 }
 
 /* ── dossier ──────────────────────────────────────────────────────────── */
@@ -273,9 +474,10 @@ function buildDossier(){
 }
 
 /* ── reader ───────────────────────────────────────────────────────────── */
-function openDoc(rel, q){
+function openDoc(rel, q, side){
   var d = D.docs.filter(function(x){ return x.rel === rel; })[0];
   if (!d) return;
+  libSel = rel;
   $('rpath').textContent = d.rel;
 
   /* the same renderer the single-file reader uses, so the document behaves the
@@ -300,8 +502,11 @@ function openDoc(rel, q){
   }
 
   if (q) markHits(doc, q);
+  $('reader').classList.toggle('side', !!side);
+  document.body.classList.toggle('split', !!side);
   $('reader').classList.add('on');
   $('reader').scrollTop = 0;
+  if (side) render();                 // keep the selected row marked in the list
   var first = doc.querySelector('mark.hit');
   if (first) setTimeout(function(){ first.scrollIntoView({block:'center'}); }, 60);
   $('rcopy').onclick = function(){ copy(d.abs); toast('path copied'); };
@@ -326,7 +531,9 @@ function markHits(root, q){
   });
 }
 function closeReader(){
-  $('reader').classList.remove('on');
+  libSel = '';
+  $('reader').classList.remove('on', 'side');
+  if (!$('spane').classList.contains('on')) document.body.classList.remove('split');
   $('tray').classList.remove('open');
   document.body.classList.remove('tray-open');
   $('composer').classList.remove('show');
@@ -343,7 +550,7 @@ function render(){
     return '<button data-v="' + v.id + '" class="' + (v.id===view?'on':'') + '">' + v.label +
       (v.n != null ? '<span class="n">' + v.n + '</span>' : '') + '</button>';
   }).join('');
-  $('page').innerHTML = ({search:viewSearch, docs:viewDocs, stale:viewStale,
+  $('page').innerHTML = ({search:viewSearch, docs:viewLibrary, stale:viewStale,
                           notes:viewNotes, sessions:viewSessions}[view])();
   var q = $('q');
   if (q){
@@ -358,12 +565,18 @@ function render(){
 }
 function setView(v){ view = v; render(); }
 
+if (D.withSessions){
+  var anyHere = false;
+  for (var k in D.sessions){ if (inRepo(D.sessions[k].p)){ anyHere = true; break; } }
+  if (!anyHere) sesScope = 'all';        // this repo has no history of its own yet
+}
+
 VIEWS = [
   { id:'search', label:'Search' },
-  { id:'docs', label:'Documents', n: D.docs.length },
+  { id:'docs', label:'Library', n: D.docs.length },
   { id:'stale', label:'Stale' },
   { id:'notes', label:'Notes' },
-  { id:'sessions', label: D.withSessions ? 'History' : 'History ·' }
+  { id:'sessions', label:'Sessions', n: D.withSessions ? Object.keys(D.sessions).length : null }
 ];
 
 $('wname').textContent = D.name;
@@ -374,14 +587,42 @@ $('wstat').textContent = D.docs.length + ' docs · indexed in ' + D.took + 's' +
 document.addEventListener('click', function(e){
   var tab = e.target.closest('#tabs button');
   if (tab) return setView(tab.dataset.v);
+
+  var seg = e.target.closest('[data-lmode],[data-lsort],[data-lfacet],[data-sscope],[data-slive]');
+  if (seg){
+    var d = seg.dataset;
+    if (d.lmode)  libFlat = d.lmode === 'flat';
+    if (d.lsort)  libSort = d.lsort;
+    if (d.lfacet) libFacet[d.lfacet] = !libFacet[d.lfacet];
+    if (d.sscope) sesScope = d.sscope;
+    if (d.slive)  sesLive = !sesLive;
+    return render();
+  }
+  var dir = e.target.closest('[data-dir]');
+  if (dir){
+    libOpen[dir.dataset.dir] = libOpen[dir.dataset.dir] === false;
+    return render();
+  }
+  var cmd = e.target.closest('[data-copy]');
+  if (cmd){ copy(cmd.dataset.copy); return toast('copied — paste it into a terminal'); }
+
+  var ses = e.target.closest('[data-ses]');
+  if (ses) return openSession(ses.dataset.ses);
+
   var row = e.target.closest('[data-doc]');
-  if (row && !$('reader').classList.contains('on')) return openDoc(row.dataset.doc, row.dataset.q || query.trim());
+  if (row && !e.target.closest('#reader')){
+    /* opened from a list: the reader takes the right half and the list stays put */
+    var beside = view === 'docs' || $('spane').classList.contains('on');
+    return openDoc(row.dataset.doc, row.dataset.q || query.trim(), beside);
+  }
   if (e.target.id === 'rclose') closeReader();
+  if (e.target.id === 'sclose') closeSession();
 });
 document.addEventListener('keydown', function(e){
   var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
   if (e.key === 'Escape'){
     if ($('reader').classList.contains('on')){ if (!readerBusy()) closeReader(); }
+    else if ($('spane').classList.contains('on')) closeSession();
     else if (typing) e.target.blur();
     return;
   }
@@ -402,5 +643,7 @@ render();
 if (D.open) openDoc(D.open, '');
 window.__ws = { data: D, dossier: buildDossier, setView: setView,
                 openDoc: openDoc, closeDoc: closeReader,
+                openSession: openSession, closeSession: closeSession,
+                related: relatedDocs,
                 setQuery: function(q){ query = q; render(); } };
 })();
