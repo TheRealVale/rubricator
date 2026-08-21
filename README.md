@@ -12,11 +12,16 @@ no"* without retyping it into a terminal.
 ![rubricator reviewing a plan](docs/review.png)
 
 ```bash
-md README.md          # render and open
-md                    # README.md in the current directory
+md                    # the workspace for this directory, README already open
+md README.md          # render and open one file
+md docs/              # the workspace, scoped to a subdirectory
 md docs/spec.md -b    # a normal browser tab instead of an app window
 git show HEAD:NOTES.md | md -
 ```
+
+The argument decides which door you come in by: a file opens the reader, a directory —
+or nothing at all — opens the workspace. Documents opened from the workspace carry the
+full review layer, so you can mark them up without leaving it.
 
 One bash script and a static HTML file. No daemon, no server, no build step, no runtime
 dependency beyond what macOS ships. Rendering happens in the browser from pinned local
@@ -114,12 +119,14 @@ left is your open-items list.
 
 ## Workspace mode
 
-`md --workspace` points rubricator at a whole repo instead of one file.
+A bare `md` points rubricator at a whole repo instead of one file. `-w` does the same
+thing explicitly, which is what you want in a script.
 
 ```bash
-md -w                    # index this repo and open it
-md -w ~/code/thing       # somewhere else
-md -w --sessions         # also index your own agent history (local only)
+md                       # index this repo and open it
+md ~/code/thing          # somewhere else
+md --sessions            # also index your own agent history (local only)
+md -w                    # the same thing, named explicitly
 ```
 
 It walks every markdown file the repo tracks, reads `git log`, and builds one static page
@@ -182,14 +189,21 @@ claude "$(md --review docs/plan.md)"   # blocks until you decide, prints your no
 ```
 bin/md              bash + awk: inlines the template, libraries and your markdown
                     (base64) into one self-contained HTML file, then opens it
-share/template.html the page: CSS, markdown rendering, TOC, theme
+share/template.html the reader page: CSS, chrome, TOC, theme
+share/render.js     markdown into the reader's DOM — shared by both pages, so a
+                    document behaves the same wherever it is opened
 share/review.*      annotation layer — anchors, verbs, storage, export
 share/ui.*          outline modes, search, resizable panel, shortcuts
+share/workspace.*   the repo index and its views
 share/hook.py       blocking review server for --review and --hook
 ```
 
-Annotations live in the browser's local storage, keyed by the document's absolute path.
-Nothing is written into your files and nothing leaves the machine.
+Annotations live in the browser's local storage, keyed by the document's absolute path —
+the same key from either page, so a note written in the workspace is there when you open
+the file on its own. Nothing is written into your files and nothing leaves the machine.
+
+Where rubricator is going next is written down: [`docs/architecture-plan.md`](docs/architecture-plan.md)
+for the shape, [`docs/tasks.md`](docs/tasks.md) for the work.
 
 ## Prior art
 

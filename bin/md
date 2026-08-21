@@ -24,17 +24,23 @@ else
 fi
 CACHE="${RUBRICATOR_CACHE:-$HOME/.cache/rubricator}"
 TPL="$SHARE/template.html"
-VERSION="1.5.0"
+VERSION="2.0.0"
 
 usage() {
   cat <<'HELPTXT'
 rubricator — read markdown, mark it up, send the notes to your AI.
 
 USAGE
-  md [options] [file.md]
+  md [options] [file|directory]
 
-  With no file, md looks for README.md in the current directory.
-  Use "-" to read markdown from stdin.
+  The argument decides what opens:
+    md                  the workspace for this directory, README already open
+    md docs/plan.md     the reader, on that file
+    md docs/            the workspace, scoped to that directory
+    md -                the reader, on markdown from stdin
+
+  Set RUBRICATOR_BARE=readme to make a bare "md" open README.md directly,
+  the way it behaved before 2.0.
 
 OPTIONS
   -b, --browser     open in your default browser tab (instead of a Chrome app window)
@@ -48,9 +54,8 @@ OPTIONS
       --vendor      re-download the render libraries and exit
 
 WORKSPACE
-  -w, --workspace [DIR]   index every markdown file in DIR (default: here) and open
-                          a page to search them, see which have gone stale, and read
-                          your notes across all of them
+  -w, --workspace [DIR]   the same workspace, named explicitly — safe to script
+                          against, whatever the bare default becomes
       --sessions          also index your own Claude Code history, so a topic resolves
                           to the sessions that discussed it and the files they changed.
                           Local only — cannot be combined with --out.
@@ -62,106 +67,14 @@ REVIEW
                     file, opens the review window, blocks, and returns the decision
 
 EXAMPLES
+  md                       # the workspace for this directory
+  md --sessions            # …and correlate it with your Claude Code history
   md README.md
-  md                       # README.md in this directory
+  md ~/Repositories/other  # the workspace for another repo
   git show HEAD:NOTES.md | md -
   md -o /tmp/spec.html docs/spec.md    # self-contained, shareable HTML
 HELPTXT
 }
-
-die() { printf 'md: %s\n' "$1" >&2; exit 1; }
-
-urlenc() {
-  local s="$1" out="" c
-  while [ -n "$s" ]; do
-    c="${s%"${s#?}"}"; s="${s#?}"
-    case "$c" in
-      [A-Za-z0-9._~/-]) out="$out$c" ;;
-      *) out="$out$(printf '%%%02X' "'$c")" ;;
-    esac
-  done
-  printf '%s' "$out"
-}
-
-# review modes hand off to the python runner (they block on a browser round-trip)
-case "${1:-}" in
-  --workspace|-w)
-    # a second door into the same renderer: index a tree instead of one file
-    PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
-    [ -x "$PY" ] || die "python3 is required for workspace mode"
-    shift
-    WS_DIR="."; WS_SESSIONS=""; WS_OUT=""; WS_OPEN=1
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --sessions) WS_SESSIONS="--sessions" ;;
-        -o|--out)   shift; WS_OUT="${1:?--out needs a path}" ;;
-        -n|--no-open) WS_OPEN=0 ;;
-        -*)         die "unknown workspace option: $1" ;;
-        *)          WS_DIR="$1" ;;
-      esac
-      shift
-    done
-    if [ -n "$WS_OUT" ] && [ -n "$WS_SESSIONS" ]; then
-      die "refusing --out with --sessions: your history stays on this machine"
-    fi
-    mkdir -p "$CACHE"
-    WS_FILE="${WS_OUT:-$CACHE/workspace-$(printf '%s' "$(cd "$WS_DIR" && pwd)" | shasum -a 1 | cut -c1-10).html}"
-    RUBRICATOR_HOME="$SHARE" RUBRICATOR_OUT="$WS_FILE" "$PY" "$SHARE/workspace.py" "$WS_DIR" $WS_SESSIONS >/dev/null || exit 1
-    if [ "$WS_OPEN" = 1 ] && [ -z "$WS_OUT" ]; then
-      FILEURL="file://$(urlenc "$WS_FILE")"
-      if [ -d "/Applications/Google Chrome.app" ]; then
-        open -na "/Applications/Google Chrome.app" --args --app="$FILEURL" --window-size=1280,960 >/dev/null 2>&1 || open "$FILEURL"
-      else open "$FILEURL"; fi
-    else
-      printf '%s\n' "$WS_FILE"
-    fi
-    exit 0 ;;
-  --hook|--review)
-    # hooks do not source your shell profile, so PATH may be bare
-    PY="$(command -v python3 2>/dev/null || true)"
-    [ -x "$PY" ] || PY=/usr/bin/python3
-    MODE="$1"; shift
-    if [ ! -x "$PY" ]; then
-      # never break the caller: emit no decision and leave the normal flow alone
-      [ "$MODE" = "--hook" ] && printf '%s' '{"systemMessage":"md: python3 not found - review skipped"}'
-      exit 0
-    fi
-    if [ "$MODE" = "--hook" ]; then
-      # exit code 2 would BLOCK the tool call in Claude Code, so this path must
-      # never propagate a failure: no runner, or a crashing one, just means no review
-      if [ ! -f "$SHARE/hook.py" ]; then
-        printf '%s' '{"systemMessage":"md: review runner missing - skipped"}'
-        exit 0
-      fi
-      "$PY" "$SHARE/hook.py" "${1:-plan}" || true
-      exit 0
-    fi
-    [ -n "${1:-}" ] || die "--review needs a file"
-    exec "$PY" "$SHARE/hook.py" manual "$1" ;;
-esac
-
-OPEN_MODE="app"; OUT=""; THEME="dark"; TO_STDOUT=0
-FILE=""
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -b|--browser|-t|--tab) OPEN_MODE="browser" ;;
-    -n|--no-open)          OPEN_MODE="none" ;;
-    -p|--print)            TO_STDOUT=1; OPEN_MODE="none" ;;
-    -o|--out)              shift; [ $# -gt 0 ] || die "--out needs a path"; OUT="$1"; OPEN_MODE="none" ;;
-    --light)               THEME="light" ;;
-    --vendor)              VENDOR_FORCE=1 ;;
-    -h|--help)             usage; exit 0 ;;
-    -v|--version)          echo "md $VERSION"; exit 0 ;;
-    -)                     FILE="-" ;;
-    --)                    shift; FILE="${1:-}"; break ;;
-    -*)                    die "unknown option: $1 (try md --help)" ;;
-    *)                     FILE="$1" ;;
-  esac
-  shift
-done
-
-[ -f "$TPL" ] || die "template missing at $TPL (is rubricator installed?)"
 
 ensure_vendor() {
   local manifest="$SHARE/vendor.txt" missing=0 f url sha got
@@ -189,6 +102,130 @@ ensure_vendor() {
   [ "$missing" = 1 ] && printf 'rubricator: ready.\n' >&2
   return 0
 }
+
+die() { printf 'md: %s\n' "$1" >&2; exit 1; }
+
+urlenc() {
+  local s="$1" out="" c
+  while [ -n "$s" ]; do
+    c="${s%"${s#?}"}"; s="${s#?}"
+    case "$c" in
+      [A-Za-z0-9._~/-]) out="$out$c" ;;
+      *) out="$out$(printf '%%%02X' "'$c")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# ── workspace: index a directory instead of rendering one file ───────────────
+ws_run() {
+  local dir="$1" out="$2" doopen="$3" sessions="$4" opendoc="$5"
+  local PY abs file url
+  PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
+  [ -x "$PY" ] || die "python3 is required for the workspace (try: md README.md)"
+  [ -d "$dir" ] || die "not a directory: $dir"
+  if [ -n "$out" ] && [ -n "$sessions" ]; then
+    die "refusing --out with --sessions: your history stays on this machine"
+  fi
+  ensure_vendor
+  mkdir -p "$CACHE"
+  abs="$(cd "$dir" && pwd)"
+  file="${out:-$CACHE/workspace-$(printf '%s' "$abs" | shasum -a 1 | cut -c1-10).html}"
+  RUBRICATOR_HOME="$SHARE" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
+    "$PY" "$SHARE/workspace.py" "$abs" $sessions >/dev/null || exit 1
+  if [ "$doopen" = 1 ] && [ -z "$out" ]; then
+    url="file://$(urlenc "$file")"
+    if [ -d "/Applications/Google Chrome.app" ]; then
+      open -na "/Applications/Google Chrome.app" --args --app="$url" --window-size=1280,960 >/dev/null 2>&1 || open "$url"
+    else open "$url"; fi
+  else
+    printf '%s\n' "$file"
+  fi
+}
+
+# review modes hand off to the python runner (they block on a browser round-trip)
+case "${1:-}" in
+  --workspace|-w)
+    # the explicit door into the workspace; the bare "md" below uses the same runner
+    shift
+    WS_DIR="."; WS_SESSIONS=""; WS_OUT=""; WS_OPEN=1
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --sessions)   WS_SESSIONS="--sessions" ;;
+        -o|--out)     shift; WS_OUT="${1:?--out needs a path}" ;;
+        -n|--no-open) WS_OPEN=0 ;;
+        -*)           die "unknown workspace option: $1" ;;
+        *)            WS_DIR="$1" ;;
+      esac
+      shift
+    done
+    ws_run "$WS_DIR" "$WS_OUT" "$WS_OPEN" "$WS_SESSIONS" ""
+    exit 0 ;;
+  --hook|--review)
+    # hooks do not source your shell profile, so PATH may be bare
+    PY="$(command -v python3 2>/dev/null || true)"
+    [ -x "$PY" ] || PY=/usr/bin/python3
+    MODE="$1"; shift
+    if [ ! -x "$PY" ]; then
+      # never break the caller: emit no decision and leave the normal flow alone
+      [ "$MODE" = "--hook" ] && printf '%s' '{"systemMessage":"md: python3 not found - review skipped"}'
+      exit 0
+    fi
+    if [ "$MODE" = "--hook" ]; then
+      # exit code 2 would BLOCK the tool call in Claude Code, so this path must
+      # never propagate a failure: no runner, or a crashing one, just means no review
+      if [ ! -f "$SHARE/hook.py" ]; then
+        printf '%s' '{"systemMessage":"md: review runner missing - skipped"}'
+        exit 0
+      fi
+      "$PY" "$SHARE/hook.py" "${1:-plan}" || true
+      exit 0
+    fi
+    [ -n "${1:-}" ] || die "--review needs a file"
+    exec "$PY" "$SHARE/hook.py" manual "$1" ;;
+esac
+
+OPEN_MODE="app"; OUT=""; THEME="dark"; TO_STDOUT=0
+FILE=""; SESSIONS=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -b|--browser|-t|--tab) OPEN_MODE="browser" ;;
+    -n|--no-open)          OPEN_MODE="none" ;;
+    -p|--print)            TO_STDOUT=1; OPEN_MODE="none" ;;
+    -o|--out)              shift; [ $# -gt 0 ] || die "--out needs a path"; OUT="$1"; OPEN_MODE="none" ;;
+    --light)               THEME="light" ;;
+    --sessions)            SESSIONS="--sessions" ;;
+    --vendor)              VENDOR_FORCE=1 ;;
+    -h|--help)             usage; exit 0 ;;
+    -v|--version)          echo "md $VERSION"; exit 0 ;;
+    -)                     FILE="-" ;;
+    --)                    shift; FILE="${1:-}"; break ;;
+    -*)                    die "unknown option: $1 (try md --help)" ;;
+    *)                     FILE="$1" ;;
+  esac
+  shift
+done
+
+[ -f "$TPL" ] || die "template missing at $TPL (is rubricator installed?)"
+
+# ── which door did the argument ask for? ─────────────────────────────────────
+if [ "$OPEN_MODE" = "none" ]; then WS_OPEN=0; else WS_OPEN=1; fi
+if [ -n "${FILE:-}" ] && [ "$FILE" != "-" ] && [ -d "$FILE" ]; then
+  ws_run "$FILE" "$OUT" "$WS_OPEN" "$SESSIONS" ""
+  exit 0
+fi
+if [ -z "${FILE:-}" ] && [ "${VENDOR_FORCE:-0}" != 1 ] && [ "${RUBRICATOR_BARE:-}" != "readme" ]; then
+  # bare md: the workspace for here, with the README already open in the reader
+  OPENDOC=""
+  for cand in README.md readme.md README.markdown index.md; do
+    [ -f "$cand" ] && { OPENDOC="$cand"; break; }
+  done
+  ws_run "." "$OUT" "$WS_OPEN" "$SESSIONS" "$OPENDOC"
+  exit 0
+fi
+[ -z "$SESSIONS" ] || die "--sessions applies to the workspace, not to a single file"
+
 ensure_vendor
 if [ "${VENDOR_FORCE:-0}" = 1 ] && [ -z "${FILE:-}" ]; then exit 0; fi
 

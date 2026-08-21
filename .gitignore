@@ -1,3 +1,5 @@
 # fetched by install.sh / `md --vendor`, pinned in share/vendor.txt
 share/vendor/
 .DS_Store
+__pycache__/
+*.pyc

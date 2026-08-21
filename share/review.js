@@ -1,11 +1,11 @@
 /* md review layer — annotate a rendered document, export feedback for an AI. */
 (function(){
 "use strict";
-var M = window.__md; if (!M) return;
-var doc = M.doc, META = M.META, raw = M.raw, body = M.body, fmLines = M.fmLines;
-var rawLines = raw.split('\n');
-var PATH = META.rel || META.name;
-var SHORT = META.name || PATH;
+/* one chrome, many documents. Everything per-document is reassigned by
+   openDoc(), so every closure below keeps working when a second file is
+   loaded into the same page — that is what lets the workspace reuse it. */
+var doc = null, META = {}, raw = '', body = '', fmLines = 0, rawLines = [];
+var PATH = '', SHORT = '';
 
 var VERBS = {
   change:  { label:'Change',   color:'var(--v-change)',   key:'c' },
@@ -27,14 +27,18 @@ function noteItems(){ return exportItems().filter(function(i){ return i.verb ===
 
 /* ── storage ─────────────────────────────────────────── */
 function hash(s){ var h=5381,i=s.length; while(i) h=(h*33^s.charCodeAt(--i))>>>0; return h.toString(36); }
-var KEY = 'md-review:' + hash(META.path || (META.dir + '/' + META.name));
 var DEFAULT_PRE = "Apply this feedback. Don't restructure anything I didn't mention.";
+var KEY = '';
 var store = { seq:1, preamble:DEFAULT_PRE, template:'apply', items:[] };
-try {
-  var saved = localStorage.getItem(KEY);
-  if (saved) { var o = JSON.parse(saved); for (var k in o) store[k] = o[k]; }
-} catch(e){}
-if (store.template === 'notes') store.template = 'raw';   // renamed, freeing the word for the verb
+function loadStore(){
+  KEY = 'md-review:' + hash(META.path || (META.dir + '/' + META.name));
+  store = { seq:1, preamble:DEFAULT_PRE, template:'apply', items:[] };
+  try {
+    var saved = localStorage.getItem(KEY);
+    if (saved) { var o = JSON.parse(saved); for (var k in o) store[k] = o[k]; }
+  } catch(e){}
+  if (store.template === 'notes') store.template = 'raw';   // renamed, freeing the word for the verb
+}
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(store)); } catch(e){} }
 
 /* ── source helpers ──────────────────────────────────── */
@@ -42,7 +46,7 @@ function srcSlice(a, b){ return rawLines.slice(a-1, b).join('\n').replace(/\s+$/
 function lineOfOffset(off){ return fmLines + body.slice(0, off).split('\n').length; }
 
 /* ── 1. map rendered blocks to source lines ──────────── */
-(function mapLines(){
+function mapLines(){
   var tokens;
   try { tokens = marked.lexer(body); } catch(e){ return; }
   var probe = document.createElement('div'), off = 0, idx = 0;
@@ -59,9 +63,9 @@ function lineOfOffset(off){ return fmLines + body.slice(0, off).split('\n').leng
     }
     idx += n;
   });
-})();
+}
 
-var blocks = [].filter.call(doc.children, function(el){ return el.dataset.lineStart; });
+var blocks = [];
 function blockAtLine(l){
   for (var i=0;i<blocks.length;i++){
     if (+blocks[i].dataset.lineStart <= l && l <= +blocks[i].dataset.lineEnd) return blocks[i];
@@ -114,7 +118,10 @@ function reanchor(){
   store.items.sort(function(x, y){ return x.lineStart - y.lineStart || x.id - y.id; });
   save();
 }
-reanchor();
+
+/* the workspace keeps this chrome on a page that also shows lists; the layer
+   must not react to keys or selections while its document is hidden */
+function live(){ return !!doc && doc.isConnected && doc.offsetParent !== null; }
 
 /* ── highlights ──────────────────────────────────────── */
 var HL = null;
@@ -220,6 +227,7 @@ function showPop(rect){
 }
 function hidePop(){ pop.classList.remove('show'); }
 document.addEventListener('selectionchange', function(){
+  if (!live()) return;
   if (composer.classList.contains('show')) return;
   var s = selInfo();
   if (s) showPop(s.rect); else hidePop();
@@ -376,7 +384,6 @@ revBtn.addEventListener('click', function(){ toggleTray(); });
 document.getElementById('tray-close').addEventListener('click', function(){ toggleTray(false); });
 
 /* preamble + template */
-preBox.value = store.preamble;
 preBox.addEventListener('input', function(){ store.preamble = preBox.value; save(); });
 [].forEach.call(document.querySelectorAll('#tray .tpl button'), function(b){
   b.addEventListener('click', function(){
@@ -490,13 +497,14 @@ function setFocus(i, scroll){
   el.classList.add('kb-focus');
   if (scroll) el.scrollIntoView({ block:'nearest', behavior:'smooth' });
 }
-doc.addEventListener('mouseover', function(e){
+function onHover(e){
   var b = blockOf(e.target);
   if (!b) return;
   var i = blocks.indexOf(b);
   if (i >= 0 && i !== focusIdx) setFocus(i, false);
-});
+}
 document.addEventListener('keydown', function(e){
+  if (!live()) return;
   var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable;
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter'){ e.preventDefault(); doExport(); return; }
   if (typing || e.altKey || e.metaKey || e.ctrlKey) return;
@@ -515,10 +523,43 @@ document.addEventListener('keydown', function(e){
 });
 
 /* ── go ──────────────────────────────────────────────── */
-syncTpl(); paint(); renderTray();
+/* openDoc() loads a document into this chrome. Calling it again swaps the
+   document without rebuilding a single listener or leaking the last one's state. */
+var booted = false, hovering = null;
+function openDoc(m){
+  if (!m || !m.doc) return;
+  doc = m.doc;
+  META = m.META || {};
+  raw  = m.raw || '';
+  body = m.body != null ? m.body : raw;
+  fmLines = m.fmLines || 0;
+  rawLines = raw.split('\n');
+  PATH  = META.rel || META.name || '';
+  SHORT = META.name || PATH;
+
+  hidePop(); closeComposer();
+  loadStore();
+  mapLines();
+  blocks = [].filter.call(doc.children, function(el){ return el.dataset.lineStart; });
+  focusIdx = -1;
+
+  if (hovering !== doc){
+    if (hovering) hovering.removeEventListener('mouseover', onHover);
+    doc.addEventListener('mouseover', onHover);
+    hovering = doc;
+  }
+
+  reanchor();
+  preBox.value = store.preamble;
+  syncTpl(); paint(); renderTray();
+  if (!booted){ booted = true; hookMode(); }
+}
+
+window.MDReview = { open: openDoc, count: openCount };
+if (window.__md) openDoc(window.__md);
 
 /* ── hook mode: an agent is blocked on this window ───────────────────── */
-(function hookMode(){
+function hookMode(){
   var H = META.hook;
   if (!H || !H.url) return;
   document.body.classList.add('hook-mode');
@@ -622,7 +663,8 @@ syncTpl(); paint(); renderTray();
   if (H.deadline) tick();
 
   toggleTray(true);
-})();
+}
 
-window.__mdReview = { store: store, build: buildExport, notes: buildNotes };
+/* a live handle, not a snapshot — `store` is replaced on every openDoc() */
+window.__mdReview = { get store(){ return store; }, build: buildExport, notes: buildNotes };
 })();

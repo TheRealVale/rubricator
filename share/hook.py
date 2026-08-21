@@ -105,6 +105,8 @@ def serve():
 
 # ── window handling ──────────────────────────────────────────────────────────
 def open_window(url):
+    if os.environ.get("RUBRICATOR_NO_WINDOW"):   # tests drive the page themselves
+        return
     if os.path.isdir(CHROME):
         try:
             subprocess.run(["open", "-na", CHROME, "--args", "--app=" + url,

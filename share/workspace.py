@@ -45,6 +45,7 @@ def find_docs(root):
 
 HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.M)
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)")
+MERMAID_FENCE = re.compile(r"^[ \t]*(?:```|~~~)[ \t]*mermaid\b", re.M)
 WORD = re.compile(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9_-]{2,}")
 
 
@@ -228,12 +229,20 @@ def emit_html(data, share):
     def v(name):
         f = vendor / name
         return f.read_text(encoding="utf-8", errors="replace") if f.is_file() else ""
+    def sh(name):
+        return (share / name).read_text(encoding="utf-8")
+    # mermaid is 3 MB — carry it only when a document in this tree actually needs it
+    wants_mermaid = any(MERMAID_FENCE.search(d["text"]) for d in data["docs"])
     parts = {
         "__NAME__": html.escape(data["name"]),
         "__BASECSS__": design_css(share),
+        "__REVIEWCSS__": sh("review.css"),
         "__MARKED__": v("marked.min.js"),
         "__HLJS__": v("highlight.min.js"),
-        "__WSJS__": (share / "workspace.js").read_text(encoding="utf-8"),
+        "__MERMAID__": "<script>" + v("mermaid.min.js") + "</script>" if wants_mermaid else "",
+        "__RENDERJS__": sh("render.js"),
+        "__REVIEWJS__": sh("review.js"),
+        "__WSJS__": sh("workspace.js"),
         "__DATA__": json.dumps(data, ensure_ascii=False).replace("</", "<\\/"),
     }
     for k, val in parts.items():
@@ -254,6 +263,15 @@ def main():
         sys.stderr.write(f"rubricator: not a directory: {root}\n")
         return 1
     data = build(root, with_sessions)
+    # a document to open straight away — bare `md` passes the README this way
+    want = os.environ.get("RUBRICATOR_OPEN") or ""
+    if want:
+        try:
+            rel = str((root / want).resolve().relative_to(root))
+        except Exception:
+            rel = ""
+        if any(d["rel"] == rel for d in data["docs"]):
+            data["open"] = rel
     if os.environ.get("RUBRICATOR_JSON"):
         json.dump(data, sys.stdout)
         return 0

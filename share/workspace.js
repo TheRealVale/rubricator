@@ -277,15 +277,32 @@ function openDoc(rel, q){
   var d = D.docs.filter(function(x){ return x.rel === rel; })[0];
   if (!d) return;
   $('rpath').textContent = d.rel;
-  var body = d.text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
-  $('rbody').innerHTML = marked.parse(body);
-  $('rbody').querySelectorAll('pre code').forEach(function(c){
-    if (window.hljs) try { hljs.highlightElement(c); } catch(e){}
+
+  /* the same renderer the single-file reader uses, so the document behaves the
+     same here: anchors, alerts, code copy, mermaid — and the same block-to-line
+     mapping the review layer needs */
+  var doc = $('doc');
+  var out = MD.render({
+    doc: doc,
+    fm:  $('fm'),
+    raw: d.text,
+    base: 'file://' + d.abs.replace(/[^/]*$/, '')
   });
-  if (q) markHits($('rbody'), q);
+
+  /* META.path is the absolute path, which is exactly what the reader keys its
+     annotations on — so notes written here are the same notes it shows */
+  if (window.MDReview){
+    window.MDReview.open({
+      doc: doc, raw: d.text, body: out.body, fmLines: out.fmLines,
+      META: { path: d.abs, rel: d.rel, name: d.rel.split('/').pop(),
+              dir: d.abs.replace(/[^/]*$/, ''), base: 'file://' + d.abs }
+    });
+  }
+
+  if (q) markHits(doc, q);
   $('reader').classList.add('on');
   $('reader').scrollTop = 0;
-  var first = $('rbody').querySelector('mark.hit');
+  var first = doc.querySelector('mark.hit');
   if (first) setTimeout(function(){ first.scrollIntoView({block:'center'}); }, 60);
   $('rcopy').onclick = function(){ copy(d.abs); toast('path copied'); };
 }
@@ -308,7 +325,17 @@ function markHits(root, q){
     node.parentNode.replaceChild(frag, node);
   });
 }
-function closeReader(){ $('reader').classList.remove('on'); }
+function closeReader(){
+  $('reader').classList.remove('on');
+  $('tray').classList.remove('open');
+  document.body.classList.remove('tray-open');
+  $('composer').classList.remove('show');
+  $('pop').classList.remove('show');
+  render();                       // note counts may have changed while it was open
+}
+function readerBusy(){
+  return $('composer').classList.contains('show') || $('tray').classList.contains('open');
+}
 
 /* ── shell ────────────────────────────────────────────────────────────── */
 function render(){
@@ -353,7 +380,11 @@ document.addEventListener('click', function(e){
 });
 document.addEventListener('keydown', function(e){
   var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
-  if (e.key === 'Escape'){ if ($('reader').classList.contains('on')) closeReader(); else if (typing) e.target.blur(); return; }
+  if (e.key === 'Escape'){
+    if ($('reader').classList.contains('on')){ if (!readerBusy()) closeReader(); }
+    else if (typing) e.target.blur();
+    return;
+  }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === '/'){ e.preventDefault(); if (view !== 'search') setView('search'); var q=$('q'); if (q) q.focus(); }
   if (e.key === 't'){
@@ -368,6 +399,8 @@ $('theme').addEventListener('click', function(){
 try { var th = localStorage.getItem('md-theme'); if (th) document.documentElement.setAttribute('data-theme', th); } catch(e){}
 marked.setOptions({ gfm:true });
 render();
+if (D.open) openDoc(D.open, '');
 window.__ws = { data: D, dossier: buildDossier, setView: setView,
+                openDoc: openDoc, closeDoc: closeReader,
                 setQuery: function(q){ query = q; render(); } };
 })();

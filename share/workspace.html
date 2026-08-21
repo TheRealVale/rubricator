@@ -72,6 +72,7 @@ html[data-theme="light"] .act button{color:#fff}
   box-shadow:var(--shadow);font-size:12.5px;opacity:0;pointer-events:none;transition:.18s}
 .toast.show{opacity:1;transform:translateX(-50%)}
 </style>
+<style>__REVIEWCSS__</style>
 </head>
 <body>
 <div class="wsbar">
@@ -87,15 +88,53 @@ html[data-theme="light"] .act button{color:#fff}
 <div class="reader" id="reader">
   <div class="rhead">
     <span class="p" id="rpath"></span>
+    <button class="btn rev" id="revbtn" title="Feedback (f)" aria-label="Feedback"
+      style="all:unset;cursor:pointer;font-size:12px;color:var(--fg-muted);padding:5px 10px;border:1px solid var(--border);border-radius:7px;position:relative">
+      notes<span class="cnt" id="revcnt" style="display:none">0</span>
+    </button>
     <button class="btn ghost" id="rcopy" style="all:unset;cursor:pointer;font-size:12px;color:var(--fg-muted);padding:5px 10px;border:1px solid var(--border);border-radius:7px">copy path</button>
     <button class="btn" id="rclose" style="all:unset;cursor:pointer;font-size:12px;color:var(--fg-muted);padding:5px 10px">close (esc)</button>
   </div>
-  <div class="body md" id="rbody"></div>
+  <div class="body"><div id="fm"></div><article class="md" id="doc"></article></div>
 </div>
+
+<div class="pop" id="pop"></div>
+<div class="composer" id="composer">
+  <div class="chips" id="c-chips"></div>
+  <textarea id="c-text" placeholder="What should change?" spellcheck="false"></textarea>
+  <div class="foot"><span class="hint">&crarr; save &middot; esc close</span><button class="del" id="c-del">Delete</button></div>
+</div>
+<aside id="tray">
+  <div class="th">
+    <span class="t">Feedback</span>
+    <span class="n" id="tray-count">0</span>
+    <button class="btn" id="tray-close" title="Close (esc)" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="list" id="tray-list"></div>
+  <div class="foot">
+    <div class="tpl">
+      <button data-tpl="apply">Apply</button>
+      <button data-tpl="questions">Questions</button>
+      <button data-tpl="raw">Raw</button>
+    </div>
+    <textarea class="pre" id="pre-box" spellcheck="false" placeholder="Instructions for the AI…"></textarea>
+    <button class="go" id="go">Copy feedback</button>
+    <div class="keys">
+      <kbd>c</kbd> <kbd>?</kbd> <kbd>x</kbd> <kbd>e</kbd> <kbd>a</kbd> mark up &middot;
+      <kbd>&#8984;</kbd><kbd>&crarr;</kbd> copy
+    </div>
+  </div>
+</aside>
 <div class="toast" id="toast"></div>
 <script>__MARKED__</script>
 <script>__HLJS__</script>
 <script id="wsdata" type="application/json">__DATA__</script>
+__MERMAID__
+<script>__RENDERJS__</script>
+<!-- the review layer wires its chrome first, so a document can be opened on load -->
+<script>__REVIEWJS__</script>
 <script>__WSJS__</script>
 </body>
 </html>
