@@ -1,7 +1,7 @@
 ---
 title: One door, one shell
 subtitle: Restructuring rubricator around a workspace that can act
-status: plan
+status: delivered — all five phases shipped, see docs/tasks.md
 ---
 
 # One door, one shell
@@ -355,13 +355,22 @@ flowchart LR
 
 ---
 
-## 9. Decisions for you
+## 9. What was decided
 
-1. **Bare `md`** — workspace with the README pre-opened, as proposed? Or keep
-   `md` = README and put the workspace on `md .` only?
-2. **Launch** — opt-in behind a flag, as proposed? Or enabled by default on the
-   grounds that it is localhost-only and token-gated?
-3. **Notes on disk** — write `.rubricator/notes.json` into the repo, or keep
-   annotations in `localStorage` and treat them as throwaway?
-4. **Scope now** — A+B is a coherent release on its own (better browsing, no new
-   powers). C+D is the interesting one but is where the security surface appears.
+1. **Bare `md`** opens the workspace with the README already in the pane, so
+   nothing was lost by changing the default. `RUBRICATOR_BARE=readme` restores
+   the old behaviour; shipped as 2.0.0.
+2. **Launch is opt-in** — `md --allow-launch`, or `allow_launch` in the config.
+   A fresh install can start nothing.
+3. **Notes went to disk**, at `.rubricator/notes.json`, kept out of git through
+   `.git/info/exclude` rather than `.gitignore` — nothing tracked is touched and
+   committing them stays a choice.
+4. **All five phases shipped in sequence**, one commit each, rather than as two
+   releases. The tiering in C is what made D and E small.
+
+Two things this plan expected that turned out differently. Driving a named
+terminal needs macOS Automation permission and that dialog *blocks*, so the
+default launcher became a `.command` file opened through LaunchServices, which
+needs none. And dropping document bodies from the page was supposed to require a
+server-side search; hydrating every body on the first search turned out to be
+simpler, keep one code path, and cost one request.
