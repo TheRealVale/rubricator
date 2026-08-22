@@ -393,13 +393,16 @@ def serve_workspace(root, with_sessions, share, open_rel):
     sys.path.insert(0, str(share))
     import serve as S
 
+    import actions as A
     state = {"data": build(root, with_sessions)}
     state["data"]["open"] = open_rel or ""
 
     def page(method, query, body):
         data = dict(state["data"])
         data["base"] = srv.base
-        data["caps"] = {"live": 1, "text": 1, "reindex": 1, "notes": 1, "asset": 1, "launch": 0}
+        data["caps"] = {"live": 1, "text": 1, "reindex": 1, "notes": 1, "asset": 1,
+                        "launch": 1 if A.enabled() else 0,
+                        "reveal": 1 if A.enabled() else 0}
         data["notes"] = read_notes(root)
         html_out = emit_html(data, share, base=srv.base)
         inject = os.environ.get("RUBRICATOR_INJECT")     # a seam for driving the live page
@@ -445,7 +448,36 @@ def serve_workspace(root, with_sessions, share, open_rel):
         n = write_notes(root, path, store)
         return S.J({"ok": True, "documents": n})
 
-    routes = {"": page, "text": text, "asset": asset, "reindex": reindex, "notes": notes}
+    def act(method, query, body):
+        """A verb and an id. Everything else is resolved here, from the index."""
+        if not A.enabled():
+            return S.J({"error": "actions are off — start with md --allow-launch"}, 403)
+        b = S.json_body(body)
+        verb, ident = b.get("verb") or "", b.get("id") or ""
+        docs = {d["rel"]: d for d in state["data"]["docs"]}
+        try:
+            if verb == "launch":
+                d = docs.get(ident)
+                return S.J(A.launch(root, d["abs"] if d else "", b.get("text") or ""))
+            if verb in ("resume", "fork"):
+                m = (state["data"].get("sessions") or {}).get(ident)
+                if not m or not m.get("live"):
+                    return S.J({"error": "that session has no transcript to resume"}, 400)
+                cwd = m.get("p") or str(root)
+                if not os.path.isdir(cwd):
+                    cwd = str(root)
+                return S.J(A.resume(cwd, ident, fork=(verb == "fork")))
+            if verb in ("reveal", "edit"):
+                d = docs.get(ident)
+                if not d:
+                    return S.J({"error": "no such document"}, 400)
+                return S.J(A.reveal(d["abs"]) if verb == "reveal" else A.edit(d["abs"]))
+        except Exception as e:
+            return S.J({"error": str(e)}, 500)
+        return S.J({"error": "unknown verb"}, 400)
+
+    routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
+              "notes": notes, "act": act}
     srv = S.Server(routes)
     for name in ("marked.min.js", "highlight.min.js", "mermaid.min.js"):
         def one(method, query, body, _n=name):

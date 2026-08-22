@@ -47,6 +47,16 @@ function ensureAllText(cb){
 }
 function docBy(rel){ return D.docs.filter(function(x){ return x.rel === rel; })[0]; }
 
+/* A verb and an id — never a path, never a command. The server resolves the
+   rest against the index it already holds. */
+function act(verb, id, text, ok){
+  if (!can('launch')) return toast('actions are off — start with md --allow-launch');
+  api('act', { verb: verb, id: id, text: text || '' }, function(j){
+    if (j && j.error) return toast(j.error);
+    toast(ok || 'done');
+  }, function(){ toast(verb + ' failed'); });
+}
+
 /* notes: the server owns them when there is one, and the browser's copy is
    kept in step so the same notes show up if you open the file on its own */
 var DISK = D.notes || {};
@@ -453,7 +463,17 @@ function openSession(sid){
       '<span>' + m.n + ' prompts</span><span>' + span(m) + '</span>' +
       '<span>last active ' + ago(m.b) + ' ago</span></div>'];
 
-  if (m.live){
+  if (m.live && can('launch')){
+    out.push('<div class="grp">Pick it up</div>',
+      '<div class="act"><button data-act="resume" data-id="' + esc(sid) + '">Resume this session</button>' +
+      '<button class="ghost" data-act="fork" data-id="' + esc(sid) + '">Fork it</button></div>',
+      '<div class="qnote" style="margin-top:9px">Resume continues the conversation where it ' +
+      'stopped. Fork branches off without disturbing the original.</div>',
+      '<div class="grp">or by hand</div>',
+      '<div class="cmd" data-copy="cd ' + esc(m.p || D.root) + ' && claude -r ' + esc(sid) + '">' +
+        'cd ' + esc((m.p || D.root).replace(/^\/Users\/[^/]+/, '~')) + ' &amp;&amp; claude -r ' + esc(sid.slice(0, 8)) + '…' +
+        '<span style="color:var(--fg-dim)">  click to copy</span></div>');
+  } else if (m.live){
     out.push('<div class="grp">Pick it up</div>',
       '<div class="cmd" data-copy="cd ' + esc(m.p || D.root) + ' && claude -r ' + esc(sid) + '">' +
         'cd ' + esc((m.p || D.root).replace(/^\/Users\/[^/]+/, '~')) + ' &amp;&amp; claude -r ' + esc(sid.slice(0, 8)) + '…' +
@@ -595,6 +615,21 @@ function openDoc(rel, q, side){
   var first = doc.querySelector('mark.hit');
   if (first) setTimeout(function(){ first.scrollIntoView({block:'center'}); }, 60);
   $('rcopy').onclick = function(){ copy(d.abs); toast('path copied'); };
+  var send = $('rsend');
+  if (send){
+    send.style.display = can('launch') ? '' : 'none';
+    send.onclick = function(){
+      /* the notes you just took become the first thing the session hears */
+      var text = window.__mdReview ? window.__mdReview.build() : '';
+      if (!text) text = 'Read ' + d.rel + ' and tell me what you make of it.';
+      act('launch', d.rel, text, 'session opening in a new terminal window');
+    };
+  }
+  var rev = $('rreveal');
+  if (rev){
+    rev.style.display = can('reveal') ? '' : 'none';
+    rev.onclick = function(){ act('reveal', d.rel, '', 'revealed in Finder'); };
+  }
 }
 function markHits(root, q){
   var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], n;
@@ -738,6 +773,10 @@ document.addEventListener('click', function(e){
     libOpen[dir.dataset.dir] = libOpen[dir.dataset.dir] === false;
     return render();
   }
+  var ab = e.target.closest('[data-act]');
+  if (ab) return act(ab.dataset.act, ab.dataset.id, '',
+                     ab.dataset.act === 'fork' ? 'forking in a new terminal window'
+                                               : 'resuming in a new terminal window');
   var cmd = e.target.closest('[data-copy]');
   if (cmd){ copy(cmd.dataset.copy); return toast('copied — paste it into a terminal'); }
 

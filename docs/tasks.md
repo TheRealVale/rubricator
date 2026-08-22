@@ -97,21 +97,23 @@ is honest about which sessions can still be picked up.
 
 ---
 
-## Phase D — actions
+## Phase D — actions ✅
 
 Everything here is off by default. This is where a local page gains the power to
 start a process, and it should look like it.
 
-- [ ] **D1 · Action bus.** `POST /act {verb, id}` — verb allowlist, every path
+- [x] **D1 · Action bus.** `POST /act {verb, id}` — verb allowlist, every path
       and argument resolved server-side. Nothing from the page reaches a shell.
-- [ ] **D2 · Terminal dispatch.** Record `$TERM_PROGRAM` at `md` invocation,
-      persist it, fall back to Terminal.app. *(Verified working via `osascript`.)*
-- [ ] **D3 · Launch with the dossier.** New session in the document's repo root,
+- [x] **D2 · Terminal dispatch.** A `.command` launcher handed to Terminal through
+      LaunchServices, which needs no Automation permission. Naming a terminal in
+      the config drives it over AppleScript instead — that does need permission,
+      and the error says so rather than hanging.
+- [x] **D3 · Launch with the dossier.** New session in the document's repo root,
       first prompt seeded from the annotations.
-- [ ] **D4 · Resume / fork.** `claude -r <sid>` and `--fork-session`, offered
+- [x] **D4 · Resume / fork.** `claude -r <sid>` and `--fork-session`, offered
       only for sessions that still have a transcript.
-- [ ] **D5 · Reveal in Finder · open in `$EDITOR`.**
-- [ ] **D6 · Opt-in gate.** `--allow-launch` or a config line; a fresh install can
+- [x] **D5 · Reveal in Finder · open in `$EDITOR`.**
+- [x] **D6 · Opt-in gate.** `--allow-launch` or a config line; a fresh install can
       spawn nothing. Document the threat model in the README.
 
 ---
@@ -136,6 +138,6 @@ Carried from the plan; unresolved ones block the tasks that depend on them.
 | # | Decision | Blocks | Status |
 |---|---|---|---|
 | 1 | Bare `md` opens the workspace with the README pre-opened | A1 | **accepted** |
-| 2 | Launch is opt-in behind a flag | D6 | proposed |
+| 2 | Launch is opt-in behind a flag | D6 | **accepted** — `md --allow-launch`, or `{"allow_launch": true}` in the config |
 | 3 | Notes move to `.rubricator/notes.json` | C6 | **accepted** — kept out of git via `.git/info/exclude`, so nothing tracked is touched and committing it stays a choice |
 | 4 | A+B ships as its own release before C+D | — | proposed |

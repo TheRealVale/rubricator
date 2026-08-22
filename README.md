@@ -232,6 +232,36 @@ the file on its own. Nothing is written into your files and nothing leaves the m
 Where rubricator is going next is written down: [`docs/architecture-plan.md`](docs/architecture-plan.md)
 for the shape, [`docs/tasks.md`](docs/tasks.md) for the work.
 
+## Letting it start things
+
+Off by default. With `md --allow-launch` — or `{"allow_launch": true}` in
+`~/.config/rubricator/config.json` — the workspace can hand work to a terminal:
+
+- **Send to Claude** on an open document: a new session at the repo root, with the
+  notes you just took as its first prompt. Read a plan, mark six passages, press the
+  button — the conversation starts where you left off thinking.
+- **Resume** or **fork** a past session, offered only where a transcript still exists.
+- **Reveal** a file in Finder, or open it in your editor.
+
+### What keeps that safe
+
+The page sends a verb and an id. It never sends a path and never sends a command; every
+path is resolved on the server against the index it already holds, and every argument
+goes into `argv` directly. The one thing the page may hand over is the prompt text for a
+new session, and that is written to a file and read back as a single argument — a prompt
+containing `$(…)`, backticks or `;` arrives as literal text, because no shell ever parses
+it.
+
+On top of that the server is loopback-only, token-gated per run, refuses anything
+cross-site, and exits when the window closes. Session ids are matched against a strict
+pattern before they reach a command line, and a session with no transcript is refused
+rather than attempted.
+
+The launcher is a `.command` file opened through LaunchServices, so no Automation
+permission is involved. If you set `"terminal": "iTerm.app"` in the config, rubricator
+drives that terminal over AppleScript instead — macOS will ask for permission the first
+time, and if it is refused the error tells you where to grant it.
+
 ## Prior art
 
 If you want this loop with more breadth than one person maintains, look at

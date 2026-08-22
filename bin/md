@@ -62,6 +62,11 @@ WORKSPACE
       --static            skip the local server: build one self-contained page instead.
                           You lose reindexing and notes on disk; you gain a file you
                           can move. -o and -n always imply this.
+      --allow-launch      let the page start things: open a Claude session on a document
+                          with your notes as its first prompt, resume or fork a past
+                          session, reveal a file, open your editor. Off by default.
+                          Make it permanent with {"allow_launch": true} in
+                          ~/.config/rubricator/config.json
 
 REVIEW
       --review FILE opens the review window and waits; prints your feedback to
@@ -142,6 +147,7 @@ ws_run() {
     local urlfile
     urlfile="$(mktemp "$CACHE/.serve.XXXXXX")"
     RUBRICATOR_HOME="$SHARE" RUBRICATOR_OPEN="$opendoc" \
+      RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
       nohup "$PY" "$SHARE/workspace.py" "$abs" $sessions --serve >"$urlfile" 2>/dev/null &
     local i=0 url=""
     while [ $i -lt 100 ]; do
@@ -183,6 +189,7 @@ case "${1:-}" in
       case "$1" in
         --sessions)   WS_SESSIONS="--sessions" ;;
         --static)     WS_STATIC=1 ;;
+        --allow-launch) ALLOW_LAUNCH=1 ;;
         -o|--out)     shift; WS_OUT="${1:?--out needs a path}" ;;
         -n|--no-open) WS_OPEN=0 ;;
         -*)           die "unknown workspace option: $1" ;;
@@ -228,6 +235,7 @@ while [ $# -gt 0 ]; do
     --light)               THEME="light" ;;
     --sessions)            SESSIONS="--sessions" ;;
     --static)              WS_STATIC=1 ;;
+    --allow-launch)        ALLOW_LAUNCH=1 ;;
     --vendor)              VENDOR_FORCE=1 ;;
     -h|--help)             usage; exit 0 ;;
     -v|--version)          echo "md $VERSION"; exit 0 ;;
