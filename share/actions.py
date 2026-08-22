@@ -20,11 +20,26 @@ CACHE   = Path(os.environ.get("RUBRICATOR_CACHE", HOME / ".cache/rubricator"))
 SESSION_ID = re.compile(r"^[0-9a-fA-F-]{8,64}$")
 MAX_PROMPT = 100_000
 
-TERMINALS = {          # app name → how to run a script in a new window
-    "iTerm.app":     "iTerm",
-    "iTerm2.app":    "iTerm",
+# TERM_PROGRAM as your shell reports it → the application to hand the launcher to.
+# All of these run a .command file when opened with it, which is why none of this
+# needs Automation permission.
+TERMINALS = {
+    "iTerm.app":      "iTerm",
+    "iTerm2.app":     "iTerm",
     "Apple_Terminal": "Terminal",
-    "Terminal.app":  "Terminal",
+    "Terminal.app":   "Terminal",
+    "WarpTerminal":   "Warp",
+    "ghostty":        "Ghostty",
+    "WezTerm":        "WezTerm",
+    "kitty":          "kitty",
+}
+APP_PATHS = {
+    "iTerm":    "/Applications/iTerm.app",
+    "Terminal": "/System/Applications/Utilities/Terminal.app",
+    "Warp":     "/Applications/Warp.app",
+    "Ghostty":  "/Applications/Ghostty.app",
+    "WezTerm":  "/Applications/WezTerm.app",
+    "kitty":    "/Applications/kitty.app",
 }
 
 
@@ -36,21 +51,85 @@ def config():
         return {}
 
 
+# ── settings ─────────────────────────────────────────────────────────────────
+# Only these keys are ever written, and only these values are ever accepted. The
+# page can ask for a change; it cannot invent a setting or store arbitrary text.
+SETTABLE = {
+    "terminal":     lambda v: v in ("",) or v in TERMINALS or v in APP_PATHS,
+    "allow_launch": lambda v: isinstance(v, bool),
+    "editor":       lambda v: v == "" or _is_program(v),
+    "deep":         lambda v: isinstance(v, bool),
+    "idle":         lambda v: isinstance(v, int) and 30 <= v <= 86400,
+}
+DEFAULTS = {"terminal": "", "allow_launch": False, "editor": "", "deep": False, "idle": 120}
+
+
+def _is_program(v):
+    if not isinstance(v, str) or not v or len(v) > 200 or "\n" in v:
+        return False
+    if v.startswith("/"):
+        return os.path.isfile(v) and os.access(v, os.X_OK)
+    import shutil
+    return bool(re.match(r"^[\w.+-]+$", v)) and bool(shutil.which(v))
+
+
+def settings():
+    """What is in effect, and what is merely stored — a flag on the command line
+    beats the file, and the screen should say so rather than lie about it."""
+    stored = config()
+    out = dict(DEFAULTS)
+    for k in SETTABLE:
+        if k in stored:
+            out[k] = stored[k]
+    forced = {}
+    if os.environ.get("RUBRICATOR_ALLOW_LAUNCH") == "1" and not out["allow_launch"]:
+        forced["allow_launch"] = "enabled for this window by --allow-launch"
+    return {"values": out, "forced": forced, "path": str(CONFIG),
+            "terminal_effective": terminal(),
+            "terminals": sorted(a for a in APP_PATHS if installed(a))}
+
+
+def save_settings(patch):
+    if not isinstance(patch, dict):
+        raise ValueError("not settings")
+    stored = config()
+    for k, v in patch.items():
+        if k not in SETTABLE:
+            raise ValueError(f"there is no setting called {k!r}")
+        if not SETTABLE[k](v):
+            raise ValueError(f"{k} cannot be set to {v!r}")
+        stored[k] = v
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG.with_suffix(".part")
+    tmp.write_text(json.dumps(stored, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)                 # your machine, your settings, nobody else's
+    tmp.replace(CONFIG)
+    return settings()
+
+
 def enabled():
     if os.environ.get("RUBRICATOR_ALLOW_LAUNCH") == "1":
         return True
     return bool(config().get("allow_launch"))
 
 
+def installed(app):
+    p = APP_PATHS.get(app)
+    return bool(p and os.path.isdir(p))
+
+
 def terminal():
-    """Whatever ran `md`, remembered — never guessed from the browser."""
-    want = os.environ.get("RUBRICATOR_TERM") or config().get("terminal") or ""
-    app = TERMINALS.get(want)
-    if app:
+    """Which terminal to hand a launcher to: what you chose, else whatever ran
+    `md`, else iTerm if it is here, else Terminal — which always is."""
+    chosen = config().get("terminal") or ""
+    if chosen:
+        app = TERMINALS.get(chosen, chosen)
+        if installed(app):
+            return app
+    app = TERMINALS.get(os.environ.get("RUBRICATOR_TERM") or "")
+    if app and installed(app):
         return app
-    if os.path.isdir("/Applications/iTerm.app"):
-        return "iTerm"
-    return "Terminal"
+    return "iTerm" if installed("iTerm") else "Terminal"
 
 
 def _script(cwd, argv, prompt_file=None):
@@ -79,36 +158,22 @@ def _script(cwd, argv, prompt_file=None):
 
 
 def _open_window(script):
+    """LaunchServices, not AppleScript. Every terminal here runs a .command file
+    when it is opened with one, so nothing needs Automation permission — and the
+    permission dialog, which blocks, never appears."""
     if os.environ.get("RUBRICATOR_DRY_LAUNCH"):     # build the launcher, open nothing
-        return
-    named = TERMINALS.get(config().get("terminal") or "")
-    if named:
-        # you named a terminal, so drive it — and say plainly when macOS has not
-        # been told to allow that yet, because the permission dialog blocks
-        cmd = f"/bin/sh {shlex.quote(str(script))}"
-        osa = (f'tell application "iTerm" to create window with default profile command "{cmd}"'
-               if named == "iTerm" else
-               f'tell application "Terminal"\n activate\n do script "{cmd}"\nend tell')
-        try:
-            r = subprocess.run(["osascript", "-e", osa], timeout=15,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            if r.returncode == 0:
-                return
-            err = (r.stderr or b"").decode("utf-8", "replace").strip()[:160]
-            raise RuntimeError(f"{named} refused the command: {err}")
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"macOS is asking whether rubricator may control {named}. Allow it under "
-                "System Settings › Privacy & Security › Automation, or drop "
-                '"terminal" from ~/.config/rubricator/config.json to use Terminal.app instead.')
-
-    # the default: hand the .command to Terminal through LaunchServices, which
-    # needs no Automation permission
-    r = subprocess.run(["open", "-a", "Terminal", str(script)], timeout=20,
+        return terminal()
+    app = terminal()
+    r = subprocess.run(["open", "-a", app, str(script)], timeout=25,
                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    if r.returncode != 0 and app != "Terminal":
+        r = subprocess.run(["open", "-a", "Terminal", str(script)], timeout=25,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        app = "Terminal"
     if r.returncode != 0:
         err = (r.stderr or b"").decode("utf-8", "replace").strip()[:200]
         raise RuntimeError("could not open a terminal window: " + (err or "unknown error"))
+    return app
 
 
 def _claude():
@@ -133,8 +198,8 @@ def launch(root, doc_abs, text):
         prompt = CACHE / "launch" / f"prompt-{int(time.time()*1000)}.md"
         prompt.write_text(str(text)[:MAX_PROMPT], encoding="utf-8")
     sc = _script(cwd, [_claude()], prompt)
-    _open_window(sc)
-    return {"ok": True, "cwd": str(cwd), "script": str(sc)}
+    app = _open_window(sc)
+    return {"ok": True, "cwd": str(cwd), "script": str(sc), "terminal": app}
 
 
 def resume(cwd, sid, fork=False):
@@ -142,8 +207,8 @@ def resume(cwd, sid, fork=False):
         raise ValueError("not a session id")
     argv = [_claude(), "-r", sid] + (["--fork-session"] if fork else [])
     sc = _script(cwd, argv)
-    _open_window(sc)
-    return {"ok": True, "session": sid, "script": str(sc)}
+    app = _open_window(sc)
+    return {"ok": True, "session": sid, "script": str(sc), "terminal": app}
 
 
 def reveal(path):

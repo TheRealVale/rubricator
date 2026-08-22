@@ -277,6 +277,11 @@ Off by default. With `md --allow-launch` — or `{"allow_launch": true}` in
 - **Resume** or **fork** a past session, offered only where a transcript still exists.
 - **Reveal** a file in Finder, or open it in your editor.
 
+Sessions open in **iTerm** if you have it, otherwise Terminal — or whichever terminal you
+pick under **Settings**. The launcher is a `.command` file handed to that application
+through LaunchServices, which runs it and needs no Automation permission, so macOS never
+interrupts with a dialog.
+
 ### What keeps that safe
 
 The page sends a verb and an id. It never sends a path and never sends a command; every
@@ -291,10 +296,22 @@ cross-site, and exits when the window closes. Session ids are matched against a 
 pattern before they reach a command line, and a session with no transcript is refused
 rather than attempted.
 
-The launcher is a `.command` file opened through LaunchServices, so no Automation
-permission is involved. If you set `"terminal": "iTerm.app"` in the config, rubricator
-drives that terminal over AppleScript instead — macOS will ask for permission the first
-time, and if it is refused the error tells you where to grant it.
+## Settings
+
+The workspace has a **Settings** tab: which terminal sessions open in, whether the page may
+start anything at all, your editor, and whether indexing counts subagent work. Changing
+what may be launched takes effect at once — no restart, and the buttons appear and
+disappear with it.
+
+Settings are stored in `~/.config/rubricator/config.json`, mode `0600`: your own config
+directory, readable only by you. Nothing is written into the repositories you index and
+nothing leaves the machine. The page can ask for a change but cannot invent one — only
+known keys are accepted, and each value is checked before it is stored, so an editor that
+is not a real program or a terminal that is not a terminal is refused by the server rather
+than written to disk.
+
+A flag on the command line beats the file: `md --allow-launch` enables launching for that
+window only, and the screen says so rather than pretending the setting changed.
 
 ## Prior art
 

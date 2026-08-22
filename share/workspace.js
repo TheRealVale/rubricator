@@ -53,7 +53,7 @@ function act(verb, id, text, ok){
   if (!can('launch')) return toast('actions are off — start with md --allow-launch');
   api('act', { verb: verb, id: id, text: text || '' }, function(j){
     if (j && j.error) return toast(j.error);
-    toast(ok || 'done');
+    toast((ok || 'done') + (j && j.terminal ? ' — ' + j.terminal : ''));
   }, function(){ toast(verb + ' failed'); });
 }
 
@@ -636,6 +636,68 @@ function viewGraph(){
   return out.join('');
 }
 
+/* ── settings ────────────────────────────────────────────────────────────── */
+var SET = D.settings || null;
+function setOne(key, value, note){
+  var o = {}; o[key] = value;
+  api('settings', { set: o }, function(j){
+    if (j.error) return toast(j.error);
+    SET = j.settings;
+    if (j.caps){ for (var k in j.caps) CAPS[k] = j.caps[k]; }
+    render();
+    toast(note || 'saved');
+  }, function(){ toast('could not save that'); });
+}
+function viewSettings(){
+  if (!can('settings') || !SET) return '<div class="empty">Settings live with the local ' +
+    'server. This page was built as a static file, so there is nothing here to change.<br><br>' +
+    'Open the workspace with <span class="f">md</span> instead of <span class="f">md --static</span>.</div>';
+  var v = SET.values, forced = SET.forced || {};
+  var out = [];
+
+  out.push('<div class="grp">Where a session opens</div>');
+  var terms = [['', 'whatever ran md']].concat(SET.terminals.map(function(t){
+    return [t === 'iTerm' ? 'iTerm.app' : t + '.app', t];
+  }));
+  out.push('<div class="ctl"><div class="seg">' + terms.map(function(t){
+    return '<button data-set="terminal" data-val="' + esc(t[0]) + '" class="' +
+      (v.terminal === t[0] ? 'on' : '') + '">' + esc(t[1]) + '</button>';
+  }).join('') + '</div><span class="sp">now: ' + esc(SET.terminal_effective) + '</span></div>');
+  out.push('<div class="qnote">Launchers are handed to your terminal through LaunchServices, ' +
+    'so this needs no permission from macOS and no dialog appears.</div>');
+
+  out.push('<div class="grp">What the page may start</div>');
+  out.push('<div class="ctl"><button class="chip' + (v.allow_launch ? ' on' : '') +
+    '" data-set="allow_launch" data-val="' + (v.allow_launch ? '0' : '1') + '">' +
+    (v.allow_launch ? 'launching is on' : 'launching is off') + '</button>' +
+    (forced.allow_launch ? '<span class="sp">' + esc(forced.allow_launch) + '</span>' : '') + '</div>');
+  out.push('<div class="qnote">With this on, the workspace can open a Claude session on a ' +
+    'document with your notes as its first prompt, resume or fork a past session, reveal a ' +
+    'file, or open your editor. It sends a verb and an id — never a path and never a command. ' +
+    'Off is the default, and off means nothing here can start a process.</div>');
+
+  out.push('<div class="grp">Editor</div>');
+  out.push('<div class="ctl"><input class="fld" id="s-editor" value="' + esc(v.editor) +
+    '" placeholder="left empty: whatever macOS opens .md with" spellcheck="false">' +
+    '<button class="chip" data-seteditor="1">save</button></div>');
+  out.push('<div class="qnote">A command on your PATH, or an absolute path. It is checked ' +
+    'before it is stored, and it is passed as an argument — never through a shell.</div>');
+
+  out.push('<div class="grp">Indexing</div>');
+  out.push('<div class="ctl"><button class="chip' + (v.deep ? ' on' : '') +
+    '" data-set="deep" data-val="' + (v.deep ? '0' : '1') + '">count subagent work</button>' +
+    '<span class="sp">applies the next time you open a workspace</span></div>');
+  out.push('<div class="qnote">Work you delegate is written to separate transcripts. Without ' +
+    'this, a session that edited through subagents looks like it touched nothing.</div>');
+
+  out.push('<div class="grp">Where this is kept</div>');
+  out.push('<div class="cmd" data-copy="' + esc(SET.path) + '">' + esc(SET.path.replace(/^\/Users\/[^/]+/, '~')) +
+    '<span style="color:var(--fg-dim)">  click to copy</span></div>');
+  out.push('<div class="qnote">Your own config directory, readable only by you (0600). ' +
+    'Nothing is written into the repositories you index, and nothing leaves the machine.</div>');
+  return out.join('');
+}
+
 /* ── E7 · views you wrote yourself ───────────────────────────────────────── */
 var USER_VIEWS = [];
 window.RB = {
@@ -824,7 +886,8 @@ function render(){
       (v.n != null ? '<span class="n">' + v.n + '</span>' : '') + '</button>';
   }).join('');
   var builtin = { search:viewSearch, docs:viewLibrary, stale:viewStale,
-                  notes:viewNotes, sessions:viewSessions, graph:viewGraph };
+                  notes:viewNotes, sessions:viewSessions, graph:viewGraph,
+                  settings:viewSettings };
   var mine = USER_VIEWS.filter(function(v){ return v.id === view; })[0];
   $('page').innerHTML = mine ? mine.render(D, RB) : (builtin[view] || viewSearch)();
 
@@ -862,7 +925,8 @@ VIEWS = [
   { id:'stale', label:'Stale' },
   { id:'notes', label:'Notes' },
   { id:'sessions', label:'Sessions', n: D.withSessions ? Object.keys(D.sessions).length : null },
-  { id:'graph', label:'Graph' }
+  { id:'graph', label:'Graph' },
+  { id:'settings', label:'Settings' }
 ].concat(USER_VIEWS.map(function(v){ return { id:v.id, label:v.label || v.id }; }));
 
 /* ── reindex, and the heartbeat that decides how long the server lives ───── */
@@ -951,6 +1015,18 @@ document.addEventListener('click', function(e){
     if (d.sscope) sesScope = d.sscope;
     if (d.slive)  sesLive = !sesLive;
     return render();
+  }
+  var sb = e.target.closest('[data-set]');
+  if (sb){
+    var key = sb.dataset.set, raw = sb.dataset.val;
+    var val = (key === 'terminal') ? raw : raw === '1';
+    return setOne(key, val, key === 'terminal'
+      ? 'sessions will open in ' + (raw ? raw.replace('.app','') : 'whatever ran md')
+      : null);
+  }
+  if (e.target.closest('[data-seteditor]')){
+    var f = $('s-editor');
+    return setOne('editor', f ? f.value.trim() : '', 'editor saved');
   }
   var gb = e.target.closest('[data-graph]');
   if (gb){ graphOn = gb.dataset.graph === '1'; return render(); }

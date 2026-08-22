@@ -487,8 +487,10 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         data = dict(state["data"])
         data["base"] = srv.base
         data["caps"] = {"live": 1, "text": 1, "reindex": 1, "notes": 1, "asset": 1,
-                        "watch": 1, "launch": 1 if A.enabled() else 0,
+                        "watch": 1, "settings": 1,
+                        "launch": 1 if A.enabled() else 0,
                         "reveal": 1 if A.enabled() else 0}
+        data["settings"] = A.settings()
         data["views"] = user_views()
         data["notes"] = read_notes(root)
         html_out = emit_html(data, share, base=srv.base)
@@ -600,8 +602,20 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                 wfile.write(b"data: " + msg.encode() + b"\n\n")
                 wfile.flush()
 
+    def settings(method, query, body):
+        if method == "GET":
+            return S.J(A.settings())
+        try:
+            saved = A.save_settings(S.json_body(body).get("set") or {})
+        except ValueError as e:
+            return S.J({"error": str(e)}, 400)
+        # a change to what may be launched takes effect at once, without a restart
+        return S.J({"settings": saved,
+                    "caps": {"launch": 1 if A.enabled() else 0,
+                             "reveal": 1 if A.enabled() else 0}})
+
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
-              "notes": notes, "act": act, "events": events}
+              "notes": notes, "act": act, "events": events, "settings": settings}
     srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
     if port:
         srv.httpd.server_close()
@@ -641,9 +655,18 @@ def main():
 
     if live:
         share = Path(os.environ.get("RUBRICATOR_HOME", Path(__file__).resolve().parent))
+        # settings you stored count as if you had typed them
+        sys.path.insert(0, str(share))
+        try:
+            import actions as _A
+            cfg = _A.config()
+            deep = deep or bool(cfg.get("deep"))
+            idle = int(cfg.get("idle") or 0) or None
+        except Exception:
+            idle = None
         srv = serve_workspace(roots, with_sessions, share,
                               os.environ.get("RUBRICATOR_OPEN") or "", deep=deep,
-                              port=port, idle=None if not stay else 10 ** 9)
+                              port=port, idle=10 ** 9 if stay else idle)
         sys.stdout.write(srv.base + "/\n")
         sys.stdout.flush()
         srv.wait()

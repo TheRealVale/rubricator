@@ -104,10 +104,12 @@ start a process, and it should look like it.
 
 - [x] **D1 · Action bus.** `POST /act {verb, id}` — verb allowlist, every path
       and argument resolved server-side. Nothing from the page reaches a shell.
-- [x] **D2 · Terminal dispatch.** A `.command` launcher handed to Terminal through
-      LaunchServices, which needs no Automation permission. Naming a terminal in
-      the config drives it over AppleScript instead — that does need permission,
-      and the error says so rather than hanging.
+- [x] **D2 · Terminal dispatch.** A `.command` launcher handed to your terminal
+      through LaunchServices — iTerm by default where it is installed, Terminal
+      otherwise, or whatever Settings says. Every terminal in the list runs a
+      `.command` when opened with one, so no Automation permission is involved
+      and no dialog ever appears. *(AppleScript, which does need permission and
+      whose dialog blocks, was removed.)*
 - [x] **D3 · Launch with the dossier.** New session in the document's repo root,
       first prompt seeded from the annotations.
 - [x] **D4 · Resume / fork.** `claude -r <sid>` and `--fork-session`, offered
@@ -142,6 +144,15 @@ Carried from the plan; unresolved ones block the tasks that depend on them.
 | 3 | Notes move to `.rubricator/notes.json` | C6 | **accepted** — kept out of git via `.git/info/exclude`, so nothing tracked is touched and committing it stays a choice |
 | 4 | A+B ships as its own release before C+D | — | superseded — A through E shipped in sequence, each on its own commit |
 
+
+---
+
+## After the plan
+
+- [x] **F1 · Settings screen.** Terminal, launching, editor and deep indexing,
+      changed from the workspace and persisted to `~/.config/rubricator/config.json`
+      at mode 0600. Only known keys, each value validated server-side; a CLI flag
+      still wins and the screen says when it has.
 
 ---
 
