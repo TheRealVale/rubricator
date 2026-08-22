@@ -118,16 +118,16 @@ start a process, and it should look like it.
 
 ---
 
-## Phase E — extensions
+## Phase E — extensions ✅
 
-- [ ] **E1 · Watch mode over SSE** — `docs/watch-plan.md`, now a small addition.
-- [ ] **E2 · Per-file timeline** — commits and sessions on one axis.
-- [ ] **E3 · Correlation graph** — the mindmap view, gated behind a node budget.
-- [ ] **E4 · Subagent transcripts** (`--deep`) so delegated file edits are attributed.
-- [ ] **E5 · `md serve`** — a persistent workspace on a stable port.
-- [ ] **E6 · Provider interface** — commits, GitHub issues, a notes folder.
-- [ ] **E7 · User views** — `~/.config/rubricator/views/*.js`, loaded if present.
-- [ ] **E8 · Multi-root workspace.**
+- [x] **E1 · Watch mode over SSE** — `docs/watch-plan.md`, now a small addition.
+- [x] **E2 · Per-file timeline** — commits and sessions on one axis.
+- [x] **E3 · Correlation graph** — the mindmap view, gated behind a node budget.
+- [x] **E4 · Subagent transcripts** (`--deep`) so delegated file edits are attributed.
+- [x] **E5 · `md serve`** — a persistent workspace on a stable port.
+- [x] **E6 · Provider interface** — commits, GitHub issues, a notes folder.
+- [x] **E7 · User views** — `~/.config/rubricator/views/*.js`, loaded if present.
+- [x] **E8 · Multi-root workspace.**
 
 ---
 
@@ -140,4 +140,23 @@ Carried from the plan; unresolved ones block the tasks that depend on them.
 | 1 | Bare `md` opens the workspace with the README pre-opened | A1 | **accepted** |
 | 2 | Launch is opt-in behind a flag | D6 | **accepted** — `md --allow-launch`, or `{"allow_launch": true}` in the config |
 | 3 | Notes move to `.rubricator/notes.json` | C6 | **accepted** — kept out of git via `.git/info/exclude`, so nothing tracked is touched and committing it stays a choice |
-| 4 | A+B ships as its own release before C+D | — | proposed |
+| 4 | A+B ships as its own release before C+D | — | superseded — A through E shipped in sequence, each on its own commit |
+
+
+---
+
+## Done
+
+All five phases are in. What the plan called *room deliberately left* is now
+reachable rather than hypothetical: a provider is a file in
+`~/.config/rubricator/providers/`, a view is a file in
+`~/.config/rubricator/views/`, and a workspace can hold more than one repo.
+
+What is deliberately still missing, and why:
+
+- **No daemon by default.** `md serve` exists for when you want one, but the
+  ordinary path still starts a server that dies with its window.
+- **No cloud, no sync, no account.** Session history never leaves the machine;
+  `--sessions` still refuses `--out`.
+- **macOS only.** The window handling, the terminal dispatch and the Finder
+  verbs are all platform-specific. Nothing else is.

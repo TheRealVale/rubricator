@@ -22,6 +22,12 @@ import http.server, json, os, secrets, sys, threading, time, urllib.parse
 IDLE = int(os.environ.get("RUBRICATOR_IDLE", "120"))     # seconds without a heartbeat
 
 
+def stream(fn):
+    """Mark a route as a server-sent event stream."""
+    fn.stream = True
+    return fn
+
+
 class Server:
     def __init__(self, routes, idle=IDLE):
         self.routes = routes
@@ -109,6 +115,20 @@ class Server:
                 if fn is None:
                     return self.send_error(404)
                 server.seen = time.time()
+                if getattr(fn, "stream", False):
+                    # an open stream is not a request that ends; hand it the socket
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.close_connection = True
+                    try:
+                        fn(self.wfile)
+                    except Exception:
+                        pass
+                    return
                 body = b""
                 if method == "POST":
                     try:

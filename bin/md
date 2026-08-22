@@ -74,11 +74,19 @@ REVIEW
       --hook plan   for a Claude Code PreToolUse/ExitPlanMode hook: finds the plan
                     file, opens the review window, blocks, and returns the decision
 
+MORE
+  md serve [DIR…]         keep a workspace up on a fixed port (--port N), instead of
+                          one that closes with its window
+      --deep              count what subagents changed too, so delegated work is
+                          attributed to the session that asked for it
+
 EXAMPLES
   md                       # the workspace for this directory
   md --sessions            # …and correlate it with your Claude Code history
   md README.md
   md ~/Repositories/other  # the workspace for another repo
+  md . ../other-repo       # both at once
+  md serve --port 7777 --sessions
   git show HEAD:NOTES.md | md -
   md -o /tmp/spec.html docs/spec.md    # self-contained, shareable HTML
 HELPTXT
@@ -127,17 +135,21 @@ urlenc() {
 
 # ── workspace: index a directory instead of rendering one file ───────────────
 ws_run() {
-  local dir="$1" out="$2" doopen="$3" sessions="$4" opendoc="$5"
+  local out="$1" doopen="$2" sessions="$3" opendoc="$4"
+  shift 4
+  local dirs=("$@")
+  local dir="${dirs[0]}"
   local PY abs file url
   PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
   [ -x "$PY" ] || die "python3 is required for the workspace (try: md README.md)"
-  [ -d "$dir" ] || die "not a directory: $dir"
+  local d; for d in "${dirs[@]}"; do [ -d "$d" ] || die "not a directory: $d"; done
   if [ -n "$out" ] && [ -n "$sessions" ]; then
     die "refusing --out with --sessions: your history stays on this machine"
   fi
   ensure_vendor
   mkdir -p "$CACHE"
   abs="$(cd "$dir" && pwd)"
+  local absdirs=(); for d in "${dirs[@]}"; do absdirs+=("$(cd "$d" && pwd)"); done
 
   # Two tiers. Live is a small local server: the page fetches documents as it
   # needs them, can reindex without regenerating, and keeps notes in the repo.
@@ -148,7 +160,7 @@ ws_run() {
     urlfile="$(mktemp "$CACHE/.serve.XXXXXX")"
     RUBRICATOR_HOME="$SHARE" RUBRICATOR_OPEN="$opendoc" \
       RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
-      nohup "$PY" "$SHARE/workspace.py" "$abs" $sessions --serve >"$urlfile" 2>/dev/null &
+      nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} --serve >"$urlfile" 2>/dev/null &
     local i=0 url=""
     while [ $i -lt 100 ]; do
       url="$(head -1 "$urlfile" 2>/dev/null || true)"
@@ -168,7 +180,7 @@ ws_run() {
 
   file="${out:-$CACHE/workspace-$(printf '%s' "$abs" | shasum -a 1 | cut -c1-10).html}"
   RUBRICATOR_HOME="$SHARE" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
-    "$PY" "$SHARE/workspace.py" "$abs" $sessions >/dev/null || exit 1
+    "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} >/dev/null || exit 1
   if [ "$doopen" = 1 ] && [ -z "$out" ]; then
     url="file://$(urlenc "$file")"
     if [ -d "/Applications/Google Chrome.app" ]; then
@@ -184,21 +196,48 @@ case "${1:-}" in
   --workspace|-w)
     # the explicit door into the workspace; the bare "md" below uses the same runner
     shift
-    WS_DIR="."; WS_SESSIONS=""; WS_OUT=""; WS_OPEN=1
+    WS_DIRS=(); WS_SESSIONS=""; WS_OUT=""; WS_OPEN=1
     while [ $# -gt 0 ]; do
       case "$1" in
         --sessions)   WS_SESSIONS="--sessions" ;;
+        --deep)       WS_SESSIONS="--sessions"; DEEP=1 ;;
         --static)     WS_STATIC=1 ;;
         --allow-launch) ALLOW_LAUNCH=1 ;;
         -o|--out)     shift; WS_OUT="${1:?--out needs a path}" ;;
         -n|--no-open) WS_OPEN=0 ;;
         -*)           die "unknown workspace option: $1" ;;
-        *)            WS_DIR="$1" ;;
+        *)            WS_DIRS+=("$1") ;;
       esac
       shift
     done
-    ws_run "$WS_DIR" "$WS_OUT" "$WS_OPEN" "$WS_SESSIONS" ""
+    [ ${#WS_DIRS[@]} -gt 0 ] || WS_DIRS=(".")
+    ws_run "$WS_OUT" "$WS_OPEN" "$WS_SESSIONS" "" "${WS_DIRS[@]}"
     exit 0 ;;
+  serve)
+    # a workspace that stays up: same server, a port you can bookmark, no idle exit
+    shift
+    PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
+    [ -x "$PY" ] || die "python3 is required for the workspace"
+    SV_DIRS=(); SV_ARGS=(--serve --stay); SV_PORT=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --sessions)     SV_ARGS+=(--sessions) ;;
+        --deep)         SV_ARGS+=(--sessions --deep) ;;
+        --allow-launch) ALLOW_LAUNCH=1 ;;
+        --port)         shift; SV_PORT="${1:?--port needs a number}" ;;
+        --port=*)       SV_PORT="${1#--port=}" ;;
+        -*)             die "unknown serve option: $1" ;;
+        *)              SV_DIRS+=("$1") ;;
+      esac
+      shift
+    done
+    [ ${#SV_DIRS[@]} -gt 0 ] || SV_DIRS=(".")
+    [ -n "$SV_PORT" ] && SV_ARGS+=("--port=$SV_PORT")
+    ensure_vendor
+    printf 'rubricator: serving %s — ctrl-c to stop\n' "${SV_DIRS[*]}" >&2
+    exec env RUBRICATOR_HOME="$SHARE" RUBRICATOR_TERM="${TERM_PROGRAM:-}" \
+      RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
+      "$PY" "$SHARE/workspace.py" "${SV_DIRS[@]}" "${SV_ARGS[@]}" ;;
   --hook|--review)
     # hooks do not source your shell profile, so PATH may be bare
     PY="$(command -v python3 2>/dev/null || true)"
@@ -224,7 +263,7 @@ case "${1:-}" in
 esac
 
 OPEN_MODE="app"; OUT=""; THEME="dark"; TO_STDOUT=0
-FILE=""; SESSIONS=""
+FILE=""; SESSIONS=""; EXTRA_DIRS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -234,6 +273,7 @@ while [ $# -gt 0 ]; do
     -o|--out)              shift; [ $# -gt 0 ] || die "--out needs a path"; OUT="$1"; OPEN_MODE="none" ;;
     --light)               THEME="light" ;;
     --sessions)            SESSIONS="--sessions" ;;
+    --deep)                SESSIONS="--sessions"; DEEP=1 ;;
     --static)              WS_STATIC=1 ;;
     --allow-launch)        ALLOW_LAUNCH=1 ;;
     --vendor)              VENDOR_FORCE=1 ;;
@@ -242,7 +282,7 @@ while [ $# -gt 0 ]; do
     -)                     FILE="-" ;;
     --)                    shift; FILE="${1:-}"; break ;;
     -*)                    die "unknown option: $1 (try md --help)" ;;
-    *)                     FILE="$1" ;;
+    *)                     if [ -z "${FILE:-}" ]; then FILE="$1"; else EXTRA_DIRS+=("$1"); fi ;;
   esac
   shift
 done
@@ -252,7 +292,7 @@ done
 # ── which door did the argument ask for? ─────────────────────────────────────
 if [ "$OPEN_MODE" = "none" ]; then WS_OPEN=0; else WS_OPEN=1; fi
 if [ -n "${FILE:-}" ] && [ "$FILE" != "-" ] && [ -d "$FILE" ]; then
-  ws_run "$FILE" "$OUT" "$WS_OPEN" "$SESSIONS" ""
+  ws_run "$OUT" "$WS_OPEN" "$SESSIONS" "" "$FILE" ${EXTRA_DIRS[@]+"${EXTRA_DIRS[@]}"}
   exit 0
 fi
 if [ -z "${FILE:-}" ] && [ "${VENDOR_FORCE:-0}" != 1 ] && [ "${RUBRICATOR_BARE:-}" != "readme" ]; then
@@ -261,7 +301,7 @@ if [ -z "${FILE:-}" ] && [ "${VENDOR_FORCE:-0}" != 1 ] && [ "${RUBRICATOR_BARE:-
   for cand in README.md readme.md README.markdown index.md; do
     [ -f "$cand" ] && { OPENDOC="$cand"; break; }
   done
-  ws_run "." "$OUT" "$WS_OPEN" "$SESSIONS" "$OPENDOC"
+  ws_run "$OUT" "$WS_OPEN" "$SESSIONS" "$OPENDOC" "."
   exit 0
 fi
 [ -z "$SESSIONS" ] || die "--sessions applies to the workspace, not to a single file"

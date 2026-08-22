@@ -125,6 +125,29 @@ body.split .page{padding-right:calc(min(62%,880px) + 28px)}
 .cmd{font-family:var(--mono);font-size:11.5px;padding:9px 12px;border:1px solid var(--border);
   border-radius:9px;background:var(--bg-soft);overflow-x:auto;white-space:nowrap;cursor:pointer}
 .cmd:hover{border-color:var(--fg-dim)}
+/* ── a document's history on one axis ───────────────────────────────────── */
+.tl{position:relative;height:26px;margin:0 0 18px;font-size:10px;color:var(--fg-dim)}
+.tl .axis{position:absolute;left:6%;right:6%;top:11px;height:1px;background:var(--border)}
+.tl i{position:absolute;top:7px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;
+  background:var(--fg-dim);opacity:.55}
+.tl i.c{background:var(--fg-dim)}
+.tl i.s{background:var(--accent);opacity:1;cursor:pointer;top:6px;width:9px;height:9px;margin-left:-4.5px}
+.tl i.s:hover{transform:scale(1.35)}
+.tl i.m{background:var(--green);opacity:1}
+.tl .lo{position:absolute;left:0;top:0}
+.tl .hi{position:absolute;right:0;top:0}
+
+/* ── the graph ──────────────────────────────────────────────────────────── */
+.graph{border:1px solid var(--border-soft);border-radius:12px;background:var(--bg-elev);
+  overflow-x:auto;padding:6px}
+.graph svg{width:100%;min-width:640px;height:auto;display:block}
+.graph line{stroke:var(--border);opacity:.85}
+.graph circle{fill:var(--bg-soft);stroke:var(--accent);stroke-width:1.6}
+.graph .n{cursor:pointer}
+.graph .n:hover circle{fill:var(--accent-soft)}
+.graph text{fill:var(--fg-muted);font-size:11px;text-anchor:middle;font-family:var(--font)}
+.graph .n:hover text{fill:var(--fg)}
+
 #reidx.busy svg{animation:spin .7s linear infinite}
 #reidx:hover{color:var(--fg)}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -158,7 +181,7 @@ body.split .page{padding-right:calc(min(62%,880px) + 28px)}
     <button class="btn ghost" id="rcopy" style="all:unset;cursor:pointer;font-size:12px;color:var(--fg-muted);padding:5px 10px;border:1px solid var(--border);border-radius:7px">copy path</button>
     <button class="btn" id="rclose" style="all:unset;cursor:pointer;font-size:12px;color:var(--fg-muted);padding:5px 10px">close (esc)</button>
   </div>
-  <div class="body"><div id="fm"></div><article class="md" id="doc"></article></div>
+  <div class="body"><div id="rtime"></div><div id="fm"></div><article class="md" id="doc"></article></div>
 </div>
 
 <div class="pop" id="pop"></div>

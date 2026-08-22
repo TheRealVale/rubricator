@@ -232,6 +232,40 @@ the file on its own. Nothing is written into your files and nothing leaves the m
 Where rubricator is going next is written down: [`docs/architecture-plan.md`](docs/architecture-plan.md)
 for the shape, [`docs/tasks.md`](docs/tasks.md) for the work.
 
+## Watching, and the rest
+
+The live workspace watches the files it indexed. Change one on disk and the page
+says so; change the one you are reading and it reloads in place, keeping your
+scroll position. Nothing to enable.
+
+**Graph** draws which documents belong together, from the files they describe and
+the sessions that touched them. It asks before laying out, because that is a real
+computation and you should be the one to ask for it.
+
+Every document carries a small **timeline**: commits as grey marks, sessions that
+touched it in accent, the last edit in green. Click a session mark to open it.
+
+```bash
+md serve --port 7777        # a workspace that stays up, on a port you can bookmark
+md . ../other-repo          # more than one repo in one workspace
+md --deep                   # count what subagents changed, not just the main thread
+```
+
+`--deep` matters more than it sounds: work you delegated is recorded in separate
+transcripts, so without it a session that did most of its editing through subagents
+looks like it touched nothing. Here it is the difference between 1,286 files
+attributed and 1,579.
+
+### Extending it
+
+Two directories, both optional:
+
+- `~/.config/rubricator/views/*.js` — each file may call
+  `RB.view({id, label, render})` and gets its own tab. `RB` hands you the index,
+  the helpers and `RB.open(rel)`.
+- `~/.config/rubricator/providers/*.py` — each file may define `provide(root)`,
+  and whatever it returns lands in the page as `D.extra[name]`.
+
 ## Letting it start things
 
 Off by default. With `md --allow-launch` — or `{"allow_launch": true}` in

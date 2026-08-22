@@ -90,9 +90,11 @@ def git_activity(root, docs):
         if chunk.startswith("\x01"):
             cur = int(chunk[1:] or 0)
             continue
-        e = commits.setdefault(chunk, {"n": 0, "last": 0})
+        e = commits.setdefault(chunk, {"n": 0, "last": 0, "ts": []})
         e["n"] += 1
         e["last"] = max(e["last"], cur or 0)
+        if len(e["ts"]) < 60:
+            e["ts"].append(cur or 0)
 
     stale = {}
     all_paths = list(commits.keys())
@@ -114,6 +116,7 @@ def git_activity(root, docs):
         churn = sum(commits[t]["n"] for t in targets if commits[t]["last"] > last)
         repo_churn = sum(1 for p in all_paths if commits[p]["last"] > last)
         stale[d["rel"]] = {"commits": info.get("n", 0), "last": last,
+                           "ts": info.get("ts", [])[:40],
                            "targets": sorted(targets)[:40],
                            "targetChurn": churn, "repoChurn": repo_churn}
     return commits, stale
@@ -151,7 +154,7 @@ def scrub(s):
     return s
 
 
-def load_sessions(limit_project=None):
+def load_sessions(limit_project=None, deep=False):
     """Two records of the same history, joined on the session id.
 
     history.jsonl remembers every prompt you have ever typed and outlives the
@@ -209,6 +212,16 @@ def load_sessions(limit_project=None):
                         seen.update(re.findall(r'"file_path":"([^"]+)"', line))
             except Exception:
                 continue
+            if deep:
+                # a subagent's edits belong to the session that delegated them
+                for sub_ in (p.parent / sid / "subagents").rglob("*.jsonl"):
+                    try:
+                        with sub_.open(encoding="utf-8", errors="replace") as f:
+                            for line in f:
+                                if '"file_path"' in line:
+                                    seen.update(re.findall(r'"file_path":"([^"]+)"', line))
+                    except Exception:
+                        pass
             seen = {f for f in seen if not SCRATCH.search(f)}
             m = meta.get(sid)
             if m is None:
@@ -246,7 +259,7 @@ def _cache_write(name, stamp, data):
         pass
 
 
-def session_stamp():
+def session_stamp(deep=False):
     """History grows by appending and transcripts by rewriting, so size plus the
     newest mtime is enough to know whether a re-scan would find anything new."""
     parts = []
@@ -264,39 +277,96 @@ def session_stamp():
             except Exception:
                 pass
     parts.append(f"{n}:{newest}")
-    return "|".join(parts)
+    return "|".join(parts) + ("|deep" if deep else "")
 
 
-def cached_sessions():
-    stamp = session_stamp()
-    hit = _cache_read("sessions.json", stamp)
+def cached_sessions(deep=False):
+    stamp = session_stamp(deep)
+    name = "sessions-deep.json" if deep else "sessions.json"
+    hit = _cache_read(name, stamp)
     if hit is not None:
         return hit["prompts"], hit["sessions"], hit["touches"]
-    prompts, meta, touches = load_sessions()
-    _cache_write("sessions.json", stamp,
-                 {"prompts": prompts, "sessions": meta, "touches": touches})
+    prompts, meta, touches = load_sessions(deep=deep)
+    _cache_write(name, stamp, {"prompts": prompts, "sessions": meta, "touches": touches})
     return prompts, meta, touches
 
 
+# ── providers ────────────────────────────────────────────────────────────────
+PROVIDERS = {}
+
+
+def provider(name):
+    """Anything that can answer 'give me things about this tree'. The built-ins
+    are registered the same way a stranger's would be, so adding a source means
+    dropping a file in ~/.config/rubricator/providers/ that defines provide(root)."""
+    def wrap(fn):
+        PROVIDERS[name] = fn
+        return fn
+    return wrap
+
+
+def load_extra_providers():
+    d = Path(os.environ.get("RUBRICATOR_CONFIG_DIR", HOME / ".config/rubricator")) / "providers"
+    if not d.is_dir():
+        return
+    import importlib.util
+    for f in sorted(d.glob("*.py")):
+        try:
+            spec = importlib.util.spec_from_file_location("rb_provider_" + f.stem, f)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            if hasattr(mod, "provide"):
+                PROVIDERS[f.stem] = mod.provide
+        except Exception as e:
+            sys.stderr.write(f"rubricator: provider {f.name} failed to load: {e}\n")
+
+
 # ── assembly ─────────────────────────────────────────────────────────────────
-def build(root, with_sessions):
+def build(roots, with_sessions, deep=False):
+    """roots may be one directory or several; the first is the one the page is
+    named after and the one relative paths are shown against."""
+    if isinstance(roots, (str, Path)):
+        roots = [Path(roots)]
+    roots = [Path(r) for r in roots]
+    root = roots[0]
     t0 = time.time()
-    docs = []
-    for path, rel in find_docs(root):
-        d = read_doc(path, rel, root)
-        if d:
-            docs.append(d)
-    commits, stale = git_activity(root, docs)
+
+    docs, stale, has_git = [], {}, False
+    for r in roots:
+        mine = []
+        for path, rel in find_docs(r):
+            d = read_doc(path, rel, r)
+            if d:
+                d["root"] = str(r)
+                if len(roots) > 1:
+                    d["rel"] = (r.name + "/" + rel) if r != root else rel
+                mine.append(d)
+        commits, st = git_activity(r, mine)
+        has_git = has_git or bool(commits)
+        for k, v in st.items():
+            stale[(r.name + "/" + k) if (len(roots) > 1 and r != root) else k] = v
+        docs.extend(mine)
+
     data = {
-        "root": str(root), "name": root.name, "generated": int(time.time()),
-        "docs": docs, "stale": stale, "hasGit": bool(commits),
+        "root": str(root), "roots": [str(r) for r in roots], "name": root.name,
+        "generated": int(time.time()),
+        "docs": docs, "stale": stale, "hasGit": has_git,
         "sessions": {}, "prompts": [], "touches": {}, "withSessions": with_sessions,
     }
     if with_sessions:
-        prompts, sessions, touches = cached_sessions()
+        prompts, sessions, touches = cached_sessions(deep)
         data["prompts"] = prompts
         data["sessions"] = sessions
         data["touches"] = touches
+        data["deep"] = bool(deep)
+
+    load_extra_providers()
+    for name, fn in PROVIDERS.items():
+        try:
+            data.setdefault("extra", {})[name] = fn(root)
+        except Exception as e:
+            sys.stderr.write(f"rubricator: provider {name} failed: {e}\n")
+
     data["took"] = round(time.time() - t0, 2)
     return data
 
@@ -350,6 +420,21 @@ def emit_html(data, share, base=None):
     return page
 
 
+# ── your own views ───────────────────────────────────────────────────────────
+def user_views():
+    """Anything in ~/.config/rubricator/views/*.js is loaded into the page and can
+    register a tab of its own through RB.view({id, label, render})."""
+    d = Path(os.environ.get("RUBRICATOR_CONFIG_DIR", HOME / ".config/rubricator")) / "views"
+    out = []
+    if d.is_dir():
+        for f in sorted(d.glob("*.js")):
+            try:
+                out.append({"name": f.stem, "src": f.read_text(encoding="utf-8")[:400_000]})
+            except Exception:
+                pass
+    return out
+
+
 # ── notes on disk ────────────────────────────────────────────────────────────
 def notes_file(root):
     return root / ".rubricator" / "notes.json"
@@ -389,20 +474,22 @@ def write_notes(root, path, store):
 
 
 # ── the live tier ────────────────────────────────────────────────────────────
-def serve_workspace(root, with_sessions, share, open_rel):
+def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, idle=None):
     sys.path.insert(0, str(share))
     import serve as S
 
     import actions as A
-    state = {"data": build(root, with_sessions)}
+    root = Path(roots[0]) if isinstance(roots, list) else Path(roots)
+    state = {"data": build(roots, with_sessions, deep)}
     state["data"]["open"] = open_rel or ""
 
     def page(method, query, body):
         data = dict(state["data"])
         data["base"] = srv.base
         data["caps"] = {"live": 1, "text": 1, "reindex": 1, "notes": 1, "asset": 1,
-                        "launch": 1 if A.enabled() else 0,
+                        "watch": 1, "launch": 1 if A.enabled() else 0,
                         "reveal": 1 if A.enabled() else 0}
+        data["views"] = user_views()
         data["notes"] = read_notes(root)
         html_out = emit_html(data, share, base=srv.base)
         inject = os.environ.get("RUBRICATOR_INJECT")     # a seam for driving the live page
@@ -432,7 +519,7 @@ def serve_workspace(root, with_sessions, share, open_rel):
         return 200, ctype, f.read_bytes()
 
     def reindex(method, query, body):
-        state["data"] = build(root, with_sessions)
+        state["data"] = build(roots, with_sessions, deep)
         d = dict(state["data"])
         d["docs"] = [{k: x for k, x in doc.items() if k != "text"} for doc in d["docs"]]
         d["notes"] = read_notes(root)
@@ -476,9 +563,52 @@ def serve_workspace(root, with_sessions, share, open_rel):
             return S.J({"error": str(e)}, 500)
         return S.J({"error": "unknown verb"}, 400)
 
+    def snapshot():
+        out = {}
+        for d in state["data"]["docs"]:
+            try:
+                out[d["rel"]] = int(os.stat(d["abs"]).st_mtime)
+            except OSError:
+                out[d["rel"]] = 0
+        return out
+
+    @S.stream
+    def events(wfile):
+        """Watch mode. The page asked to be told when a document changes, so tell
+        it — one line per change, until the window goes away."""
+        last = snapshot()
+        wfile.write(b": watching\n\n")
+        wfile.flush()
+        while not srv.stop.is_set():
+            if srv.stop.wait(1.0):
+                break
+            now_ = snapshot()
+            changed = [r for r, t in now_.items()
+                       if t and last.get(r) is not None and t != last[r]]
+            added = [r for r in now_ if r not in last]
+            gone = [r for r in last if r not in now_]
+            last = now_
+            if changed or added or gone:
+                for d in state["data"]["docs"]:
+                    if d["rel"] in changed:
+                        try:
+                            d["text"] = Path(d["abs"]).read_text(encoding="utf-8", errors="replace")
+                            d["mtime"] = now_[d["rel"]]
+                        except Exception:
+                            pass
+                msg = json.dumps({"changed": changed, "added": added, "gone": gone})
+                wfile.write(b"data: " + msg.encode() + b"\n\n")
+                wfile.flush()
+
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
-              "notes": notes, "act": act}
-    srv = S.Server(routes)
+              "notes": notes, "act": act, "events": events}
+    srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
+    if port:
+        srv.httpd.server_close()
+        import http.server as _h
+        srv.httpd = _h.ThreadingHTTPServer(("127.0.0.1", port), srv._handler())
+        srv.httpd.daemon_threads = True
+        srv.port = port
     for name in ("marked.min.js", "highlight.min.js", "mermaid.min.js"):
         def one(method, query, body, _n=name):
             f = share / "vendor" / _n
@@ -495,21 +625,31 @@ def main():
     args = sys.argv[1:]
     with_sessions = "--sessions" in args
     live = "--serve" in args
+    deep = "--deep" in args
+    stay = "--stay" in args
+    port = 0
+    for a in args:
+        if a.startswith("--port="):
+            port = int(a.split("=", 1)[1] or 0)
     args = [a for a in args if not a.startswith("--")]
-    root = Path(args[0]).resolve() if args else Path.cwd()
-    if not root.is_dir():
-        sys.stderr.write(f"rubricator: not a directory: {root}\n")
-        return 1
+    roots = [Path(a).resolve() for a in args] or [Path.cwd()]
+    for r in roots:
+        if not r.is_dir():
+            sys.stderr.write(f"rubricator: not a directory: {r}\n")
+            return 1
+    root = roots[0]
 
     if live:
         share = Path(os.environ.get("RUBRICATOR_HOME", Path(__file__).resolve().parent))
-        srv = serve_workspace(root, with_sessions, share, os.environ.get("RUBRICATOR_OPEN") or "")
+        srv = serve_workspace(roots, with_sessions, share,
+                              os.environ.get("RUBRICATOR_OPEN") or "", deep=deep,
+                              port=port, idle=None if not stay else 10 ** 9)
         sys.stdout.write(srv.base + "/\n")
         sys.stdout.flush()
         srv.wait()
         return 0
 
-    data = build(root, with_sessions)
+    data = build(roots, with_sessions, deep)
     # a document to open straight away — bare `md` passes the README this way
     want = os.environ.get("RUBRICATOR_OPEN") or ""
     if want:

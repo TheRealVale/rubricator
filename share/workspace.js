@@ -179,7 +179,13 @@ var VIEWS = [], view = 'search', query = '';
 var libSort = 'recent', libFlat = false, libFacet = {}, libOpen = {}, libSel = '';
 var sesScope = 'here', sesLive = false, sesSel = '';
 
-function shortPath(p){ return p.replace(D.root + '/', '').replace(/^\/Users\/[^/]+/, '~'); }
+var ROOTS = D.roots || [D.root];
+function shortPath(p){
+  for (var i = 0; i < ROOTS.length; i++){
+    if (p.indexOf(ROOTS[i] + '/') === 0) return p.slice(ROOTS[i].length + 1);
+  }
+  return p.replace(/^\/Users\/[^/]+/, '~');
+}
 
 function viewSearch(){
   var q = query.trim(), out = [];
@@ -364,7 +370,10 @@ function viewNotes(){
 }
 
 function inRepo(path){
-  return path === D.root || (path || '').indexOf(D.root + '/') === 0;
+  for (var i = 0; i < ROOTS.length; i++){
+    if (path === ROOTS[i] || (path || '').indexOf(ROOTS[i] + '/') === 0) return true;
+  }
+  return false;
 }
 function sessionList(){
   var out = [];
@@ -529,6 +538,116 @@ function closeSession(){
   render();
 }
 
+/* ── E3 · the graph: which documents belong together ─────────────────────── */
+var graphOn = false;
+function graphEdges(){
+  /* two documents are related when they describe the same files, or when one
+     session touched both — the two signals the index already holds */
+  var docs = D.docs, idx = {}, edges = {};
+  docs.forEach(function(d, i){ idx[d.rel] = i; });
+  function link(a, b, w){
+    if (a === b) return;
+    var k = a < b ? a + '\u0000' + b : b + '\u0000' + a;
+    edges[k] = (edges[k] || 0) + w;
+  }
+  var byTarget = {};
+  docs.forEach(function(d){
+    ((D.stale[d.rel] || {}).targets || []).forEach(function(t){
+      (byTarget[t] = byTarget[t] || []).push(d.rel);
+    });
+  });
+  for (var t in byTarget){
+    var g = byTarget[t];
+    if (g.length > 12) continue;            // a file everything mentions says nothing
+    for (var i = 0; i < g.length; i++) for (var j = i + 1; j < g.length; j++) link(g[i], g[j], 1);
+  }
+  if (D.withSessions){
+    for (var sid in D.sessions){
+      var files = D.sessions[sid].files || [];
+      if (!files.length || files.length > 400) continue;
+      var hit = [];
+      docs.forEach(function(d){ if (files.indexOf(d.abs) >= 0) hit.push(d.rel); });
+      if (hit.length > 1 && hit.length <= 15){
+        for (var a = 0; a < hit.length; a++) for (var b = a + 1; b < hit.length; b++) link(hit[a], hit[b], 2);
+      }
+    }
+  }
+  return Object.keys(edges).map(function(k){
+    var p = k.split('\u0000');
+    return { a: idx[p[0]], b: idx[p[1]], w: edges[k] };
+  }).filter(function(e){ return e.a != null && e.b != null; });
+}
+function viewGraph(){
+  var n = D.docs.length;
+  if (!graphOn){
+    return '<div class="empty">A map of which documents belong together, drawn from the ' +
+      'files they describe and the sessions that touched them.<br><br>' +
+      n + ' documents' + (n > 120 ? ' — that is a lot to lay out' : '') + '.<br><br>' +
+      '<div class="act"><button data-graph="1">Draw it</button></div></div>';
+  }
+  var edges = graphEdges();
+  if (!edges.length) return '<div class="act"><button class="ghost" data-graph="0">back</button></div>' +
+    '<div class="empty">Nothing connects yet: no two documents describe the same files, and ' +
+    'no session touched more than one of them.</div>';
+
+  /* a plain spring layout — at this size it converges in well under a second */
+  var deg = {}; edges.forEach(function(e){ deg[e.a] = (deg[e.a]||0)+1; deg[e.b] = (deg[e.b]||0)+1; });
+  var ids = Object.keys(deg).map(Number);
+  var W = 900, H = 560, P = [];
+  ids.forEach(function(id, i){
+    var a = 2 * Math.PI * i / ids.length;
+    P.push({ id: id, x: W/2 + Math.cos(a) * 220, y: H/2 + Math.sin(a) * 200, vx: 0, vy: 0 });
+  });
+  var pos = {}; P.forEach(function(p){ pos[p.id] = p; });
+  for (var step = 0; step < 220; step++){
+    for (var i = 0; i < P.length; i++) for (var j = i+1; j < P.length; j++){
+      var dx = P[i].x - P[j].x, dy = P[i].y - P[j].y, d2 = dx*dx + dy*dy || 1;
+      var f = 5200 / d2;
+      var dx2 = dx * f, dy2 = dy * f;
+      P[i].vx += dx2; P[i].vy += dy2; P[j].vx -= dx2; P[j].vy -= dy2;
+    }
+    edges.forEach(function(e){
+      var A = pos[e.a], B = pos[e.b]; if (!A || !B) return;
+      var dx = B.x - A.x, dy = B.y - A.y, d = Math.sqrt(dx*dx + dy*dy) || 1;
+      var f = (d - 130) * 0.012 * Math.min(3, e.w);
+      A.vx += dx/d*f; A.vy += dy/d*f; B.vx -= dx/d*f; B.vy -= dy/d*f;
+    });
+    P.forEach(function(p){
+      p.x += Math.max(-12, Math.min(12, p.vx)); p.y += Math.max(-12, Math.min(12, p.vy));
+      p.vx *= 0.55; p.vy *= 0.55;
+      p.x = Math.max(60, Math.min(W-60, p.x)); p.y = Math.max(30, Math.min(H-30, p.y));
+    });
+  }
+  var out = ['<div class="ctl"><button class="chip on" data-graph="0">back to the list</button>' +
+    '<span class="sp">' + ids.length + ' connected documents · ' + edges.length + ' links</span></div>',
+    '<div class="graph"><svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">'];
+  edges.forEach(function(e){
+    var A = pos[e.a], B = pos[e.b]; if (!A || !B) return;
+    out.push('<line x1="'+A.x.toFixed(1)+'" y1="'+A.y.toFixed(1)+'" x2="'+B.x.toFixed(1)+
+             '" y2="'+B.y.toFixed(1)+'" stroke-width="'+Math.min(3, e.w)+'"/>');
+  });
+  P.forEach(function(p){
+    var d = D.docs[p.id], r = 5 + Math.min(9, deg[p.id]);
+    out.push('<g class="n" data-doc="'+esc(d.rel)+'"><circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+
+      '" r="'+r+'"/><text x="'+p.x.toFixed(1)+'" y="'+(p.y - r - 5).toFixed(1)+'">'+
+      esc(d.title.slice(0, 26))+'</text></g>');
+  });
+  out.push('</svg></div>');
+  return out.join('');
+}
+
+/* ── E7 · views you wrote yourself ───────────────────────────────────────── */
+var USER_VIEWS = [];
+window.RB = {
+  view: function(v){ if (v && v.id && v.render) USER_VIEWS.push(v); },
+  data: D, esc: esc, ago: ago, shortPath: shortPath, toast: toast, copy: copy,
+  open: function(rel){ openDoc(rel, '', true); }
+};
+(D.views || []).forEach(function(v){
+  try { (new Function(v.src)).call(window); }
+  catch(e){ console.error('rubricator: view ' + v.name + ' failed:', e); }
+});
+
 /* ── dossier ──────────────────────────────────────────────────────────── */
 function buildDossier(){
   var q = query.trim(), L = [];
@@ -577,6 +696,7 @@ function openDoc(rel, q, side){
   if (d.text == null) return ensureText([rel], function(){ if (d.text != null) openDoc(rel, q, side); });
   libSel = rel;
   $('rpath').textContent = d.rel;
+  var tl = $('rtime'); if (tl) tl.innerHTML = docTimeline(d);
 
   /* the same renderer the single-file reader uses, so the document behaves the
      same here: anchors, alerts, code copy, mermaid — and the same block-to-line
@@ -631,6 +751,33 @@ function openDoc(rel, q, side){
     rev.onclick = function(){ act('reveal', d.rel, '', 'revealed in Finder'); };
   }
 }
+/* ── E2 · one document's history on one axis ─────────────────────────────── */
+function docTimeline(d){
+  var st = D.stale[d.rel] || {}, commits = (st.ts || []).filter(Boolean);
+  var sess = [];
+  if (D.withSessions){
+    (D.touches[d.abs] || []).forEach(function(sid){
+      var m = D.sessions[sid];
+      if (m) sess.push({ sid: sid, t: m.b, title: m.t });
+    });
+  }
+  if (!commits.length && !sess.length) return '';
+  var all = commits.concat(sess.map(function(x){ return x.t; })).concat([d.mtime]);
+  var lo = Math.min.apply(null, all), hi = Math.max(Math.max.apply(null, all), now);
+  var span = Math.max(1, hi - lo);
+  function x(t){ return (6 + 88 * (t - lo) / span).toFixed(2) + '%'; }
+  var out = ['<div class="tl" title="' + commits.length + ' commits · ' + sess.length + ' sessions">'];
+  out.push('<div class="axis"></div>');
+  commits.forEach(function(t){ out.push('<i class="c" style="left:' + x(t) + '"></i>'); });
+  sess.forEach(function(sv){
+    out.push('<i class="s" data-ses="' + esc(sv.sid) + '" style="left:' + x(sv.t) +
+             '" title="' + esc((sv.title || '').slice(0, 70)) + '"></i>');
+  });
+  out.push('<i class="m" style="left:' + x(d.mtime) + '" title="last edited"></i>');
+  out.push('<span class="lo">' + ago(lo) + ' ago</span><span class="hi">now</span></div>');
+  return out.join('');
+}
+
 function markHits(root, q){
   var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], n;
   while ((n = w.nextNode())) nodes.push(n);
@@ -666,19 +813,30 @@ function readerBusy(){
 
 /* ── shell ────────────────────────────────────────────────────────────── */
 function render(){
+  /* the search box is rebuilt on every render, and renders now come from more
+     than typing — hydration, a watch event, a reindex. Whoever caused it, the
+     caret has to come back exactly where it was or you cannot type. */
+  var prev = $('q'), sel = null;
+  if (prev && document.activeElement === prev) sel = [prev.selectionStart, prev.selectionEnd];
+
   $('tabs').innerHTML = VIEWS.map(function(v){
     return '<button data-v="' + v.id + '" class="' + (v.id===view?'on':'') + '">' + v.label +
       (v.n != null ? '<span class="n">' + v.n + '</span>' : '') + '</button>';
   }).join('');
-  $('page').innerHTML = ({search:viewSearch, docs:viewLibrary, stale:viewStale,
-                          notes:viewNotes, sessions:viewSessions}[view])();
-  needText();
+  var builtin = { search:viewSearch, docs:viewLibrary, stale:viewStale,
+                  notes:viewNotes, sessions:viewSessions, graph:viewGraph };
+  var mine = USER_VIEWS.filter(function(v){ return v.id === view; })[0];
+  $('page').innerHTML = mine ? mine.render(D, RB) : (builtin[view] || viewSearch)();
+
   var q = $('q');
   if (q){
-    q.addEventListener('input', function(){ query = q.value; var p = q.selectionStart; render();
-      var n = $('q'); if (n){ n.focus(); try { n.setSelectionRange(p,p); } catch(e){} } });
-    if (view === 'search' && query) q.focus();
+    q.addEventListener('input', function(){ query = q.value; render(); });
+    if (sel || (view === 'search' && query)){
+      q.focus({ preventScroll: true });
+      if (sel) { try { q.setSelectionRange(sel[0], sel[1]); } catch(e){} }
+    }
   }
+  needText();          // may render again later; the caret is already restored
   var dz = $('dossier');
   if (dz) dz.onclick = function(){ copy(buildDossier()); toast('dossier copied — paste it to your agent'); };
   var dw = $('dossier-what');
@@ -703,8 +861,9 @@ VIEWS = [
   { id:'docs', label:'Library', n: D.docs.length },
   { id:'stale', label:'Stale' },
   { id:'notes', label:'Notes' },
-  { id:'sessions', label:'Sessions', n: D.withSessions ? Object.keys(D.sessions).length : null }
-];
+  { id:'sessions', label:'Sessions', n: D.withSessions ? Object.keys(D.sessions).length : null },
+  { id:'graph', label:'Graph' }
+].concat(USER_VIEWS.map(function(v){ return { id:v.id, label:v.label || v.id }; }));
 
 /* ── reindex, and the heartbeat that decides how long the server lives ───── */
 function reindex(done){
@@ -750,6 +909,31 @@ if (can('live')){
   });
 }
 
+/* ── E1 · watch: the server tells us when a document changed on disk ─────── */
+if (can('watch') && window.EventSource){
+  try {
+    var es = new EventSource(BASE + '/events');
+    es.onmessage = function(ev){
+      var j = {};
+      try { j = JSON.parse(ev.data); } catch(e){ return; }
+      var changed = j.changed || [];
+      changed.forEach(function(rel){ var d = docBy(rel); if (d) d.text = null; });
+      if ((j.added || []).length || (j.gone || []).length) return reindex();
+      if (!changed.length) return;
+      if (libSel && changed.indexOf(libSel) >= 0){
+        /* reload the open document where you were reading it, not at the top */
+        var pane = $('reader'), y = pane.scrollTop, side = pane.classList.contains('side');
+        openDoc(libSel, '', side);
+        setTimeout(function(){ pane.scrollTop = y; }, 40);
+        toast(libSel + ' changed on disk — reloaded');
+      } else {
+        toast(changed.length + (changed.length > 1 ? ' documents' : ' document') + ' changed on disk');
+        render();
+      }
+    };
+  } catch(e){}
+}
+
 $('wname').textContent = D.name;
 $('wpath').textContent = D.root.replace(/^\/Users\/[^/]+/, '~');
 stat();
@@ -768,6 +952,8 @@ document.addEventListener('click', function(e){
     if (d.slive)  sesLive = !sesLive;
     return render();
   }
+  var gb = e.target.closest('[data-graph]');
+  if (gb){ graphOn = gb.dataset.graph === '1'; return render(); }
   var dir = e.target.closest('[data-dir]');
   if (dir){
     libOpen[dir.dataset.dir] = libOpen[dir.dataset.dir] === false;
