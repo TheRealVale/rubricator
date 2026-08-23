@@ -156,7 +156,17 @@ read and searched but not picked up again. The browser says which is which inste
 offering you a resume command that would fail — for the live ones it hands you
 `cd <project> && claude -r <id>`, ready to paste.
 
-**Search** every document at once, with matches in context. Click a result to read it.
+**Search** every document at once, by name or by content — typing part of a filename finds
+that file first, and works before its body has even been read. Matches come with context;
+click a result to read it.
+
+**Finding a conversation you half-remember.** The Sessions tab searches everything you have
+ever typed, across every repository, and tells you which one it was in. That is usually the
+question: not *what did I say* but *where was I when I said it*. Results carry the line that
+matched, the repository, and how long ago; opening one jumps straight to that prompt with
+the word highlighted. Prompt hits in the main Search tab are clickable for the same reason.
+Scoped to the current repository by default, with a count of how many more are elsewhere and
+one button to widen.
 
 **Stale** lists documents whose code moved on without them. Churn is counted only in the
 files each document actually mentions or links, so it flags *"this spec describes code that

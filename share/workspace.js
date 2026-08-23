@@ -166,10 +166,17 @@ function fileRank(sids, weights, q){
   out.sort(function(a,b){ return b.s - a.s || b.hits - a.hits; });
   return out;
 }
+function baseName(rel){ return rel.split('/').pop(); }
 function docScore(d, q){
-  return count(d.title, q) * 8 + d.headings.reduce(function(a,h){ return a + count(h.text, q) * 4; }, 0)
+  /* the name counts, and counts most: someone typing "workspace-plan" is naming
+     a file, not describing a topic. It is also known before the body arrives. */
+  return count(baseName(d.rel), q) * 14
+       + count(d.rel, q) * 6
+       + count(d.title, q) * 8
+       + d.headings.reduce(function(a,h){ return a + count(h.text, q) * 4; }, 0)
        + count(d.text, q);
 }
+function nameHit(d, q){ return !!q && count(d.rel, q) > 0; }
 /* headings and titles are in the page from the start, so a search answers
    immediately and deepens once the bodies land */
 function searching(){ return can('text') && !textAll && !!query; }
@@ -177,7 +184,8 @@ function searching(){ return can('text') && !textAll && !!query; }
 /* ── views ────────────────────────────────────────────────────────────── */
 var VIEWS = [], view = 'search', query = '';
 var libSort = 'recent', libFlat = false, libFacet = {}, libOpen = {}, libSel = '';
-var sesScope = 'here', sesLive = false, sesSel = '';
+var sesScope = 'here', sesLive = false, sesSel = '', sesQuery = '';
+function shortRepo(p){ return (p || '?').split('/').pop() || '?'; }
 
 var ROOTS = D.roots || [D.root];
 function shortPath(p){
@@ -222,7 +230,9 @@ function viewSearch(){
       out.push('<div class="row" data-doc="' + esc(x.d.rel) + '" data-q="' + esc(q) + '">' +
         '<div class="t">' + esc(x.d.title) + '<span class="p">' + esc(x.d.rel) + '</span></div>' +
         '<div class="snip">' + snippet(x.d.text, q) + '</div>' +
-        '<div class="meta"><span>' + count(x.d.text, q) + ' matches</span><span>' + x.d.words + ' words</span>' +
+        '<div class="meta">' +
+        (nameHit(x.d, q) ? '<span class="pill">name</span>' : '') +
+        '<span>' + count(x.d.text, q) + ' in the text</span><span>' + x.d.words + ' words</span>' +
         '<span>touched ' + ago(x.d.mtime) + ' ago</span>' +
         (an ? '<span class="pill ok">' + an + ' note' + (an>1?'s':'') + '</span>' : '') + '</div></div>');
     });
@@ -230,8 +240,11 @@ function viewSearch(){
   if (prompts.length){
     out.push('<div class="grp">You asked about this <span class="c">' + prompts.length + ' prompts</span></div>');
     prompts.slice(0, 12).forEach(function(p){
-      out.push('<div class="row" style="cursor:default"><div class="snip">' + snippet(p.text, q, 240) + '</div>' +
-        '<div class="meta"><span>' + esc((p.project||'').split('/').pop()) + '</span><span>' + ago(p.t) + ' ago</span></div></div>');
+      var known = p.sid && D.sessions[p.sid];
+      out.push('<div class="row"' + (known ? ' data-ses="' + esc(p.sid) + '" data-q="' + esc(q) + '"' : ' style="cursor:default"') + '>' +
+        '<div class="snip">' + snippet(p.text, q, 240) + '</div>' +
+        '<div class="meta"><span>' + esc((p.project||'').split('/').pop()) + '</span><span>' + ago(p.t) + ' ago</span>' +
+        (known ? '<span class="pill ok">open the session</span>' : '') + '</div></div>');
     });
   }
   function fileTable(list, title, note){
@@ -375,15 +388,42 @@ function inRepo(path){
   }
   return false;
 }
-function sessionList(){
-  var out = [];
+/* every prompt of a session, so a conversation can be found by anything said in it */
+var byS = null;
+function promptsOf(sid){
+  if (!byS){
+    byS = {};
+    D.prompts.forEach(function(p){ if (p.sid) (byS[p.sid] = byS[p.sid] || []).push(p); });
+  }
+  return byS[sid] || [];
+}
+function sessionScore(sid, m, q){
+  var n = count(m.t || '', q) * 6 + count(shortPath(m.p || ''), q) * 3, best = null, hits = 0;
+  promptsOf(sid).forEach(function(p){
+    var c = count(p.text, q);
+    if (!c) return;
+    hits += c;
+    if (!best || c > best.c) best = { p: p, c: c };
+  });
+  return { s: n + hits, hits: hits, best: best };
+}
+function sessionList(scope){
+  scope = scope || sesScope;
+  var q = sesQuery.trim(), out = [];
   for (var sid in D.sessions){
     var m = D.sessions[sid];
     if (sesLive && !m.live) continue;
-    if (sesScope === 'here' && !inRepo(m.p)) continue;
-    out.push({ sid: sid, m: m });
+    if (scope === 'here' && !inRepo(m.p)) continue;
+    if (q){
+      var r = sessionScore(sid, m, q);
+      if (!r.s) continue;
+      out.push({ sid: sid, m: m, s: r.s, hits: r.hits, best: r.best });
+    } else {
+      out.push({ sid: sid, m: m, s: 0 });
+    }
   }
-  return out.sort(function(a, b){ return b.m.b - a.m.b; });
+  return out.sort(q ? function(a, b){ return b.s - a.s || b.m.b - a.m.b; }
+                    : function(a, b){ return b.m.b - a.m.b; });
 }
 function dayLabel(ts){
   var d = Math.floor((now - ts) / DAY);
@@ -403,24 +443,55 @@ function viewSessions(){
   if (!D.withSessions) return '<div class="empty">Session data was not indexed.<br><br>' +
     'Re-run with <span class="f">md --sessions</span> to include your own history. ' +
     'It stays on this machine and cannot be written to a shareable file.</div>';
+  var q = sesQuery.trim();
   var all = sessionList(), live = 0;
   all.forEach(function(x){ if (x.m.live) live++; });
   var total = Object.keys(D.sessions).length;
-  var out = ['<div class="ctl">' +
+  var out = ['<div class="qbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>' +
+    '<input id="sq" type="text" placeholder="Something you said, or the name of a repo…" value="' +
+    esc(sesQuery) + '" autocomplete="off" spellcheck="false">' +
+    '<span class="hint">' + D.prompts.length + ' prompts</span></div>',
+    '<div class="ctl">' +
     '<div class="seg">' +
       '<button data-sscope="here" class="' + (sesScope === 'here' ? 'on' : '') + '">this repo</button>' +
       '<button data-sscope="all" class="' + (sesScope === 'all' ? 'on' : '') + '">everywhere</button>' +
     '</div>' +
     '<button class="chip' + (sesLive ? ' on' : '') + '" data-slive="1">resumable only</button>' +
-    '<span class="sp">' + all.length + ' of ' + total + ' sessions · ' + live + ' resumable</span></div>'];
+    '<span class="sp">' + all.length + (q ? ' matching' : ' of ' + total) + ' · ' + live + ' resumable</span></div>'];
 
-  if (!all.length) return out.join('') +
-    '<div class="empty">No sessions recorded for this directory.<br><br>' +
-    'Switch to <b>everywhere</b> to see the ' + total + ' sessions on this machine.</div>';
+  /* the whole point of this search is not knowing which repo it was in */
+  if (q && sesScope === 'here'){
+    var everywhere = sessionList('all').length;
+    if (everywhere > all.length){
+      out.push('<div class="qnote">' + (everywhere - all.length) + ' more in other repositories — ' +
+        '<button class="chip" data-sscope="all">search everywhere</button></div>');
+    }
+  }
+
+  if (!all.length) return out.join('') + '<div class="empty">' + (q
+    ? 'Nothing you said matches “' + esc(q) + '”' + (sesScope === 'here' ? ' in this repository.' : ' in any of them.')
+    : 'No sessions recorded for this directory.<br><br>Switch to <b>everywhere</b> to see the ' +
+      total + ' sessions on this machine.') + '</div>';
 
   out.push('<div class="qnote">A session is <span class="dot live"></span> resumable while its ' +
     'transcript is still on disk, and <span class="dot arch"></span> archived once it is gone — ' +
     'the prompts survive, the files it touched and <span class="f">claude -r</span> do not.</div>');
+
+  if (q){
+    all.slice(0, 40).forEach(function(x){
+      out.push('<div class="row" data-ses="' + esc(x.sid) + '" data-q="' + esc(q) + '">' +
+        '<div class="t"><span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
+          esc(x.m.t || '(no prompt recorded)') + '</div>' +
+        (x.best ? '<div class="snip">' + snippet(x.best.p.text, q, 200) + '</div>' : '') +
+        '<div class="meta"><span class="pill">' + esc(shortRepo(x.m.p)) + '</span>' +
+        '<span>' + x.m.n + ' prompts</span>' +
+        (x.hits ? '<span>' + x.hits + ' mention' + (x.hits > 1 ? 's' : '') + '</span>' : '<span>title match</span>') +
+        '<span>' + ago(x.m.b) + ' ago</span>' +
+        (x.m.live ? '' : '<span class="pill">no transcript</span>') + '</div></div>');
+    });
+    return out.join('');
+  }
 
   var group = '';
   all.forEach(function(x){
@@ -429,7 +500,7 @@ function viewSessions(){
     out.push('<div class="srow' + (sesSel === x.sid ? ' on' : '') + '" data-ses="' + esc(x.sid) + '">' +
       '<span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
       '<span class="ttl">' + esc(x.m.t || '(no prompt recorded)') + '</span>' +
-      (sesScope === 'all' ? '<span class="sub">' + esc((x.m.p || '?').split('/').pop()) + '</span>' : '') +
+      (sesScope === 'all' ? '<span class="sub">' + esc(shortRepo(x.m.p)) + '</span>' : '') +
       '<span class="sub">' + x.m.n + 'p</span>' +
       '<span class="sub">' + span(x.m) + '</span></div>');
   });
@@ -453,10 +524,11 @@ function relatedDocs(sid){
   return out.sort(function(a, b){ return b.s - a.s; }).slice(0, 8);
 }
 
-function openSession(sid){
+function openSession(sid, q){
   var m = D.sessions[sid];
   if (!m) return;
   sesSel = sid;
+  q = q || '';
   var mine = D.prompts.filter(function(p){ return p.sid === sid; })
                       .sort(function(a, b){ return a.t - b.t; });
   var docs = relatedDocs(sid);
@@ -521,10 +593,12 @@ function openSession(sid){
   if (mine.length){
     out.push('<div class="grp">What you asked <span class="c">' + mine.length + '</span></div>',
       '<div class="plist">' + mine.map(function(p){
-        return '<div class="pitem"><span class="when">' + ago(p.t) + ' ago</span>' + esc(p.text) + '</div>';
+        var hit = q && count(p.text, q) > 0;
+        return '<div class="pitem' + (hit ? ' hit' : '') + '"><span class="when">' + ago(p.t) +
+               ' ago</span>' + (hit ? snippet(p.text, q, 4000) : esc(p.text)) + '</div>';
       }).join('') + '</div>');
   }
-  $('spath').textContent = 'session ' + sid.slice(0, 8);
+  $('spath').textContent = shortRepo(m.p) + ' · session ' + sid.slice(0, 8);
   $('sbody').innerHTML = out.join('');
   $('spane').classList.add('on', 'side');
   document.body.classList.add('split');
@@ -878,8 +952,10 @@ function render(){
   /* the search box is rebuilt on every render, and renders now come from more
      than typing — hydration, a watch event, a reindex. Whoever caused it, the
      caret has to come back exactly where it was or you cannot type. */
-  var prev = $('q'), sel = null;
-  if (prev && document.activeElement === prev) sel = [prev.selectionStart, prev.selectionEnd];
+  var act = document.activeElement, sel = null, selId = '';
+  if (act && act.tagName === 'INPUT' && act.id){
+    selId = act.id; sel = [act.selectionStart, act.selectionEnd];
+  }
 
   $('tabs').innerHTML = VIEWS.map(function(v){
     return '<button data-v="' + v.id + '" class="' + (v.id===view?'on':'') + '">' + v.label +
@@ -892,12 +968,14 @@ function render(){
   $('page').innerHTML = mine ? mine.render(D, RB) : (builtin[view] || viewSearch)();
 
   var q = $('q');
-  if (q){
-    q.addEventListener('input', function(){ query = q.value; render(); });
-    if (sel || (view === 'search' && query)){
-      q.focus({ preventScroll: true });
-      if (sel) { try { q.setSelectionRange(sel[0], sel[1]); } catch(e){} }
-    }
+  if (q) q.addEventListener('input', function(){ query = q.value; render(); });
+  var sq = $('sq');
+  if (sq) sq.addEventListener('input', function(){ sesQuery = sq.value; render(); });
+
+  var focusOn = selId ? $(selId) : ((view === 'search' && query) ? q : null);
+  if (focusOn){
+    focusOn.focus({ preventScroll: true });
+    if (sel) { try { focusOn.setSelectionRange(sel[0], sel[1]); } catch(e){} }
   }
   needText();          // may render again later; the caret is already restored
   var dz = $('dossier');
@@ -1043,7 +1121,14 @@ document.addEventListener('click', function(e){
   if (cmd){ copy(cmd.dataset.copy); return toast('copied — paste it into a terminal'); }
 
   var ses = e.target.closest('[data-ses]');
-  if (ses) return openSession(ses.dataset.ses);
+  if (ses){
+    if (view !== 'sessions' && !$('spane').classList.contains('on')) setView('sessions');
+    var got = openSession(ses.dataset.ses, ses.dataset.q || '');
+    /* jump to the first matching prompt rather than making you hunt for it */
+    var first = $('sbody').querySelector('.pitem.hit');
+    if (first) setTimeout(function(){ first.scrollIntoView({ block:'center' }); }, 60);
+    return got;
+  }
 
   var row = e.target.closest('[data-doc]');
   if (row && !e.target.closest('#reader')){
