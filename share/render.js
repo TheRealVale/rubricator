@@ -247,6 +247,62 @@ function restoreTheme(fallback){
   else setTheme(current());          // still normalise what the page was built with
 }
 
-window.MD = { render: render, esc: esc, sanitise: sanitise, themes: THEMES, theme: current,
+/* A PDF or a Word file has no markdown source to map, so the blocks are made
+   here and a source is synthesised from them: one paragraph per block, joined
+   the way the block boundaries imply. The review layer then anchors, quotes and
+   exports exactly as it does for markdown, without knowing the difference. */
+function renderExtracted(o){
+  var doc = o.doc, i;
+  doc.textContent = '';
+  if (o.html){
+    var tpl = document.createElement('template');
+    tpl.innerHTML = o.html;
+    sanitise(tpl.content);
+    doc.appendChild(tpl.content);
+  } else {
+    /* Blank lines are the obvious paragraph break, but textutil hands back Word
+       documents with none at all and a PDF page arrives as one blob. So a part
+       that is long and has line breaks of its own is split on those too —
+       otherwise a 44,000-character document is three blocks you cannot mark up. */
+    var parts = [];
+    String(o.text || '').split(/\n{2,}/).forEach(function(part){
+      if (part.length > 400 && part.indexOf('\n') >= 0) parts = parts.concat(part.split('\n'));
+      else parts.push(part);
+    });
+    for (i = 0; i < parts.length; i++){
+      var t = parts[i].replace(/\s+$/, '');
+      if (!t) continue;
+      var head = /^(#{1,6})\s+(.*)$/.exec(t);
+      var el;
+      if (head){
+        el = document.createElement('h' + Math.min(6, head[1].length));
+        el.textContent = head[2];
+      } else {
+        el = document.createElement('p');
+        el.textContent = t;
+        el.style.whiteSpace = 'pre-wrap';       // extracted text keeps its breaks
+      }
+      doc.appendChild(el);
+    }
+  }
+  tables(doc);
+
+  /* the source is synthesised from the blocks, so it has to be read before
+     headingIds() puts an anchor character inside every heading */
+  var raw = [], line = 1;
+  for (i = 0; i < doc.children.length; i++){
+    var b = doc.children[i];
+    var txt = (b.textContent || '').replace(/\s+$/, '');
+    var n = txt.split('\n').length;
+    b.dataset.lineStart = line;
+    b.dataset.lineEnd = line + n - 1;
+    raw.push(txt);
+    line += n + 1;
+  }
+  headingIds(doc);
+  return { raw: raw.join('\n\n'), fmLines: 0 };
+}
+
+window.MD = { render: render, renderExtracted: renderExtracted, esc: esc, sanitise: sanitise, themes: THEMES, theme: current,
               setTheme: setTheme, nextTheme: nextTheme, restoreTheme: restoreTheme };
 })();

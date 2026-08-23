@@ -322,6 +322,22 @@ cross-site, and exits when the window closes. Session ids are matched against a 
 pattern before they reach a command line, and a session with no transcript is refused
 rather than attempted.
 
+## Not only markdown
+
+PDFs and Word files are indexed, searched and read alongside markdown. Both extractors ship
+with macOS — `textutil` for Word, PDFKit through the JXA bridge for PDF — so this adds no
+dependency, and results are cached against mtime and size.
+
+Extraction never holds up the index: a workspace opens on its markdown as fast as it always
+did, and a document is read the first time something actually needs it. What comes back is
+rendered as an ordinary document — one block per paragraph, a heading per page — which means
+the reader, the review layer, the outline, search and the export all work on it unchanged. You
+can mark up a page of a contract and send the quote to Claude, and it will say which page it
+came from.
+
+A PDF with no text layer says so rather than opening blank, and a password-protected one is
+named rather than retried.
+
 ## Switching project
 
 Click the repository name in the bar. The menu lists the projects you have opened before and

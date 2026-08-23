@@ -14,6 +14,8 @@ CACHE = Path(os.environ.get("RUBRICATOR_CACHE", HOME / ".cache/rubricator"))
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", "vendor",
              ".venv", "venv", "__pycache__", ".cache", "coverage", ".turbo"}
 MD_EXT = {".md", ".markdown", ".mdown", ".mdx"}
+DOC_EXT = {".pdf", ".docx", ".doc", ".rtf", ".odt"}      # read through share/extract.py
+ALL_EXT = MD_EXT | DOC_EXT
 SCRATCH = re.compile(r"^/(private/)?(tmp|var/folders)/|/\.cache/|/node_modules/|/\.claude/|/\.git/")
 
 
@@ -31,7 +33,7 @@ def find_docs(root):
     tracked = git(root, "ls-files", "-z").split("\0")
     if any(tracked):
         for rel in tracked:
-            if rel and Path(rel).suffix.lower() in MD_EXT:
+            if rel and Path(rel).suffix.lower() in ALL_EXT:
                 p = root / rel
                 if p.is_file():
                     yield p, rel
@@ -39,7 +41,7 @@ def find_docs(root):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
         for fn in filenames:
-            if Path(fn).suffix.lower() in MD_EXT:
+            if Path(fn).suffix.lower() in ALL_EXT:
                 p = Path(dirpath) / fn
                 yield p, str(p.relative_to(root))
 
@@ -50,7 +52,14 @@ MERMAID_FENCE = re.compile(r"^[ \t]*(?:```|~~~)[ \t]*mermaid\b", re.M)
 WORD = re.compile(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9_-]{2,}")
 
 
-def read_doc(path, rel, root):
+def read_doc(path, rel, root, allow_extract=False):
+    """Markdown is read straight off disk. A PDF or a Word file has to be put
+    through an extractor, which is slow enough that the index will not wait for
+    it: unless we already have it cached, the document arrives without its text
+    and the page fetches it when something actually needs it."""
+    kind = extract_kind(path)
+    if kind:
+        return read_extracted(path, rel, root, kind, allow_extract)
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except Exception:
@@ -69,9 +78,58 @@ def read_doc(path, rel, root):
         except Exception:
             pass
     st = path.stat()
-    return {"rel": rel, "abs": str(path), "title": title, "headings": heads,
+    return {"rel": rel, "abs": str(path), "kind": "md", "title": title, "headings": heads,
             "links": links, "words": len(text.split()), "bytes": st.st_size,
             "mtime": int(st.st_mtime), "text": text}
+
+
+_X = None
+
+
+def _extractor():
+    global _X
+    if _X is None:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import extract as X
+        _X = X
+    return _X
+
+
+def extract_kind(path):
+    try:
+        return _extractor().kind_of(path)
+    except Exception:
+        return None
+
+
+def read_extracted(path, rel, root, kind, allow_extract):
+    X = _extractor()
+    st = path.stat()
+    got = X.cached(str(path)) or (X.extract(str(path)) if allow_extract else None)
+    d = {"rel": rel, "abs": str(path), "kind": kind, "title": Path(rel).stem,
+         "headings": [], "links": [], "words": 0, "bytes": st.st_size,
+         "mtime": int(st.st_mtime)}
+    if not got:
+        return d                      # known about, not yet read
+    if got.get("error"):
+        d["note"] = got["error"]
+        d["text"] = ""
+        return d
+    text = got.get("text") or ""
+    d["text"] = text
+    d["words"] = len(text.split())
+    if got.get("pages"):
+        d["pages"] = got["pages"]
+    if got.get("empty"):
+        d["note"] = "no text layer — this is a picture of a document"
+    d["headings"] = [{"level": len(m.group(1)), "text": m.group(2).strip(),
+                      "line": text[:m.start()].count("\n") + 1}
+                     for m in HEADING.finditer(text)]
+    first = next((l.strip() for l in text.split("\n")
+                  if l.strip() and not l.startswith("#")), "")
+    if first:
+        d["title"] = first[:90]
+    return d
 
 
 # ── git activity, and the doc/code staleness signal ──────────────────────────
@@ -107,7 +165,7 @@ def git_activity(root, docs):
             if l in commits:
                 targets.add(l)
         stem = Path(d["rel"]).parent.as_posix()
-        for m in re.finditer(r"[`\"']([\w./-]+\.(?:ts|tsx|js|jsx|py|sql|go|rs|java|kt|vue|svelte))[`\"']", d["text"]):
+        for m in re.finditer(r"[`\"']([\w./-]+\.(?:ts|tsx|js|jsx|py|sql|go|rs|java|kt|vue|svelte))[`\"']", d.get("text") or ""):
             t = m.group(1).lstrip("./")
             for p in all_paths:
                 if p.endswith(t):
@@ -322,7 +380,7 @@ def load_extra_providers():
 
 
 # ── assembly ─────────────────────────────────────────────────────────────────
-def build(roots, with_sessions, deep=False):
+def build(roots, with_sessions, deep=False, extract_now=False):
     """roots may be one directory or several; the first is the one the page is
     named after and the one relative paths are shown against."""
     if isinstance(roots, (str, Path)):
@@ -335,7 +393,7 @@ def build(roots, with_sessions, deep=False):
     for r in roots:
         mine = []
         for path, rel in find_docs(r):
-            d = read_doc(path, rel, r)
+            d = read_doc(path, rel, r, allow_extract=extract_now)
             if d:
                 d["root"] = str(r)
                 if len(roots) > 1:
@@ -528,12 +586,28 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         return 200, "text/html; charset=utf-8", html_out, {"Content-Security-Policy": csp}
 
     def text(method, query, body):
+        """A PDF or a Word file is read here, the first time anything asks for
+        it, and cached from then on."""
         want = set(S.json_body(body).get("rels") or [])
-        out = {}
+        out, meta = {}, {}
+        X = _extractor()
         for d in state["data"]["docs"]:
-            if not want or d["rel"] in want:
-                out[d["rel"]] = d.get("text", "")
-        return S.J(out)
+            if want and d["rel"] not in want:
+                continue
+            if d.get("text") is None and d.get("kind") in ("pdf", "word"):
+                got = X.extract(d["abs"]) or {}
+                if got.get("error"):
+                    d["text"], d["note"] = "", got["error"]
+                else:
+                    d["text"] = got.get("text") or ""
+                    d["words"] = len(d["text"].split())
+                    if got.get("pages"):
+                        d["pages"] = got["pages"]
+                    if got.get("empty"):
+                        d["note"] = "no text layer — this is a picture of a document"
+                meta[d["rel"]] = {k: d[k] for k in ("words", "pages", "note") if k in d}
+            out[d["rel"]] = d.get("text") or ""
+        return S.J({"text": out, "meta": meta})
 
     def asset(method, query, body):
         rel = (query.get("p") or [""])[0]
@@ -714,7 +788,7 @@ def main():
         srv.wait()
         return 0
 
-    data = build(roots, with_sessions, deep)
+    data = build(roots, with_sessions, deep, extract_now=True)   # a static page carries it all
     # a document to open straight away — bare `md` passes the README this way
     want = os.environ.get("RUBRICATOR_OPEN") or ""
     if want:

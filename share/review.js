@@ -551,7 +551,7 @@ function openDoc(m){
 
   hidePop(); closeComposer();
   loadStore();
-  mapLines();
+  if (!m.premapped) mapLines();     // an extracted document arrives already mapped
   blocks = [].filter.call(doc.children, function(el){ return el.dataset.lineStart; });
   focusIdx = -1;
 

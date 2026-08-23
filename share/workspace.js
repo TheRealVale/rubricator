@@ -34,18 +34,27 @@ function ensureText(rels, cb){
   });
   if (!can('text') || !need.length) return cb();
   api('text', { rels: need }, function(j){
-    for (var rel in j){ var d = docBy(rel); if (d) d.text = j[rel]; }
-    cb();
+    absorb(j); cb();
   }, cb);
 }
 function ensureAllText(cb){
   if (textAll || !can('text')) { textAll = true; return cb(); }
   api('text', { rels: [] }, function(j){
-    D.docs.forEach(function(d){ if (j[d.rel] != null) d.text = j[d.rel]; });
+    absorb(j);
     textAll = true; cb();
   }, cb);
 }
 function docBy(rel){ return D.docs.filter(function(x){ return x.rel === rel; })[0]; }
+/* the server answers with the text and, for anything it had to extract, what it
+   learned on the way — a page count, a word count, or why there was nothing */
+function absorb(j){
+  var text = (j && j.text) || j || {}, meta = (j && j.meta) || {};
+  for (var rel in text){ var d = docBy(rel); if (d) d.text = text[rel]; }
+  for (var r2 in meta){
+    var e = docBy(r2); if (!e) continue;
+    for (var k in meta[r2]) e[k] = meta[r2][k];
+  }
+}
 
 /* A verb and an id — never a path, never a command. The server resolves the
    rest against the index it already holds. */
@@ -269,6 +278,7 @@ function noteCount(d){
   return annosFor(d).filter(function(i){ return i.state !== 'stale'; }).length;
 }
 function isStale(d){
+  if (d.kind && d.kind !== 'md') return false;   // a contract does not go stale
   var s = D.stale[d.rel];
   return !!(s && s.targetChurn > 0);
 }
@@ -288,11 +298,13 @@ function libDocs(){
 }
 function fileRow(d){
   var n = noteCount(d), st = D.stale[d.rel] || {};
+  var mark = d.kind === 'pdf' ? 'PDF' : (d.kind === 'word' ? 'DOC' : '');
   return '<div class="tfile' + (libSel === d.rel ? ' on' : '') + '" data-doc="' + esc(d.rel) + '">' +
     '<span class="nm">' + esc(d.rel.split('/').pop()) + '</span>' +
+    (mark ? '<span class="kind">' + mark + '</span>' : '') +
     (n ? '<span class="n">' + n + '</span>' : '') +
     (isStale(d) ? '<span class="sub w" title="code it describes moved on">⚠ ' + st.targetChurn + '</span>' : '') +
-    '<span class="sub">' + d.words + 'w</span>' +
+    '<span class="sub">' + (d.pages ? d.pages + 'p' : (d.words ? d.words + 'w' : '—')) + '</span>' +
     '<span class="sub">' + ago(d.mtime) + '</span></div>';
 }
 function libTree(docs){
@@ -857,19 +869,29 @@ function openDoc(rel, q, side){
   /* the same renderer the single-file reader uses, so the document behaves the
      same here: anchors, alerts, code copy, mermaid — and the same block-to-line
      mapping the review layer needs */
-  var doc = $('doc');
-  var out = MD.render({
-    doc: doc,
-    fm:  $('fm'),
-    raw: d.text,
-    base: 'file://' + d.abs.replace(/[^/]*$/, '')
-  });
+  var doc = $('doc'), out, premapped = false;
+  if (d.kind === 'pdf' || d.kind === 'word'){
+    $('fm').innerHTML = d.note
+      ? '<div class="docnote">' + esc(d.note) + '</div>' : '';
+    out = MD.renderExtracted({ doc: doc, text: d.text });
+    premapped = true;
+  } else {
+    $('fm').innerHTML = '';
+    out = MD.render({
+      doc: doc,
+      fm:  $('fm'),
+      raw: d.text,
+      base: 'file://' + d.abs.replace(/[^/]*$/, '')
+    });
+  }
 
   /* META.path is the absolute path, which is exactly what the reader keys its
      annotations on — so notes written here are the same notes it shows */
   if (window.MDReview){
     window.MDReview.open({
-      doc: doc, raw: d.text, body: out.body, fmLines: out.fmLines,
+      doc: doc, premapped: premapped,
+      raw: premapped ? out.raw : d.text,
+      body: premapped ? out.raw : out.body, fmLines: out.fmLines,
       META: { path: d.abs, rel: d.rel, name: d.rel.split('/').pop(),
               dir: d.abs.replace(/[^/]*$/, ''), base: 'file://' + d.abs }
     });
