@@ -61,14 +61,14 @@ function lineOfOffset(off){ return fmLines + body.slice(0, off).split('\n').leng
 function mapLines(){
   var tokens;
   try { tokens = marked.lexer(body); } catch(e){ return; }
-  var probe = document.createElement('div'), off = 0, idx = 0;
+  var probe = document.createElement('template'), off = 0, idx = 0;
   tokens.forEach(function(t){
     var start = lineOfOffset(off);
     var end = start + t.raw.replace(/\n+$/,'').split('\n').length - 1;
     off += t.raw.length;
     if (t.type === 'space') return;
     var n = 1;
-    try { probe.innerHTML = marked.parser([t]); n = probe.children.length; } catch(e){}
+    try { probe.innerHTML = marked.parser([t]); n = probe.content.children.length; } catch(e){}
     for (var i = 0; i < n; i++){
       var el = doc.children[idx + i];
       if (el){ el.dataset.lineStart = start; el.dataset.lineEnd = end; }

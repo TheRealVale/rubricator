@@ -11,6 +11,43 @@ function esc(s){
   });
 }
 
+/* ── the document is untrusted ────────────────────────────────────────────
+   Markdown carries raw HTML, and a document can come from anywhere — a repo you
+   cloned, a plan an agent wrote, a file someone sent you. Rendered into a page
+   that can talk to a local server, an <img onerror> is not a curiosity.
+
+   Sanitising happens inside a <template>, whose content is inert: images do not
+   load and handlers do not fire, so nothing runs before it is stripped. */
+var BAD_TAGS = { SCRIPT:1, IFRAME:1, FRAME:1, OBJECT:1, EMBED:1, LINK:1, META:1,
+                 BASE:1, FORM:1, STYLE:1, PORTAL:1 };
+
+function unsafeUrl(v){
+  var u = String(v || '').replace(/[\u0000-\u0020]/g, '').toLowerCase();
+  if (u.indexOf('javascript:') === 0 || u.indexOf('vbscript:') === 0) return true;
+  if (u.indexOf('data:') === 0 && u.indexOf('data:image/') !== 0) return true;
+  return false;
+}
+
+function sanitise(node){
+  var els = node.querySelectorAll('*'), i, j;
+  for (i = els.length - 1; i >= 0; i--){
+    var el = els[i];
+    if (BAD_TAGS[el.tagName]){ el.remove(); continue; }
+    var at = el.attributes;
+    for (j = at.length - 1; j >= 0; j--){
+      var name = at[j].name, low = name.toLowerCase();
+      if (low.indexOf('on') === 0 || low === 'srcdoc' || low === 'formaction'){
+        el.removeAttribute(name);
+      } else if ((low === 'href' || low === 'src' || low === 'action' ||
+                  low === 'poster' || low === 'srcset' || low === 'xlink:href') &&
+                 unsafeUrl(at[j].value)){
+        el.removeAttribute(name);
+      }
+    }
+  }
+  return node;
+}
+
 var COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 var OK   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
 var ALERT_ICON = { note:'ℹ', tip:'✦', important:'❖', warning:'▲', caution:'⚠' };
@@ -156,8 +193,12 @@ function render(o){
   var fm  = splitFrontMatter(o.raw);
 
   marked.setOptions({ gfm:true, breaks:false });
-  if (o.fm) o.fm.innerHTML = fm.html;
-  doc.innerHTML = marked.parse(fm.body);
+  if (o.fm) o.fm.innerHTML = fm.html;              // built here, already escaped
+  var tpl = document.createElement('template');
+  tpl.innerHTML = marked.parse(fm.body);
+  sanitise(tpl.content);
+  doc.textContent = '';
+  doc.appendChild(tpl.content);
 
   resolveUrls(doc, o.base);
   var headings = headingIds(doc);
@@ -206,6 +247,6 @@ function restoreTheme(fallback){
   else setTheme(current());          // still normalise what the page was built with
 }
 
-window.MD = { render: render, esc: esc, themes: THEMES, theme: current,
+window.MD = { render: render, esc: esc, sanitise: sanitise, themes: THEMES, theme: current,
               setTheme: setTheme, nextTheme: nextTheme, restoreTheme: restoreTheme };
 })();

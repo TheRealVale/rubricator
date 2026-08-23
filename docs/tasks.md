@@ -193,6 +193,11 @@ Design canvas: the shell, the session reader, and the direction exploration.
       recents the server remembered, plus a native folder chooser it opens
       itself. A second project opens in its own window. The page never sends a
       path — it asks for the picker or names something already on the list.
+- [x] **F8 · Treat the document as untrusted.** Markdown carries raw HTML and
+      an `<img onerror>` executed — in `review.js`'s line mapper, which parsed
+      every token into a live `<div>`. Both halves fixed: the renderer sanitises
+      inside an inert `<template>`, and the served page carries a nonce-based
+      CSP so an inline handler cannot run even if the sanitiser misses one.
 - [ ] **F6 · The shell itself** — navigator, tabbed splittable panes, a tray that
       follows focus. Designed and agreed; not built.
 

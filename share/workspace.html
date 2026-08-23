@@ -257,10 +257,10 @@ body.split .page{padding-right:calc(min(62%,880px) + 28px)}
 </div>
 <div class="toast" id="toast"></div>
 __LIBS__
-<script id="wsdata" type="application/json">__DATA__</script>
-<script>__RENDERJS__</script>
+<script nonce="__NONCE__" id="wsdata" type="application/json">__DATA__</script>
+<script nonce="__NONCE__">__RENDERJS__</script>
 <!-- the review layer wires its chrome first, so a document can be opened on load -->
-<script>__REVIEWJS__</script>
-<script>__WSJS__</script>
+<script nonce="__NONCE__">__REVIEWJS__</script>
+<script nonce="__NONCE__">__WSJS__</script>
 </body>
 </html>

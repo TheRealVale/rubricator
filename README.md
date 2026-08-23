@@ -292,6 +292,22 @@ pick under **Settings**. The launcher is a `.command` file handed to that applic
 through LaunchServices, which runs it and needs no Automation permission, so macOS never
 interrupts with a dialog.
 
+### Why it is off by default
+
+Not ceremony. A markdown document is untrusted input — it comes from a repo you cloned, a plan
+an agent wrote, a file someone sent you — and markdown carries raw HTML. Rubricator renders it
+into a page that can talk to a local server, so `<img onerror=…>` in a document is not a
+curiosity.
+
+That is now blocked twice: the renderer strips scripts, event handlers and `javascript:` URLs
+inside an inert `<template>` before anything is inserted, and the served page runs under a
+content security policy where only scripts carrying that page's nonce may execute. Both were
+tested against real payloads.
+
+The gate stays anyway, because two walls are better than one and the second wall is code
+written by the same hand as the first. Turn it on once under **Settings** and it stays on —
+`--allow-launch` is for a single window, the setting is the durable answer.
+
 ### What keeps that safe
 
 The page sends a verb and an id. It never sends a path and never sends a command; every

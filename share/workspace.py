@@ -383,7 +383,7 @@ def design_css(share):
     return blocks[1] if len(blocks) > 1 else ""
 
 
-def emit_html(data, share, base=None):
+def emit_html(data, share, base=None, nonce=""):
     """base set → the live tier: the libraries and the document bodies are
     fetched from the local server instead of being carried in the page."""
     page = (share / "workspace.html").read_text(encoding="utf-8")
@@ -397,10 +397,10 @@ def emit_html(data, share, base=None):
     wants_mermaid = any(MERMAID_FENCE.search(d.get("text") or "") for d in data["docs"])
     libs = ["marked.min.js", "highlight.min.js"] + (["mermaid.min.js"] if wants_mermaid else [])
     if base:
-        libs_html = "".join(f'<script src="{base}/lib/{n}"></script>' for n in libs)
+        libs_html = "".join(f'<script nonce="{nonce}" src="{base}/lib/{n}"></script>' for n in libs)
         data = dict(data, docs=[{k: x for k, x in d.items() if k != "text"} for d in data["docs"]])
     else:
-        libs_html = "".join("<script>" + v(n) + "</script>" for n in libs)
+        libs_html = "".join(f'<script nonce="{nonce}">' + v(n) + "</script>" for n in libs)
     # a static page has no server to ask, so the theme is baked in at build time
     theme = os.environ.get("RUBRICATOR_THEME") or ""
     if theme not in ("rubric", "slate", "bone"):
@@ -424,6 +424,7 @@ def emit_html(data, share, base=None):
         "__REVIEWJS__": sh("review.js"),
         "__WSJS__": sh("workspace.js"),
         "__DATA__": json.dumps(data, ensure_ascii=False).replace("</", "<\\/"),
+        "__NONCE__": nonce,
     }
     for k, val in parts.items():
         page = page.replace(k, val)
@@ -509,11 +510,22 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         data["recents"] = [p for p in A.recents() if p != str(root)]
         data["views"] = user_views()
         data["notes"] = read_notes(root)
-        html_out = emit_html(data, share, base=srv.base)
+        # a second wall behind the sanitiser: only scripts carrying this run's
+        # nonce may execute, so an inline handler that slipped through is inert
+        import secrets as _s
+        nonce = _s.token_urlsafe(12)
+        html_out = emit_html(data, share, base=srv.base, nonce=nonce)
         inject = os.environ.get("RUBRICATOR_INJECT")     # a seam for driving the live page
         if inject and os.path.isfile(inject):
-            html_out = html_out.replace("</body>", Path(inject).read_text(encoding="utf-8") + "</body>", 1)
-        return 200, "text/html; charset=utf-8", html_out
+            extra_js = Path(inject).read_text(encoding="utf-8").replace(
+                "<script>", f'<script nonce="{nonce}">')   # the policy applies to it too
+            html_out = html_out.replace("</body>", extra_js + "</body>", 1)
+        csp = ("default-src 'none'; "
+               f"script-src 'nonce-{nonce}' 'unsafe-eval'; "
+               "style-src 'unsafe-inline'; img-src 'self' data: blob:; "
+               "font-src data:; connect-src 'self'; base-uri 'none'; "
+               "form-action 'none'; frame-ancestors 'none'")
+        return 200, "text/html; charset=utf-8", html_out, {"Content-Security-Policy": csp}
 
     def text(method, query, body):
         want = set(S.json_body(body).get("rels") or [])

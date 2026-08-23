@@ -92,11 +92,13 @@ class Server:
                 name = parts[1] if len(parts) > 1 else ""
                 return name.strip("/"), urllib.parse.parse_qs(path.query)
 
-            def _send(self, status, ctype, body):
+            def _send(self, status, ctype, body, extra=None):
                 if isinstance(body, str):
                     body = body.encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", ctype)
+                for k, v in (extra or {}).items():
+                    self.send_header(k, v)
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Referrer-Policy", "no-referrer")
@@ -136,11 +138,14 @@ class Server:
                         body = self.rfile.read(n) if 0 < n <= 8_000_000 else b""
                     except Exception:
                         body = b""
+                extra = None
                 try:
-                    status, ctype, out = fn(method, query, body)
+                    r = fn(method, query, body)
+                    status, ctype, out = r[0], r[1], r[2]
+                    extra = r[3] if len(r) > 3 else None
                 except Exception as e:
                     status, ctype, out = 500, "application/json", json.dumps({"error": str(e)})
-                self._send(status, ctype, out)
+                self._send(status, ctype, out, extra)
 
             def do_GET(self):
                 self._serve("GET")
