@@ -196,15 +196,32 @@ H1–H4 is the useful half and is one sitting.
 
 ---
 
-## 8. Decisions for you
+## 8. What was decided
 
-1. **Is the text view annotatable, as drawn?** It is the reason to do this at all
-   rather than shelling out to Preview — but it does mean your notes attach to
-   *extracted* text, which can differ from what the page looks like.
-2. **Spreadsheets?** `.xlsx` is a zip of XML and would be perhaps forty lines —
-   there are three of them here. Out of scope as written; say the word and it is
-   in.
-3. **OCR now or later?** H7 as drawn, or leave scans reported and unread.
-4. **Should a PDF be pickable into a dossier the same way?** I assume yes — a
-   quote from the Leistungsbeschreibung is exactly the sort of thing you would
-   hand an agent — which makes page citations worth getting right.
+1. **The text view is annotatable, and the toggle is everywhere** — original on
+   one side, extracted text on the other. With one honest split:
+   - **Word can be close to the original.** `textutil -convert html` keeps
+     headings, bold, lists and tables, so the annotatable view is structured
+     rather than flattened.
+   - **PDF text cannot be.** PDFKit returns a stream with page breaks and no
+     structure; reconstructing layout from glyph positions is a rabbit hole that
+     still gets tables wrong. So a PDF's text view is honest prose with page
+     headings, and the original view is what it looks like.
+2. **Spreadsheets are out.** `.xlsx` stays unindexed.
+3. **OCR later.** Scans are reported and left unread for now (H7).
+4. **A PDF is pickable like anything else** — which is what makes page headings
+   load-bearing: a quote handed to an agent says which page it came from.
+
+### The order
+
+Extraction is independent of the shell; the *toggle* is not — a two-view
+document is exactly the kind of thing panes and tabs are for. So this is split
+rather than sequenced behind the shell:
+
+| now | after the shell |
+|---|---|
+| H1 extract · H2 index · H4 search | H5 the original view, as a second surface |
+| H3 in its plain form — extracted text opens in the reader as it stands, annotatable | H6 warm-up · H7 OCR |
+
+That makes the Anforderungsdokument searchable and markable today without
+building a document view twice.
