@@ -174,6 +174,28 @@ end of it.
 
 ---
 
+## Planned — PDF and Word
+
+See [`documents-plan.md`](documents-plan.md). Both extractors ship with macOS:
+`textutil` for Word, PDFKit through the JXA bridge for PDF — measured here at
+0.19 s per PDF across 16 of them, 0.76 s for 3 Word files.
+
+- [ ] **H1 · `extract.py`.** One function per kind, page-aware for PDF, results
+      cached on mtime + size like the session index.
+- [ ] **H2 · Index them.** `find_docs` widens to `.pdf .docx .doc .rtf`;
+      documents carry a kind and a page count; extraction stays lazy so the
+      workspace still opens instantly.
+- [ ] **H3 · Read one.** Extracted text rendered as a document with a heading
+      per page — which hands it the reader, the review layer, the outline and
+      the export unchanged.
+- [ ] **H4 · Search them** alongside markdown.
+- [ ] **H5 · The original view.** Chrome's PDF viewer over the asset route,
+      `textutil -convert html` for Word, and `object-src 'self'` in the policy.
+- [ ] **H6 · Background warm-up** with progress over the SSE channel.
+- [ ] **H7 · OCR on request** through Vision, for the scans.
+
+---
+
 ## Look and feel
 
 Design canvas: the shell, the session reader, and the direction exploration.
