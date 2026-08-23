@@ -155,8 +155,14 @@ end of it.
 - [ ] **G1 · The conversation model.** `transcript.py` parses one transcript into
       turns and changes; `GET /session?id=` serves it. On demand, never indexed,
       never embedded — 0.25 s for the largest transcript on this machine.
-- [ ] **G2 · Read a session.** Turn cards, tool calls as one line each, thinking
-      collapsed to a count, and a ribbon down the side for navigating 137 turns.
+- [ ] **G2 · Read a session.** Rendered as markdown and read through the
+      existing reader, so the outline, in-document search, the tray and export
+      all come for free. Two verbs instead of six — *pick* and *ask*, since
+      *change* and *cut* are meaningless against history. Three densities
+      (transcript · your prompts · what changed), a ribbon for navigating 137
+      turns, thinking as a count, tool calls as one line with an expandable diff.
+- [ ] **G2b · Actions on a turn.** Copy it · reuse it in a new session ·
+      continue from here · pick it into the tray.
 - [ ] **G3 · What it changed.** Documents created and edited, named as such from
       `toolUseResult.type`; other files folded into a count per directory.
 - [ ] **G4 · The reverse index.** document → sessions, from the same pass:

@@ -116,59 +116,133 @@ Everything that survives still goes through the same `scrub()` the prompts do.
 
 ---
 
-## 3. Reading it
+## 3. What you are actually doing here
 
+Nobody opens an eight-week-old session to read it. They open it because
+something in the present is unresolved. Nine reasons, and what each one needs:
+
+| you opened it because… | what you need | what you do next |
+|---|---|---|
+| **you can't remember where something was decided** | the passage, and two turns either side | copy it, or keep it |
+| **the code doesn't match your memory of the plan** | your own prompt, verbatim | copy it |
+| **you wrote a prompt once that worked** | that prompt, editable | start a new session with it |
+| **you want to keep going** | the last few turns | resume, or fork |
+| **it went wrong somewhere** | the tool call that failed | expand the result, open the file |
+| **you're assembling the next prompt** | three passages from across the session | collect, then hand them over |
+| **the reasoning deserves to be written down** | several turns, as prose | save as a document |
+| **you want what it produced** | the files, created vs edited | open one in the reader |
+| **you're reading a document and wondering where it came from** | the session that wrote it | jump into it, at the right turn |
+
+Two things fall out of that list.
+
+**Almost nobody reads a session linearly.** Eight of the nine arrive with a
+target and want to land near it. The design problem is *arrival and extraction*,
+not pagination.
+
+**Seven of the nine end in taking something out.** A passage, a prompt, a file, a
+document. So the reader is not a viewer with some buttons bolted on — it is an
+extraction surface, and the buttons are the point.
+
+### Which makes it the same tool it already is
+
+Rubricator's whole loop is: read something, mark the parts that matter, hand the
+marks to an agent. A conversation is just another thing to read that way.
+
+```mermaid
+flowchart LR
+  C["a past session"] -->|"pick passages"| D["a dossier"]
+  C -->|"save turns"| M["a markdown document"]
+  D --> N["a new session"]
+  M --> R["read and marked up<br/>like any other document"]
+  R --> N
+  M -.->|"provenance points back"| C
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ hypergol · Plan space fighter game with shaders             │
-│ ● resumable · fable-5 · main · 137 turns · 4h 20m    [⤺][⑂] │
-├───────┬─────────────────────────────────────────────────────┤
-│ ▎     │  you                                        14:02   │
-│ ▎you  │  lets plan the affix redesign, i want …             │
-│ ▎     │                                                     │
-│ ▊claude  claude                                     14:02   │
-│ ▊     │  I'll look at how affixes are rolled today          │
-│ ▎     │  before proposing anything.                         │
-│ ▎     │  ┌───────────────────────────────────────┐          │
-│ ▎     │  │ ⌕ Read  src/affix.ts                  │          │
-│ ▎     │  │ ✎ Edit  docs/affixes.md      edited   │          │
-│ ▎     │  │ + Write docs/affix-plan.md   created  │          │
-│ ▎     │  └───────────────────────────────────────┘          │
-│ ▎     │  ⋯ 4 thoughts                                       │
-│ ═══   │  ── context compacted ──                            │
-│ ▎you  │  you                                        15:41   │
-└───────┴─────────────────────────────────────────────────────┘
-```
 
-The left rail is the **ribbon**: the whole session compressed to one column —
-your turns, Claude's, and where it did the most work. On a 137-turn conversation
-that is the difference between reading and scrolling. Click anywhere on it to
-jump.
+So the conversation is **rendered as markdown and read through the existing
+reader**. The review layer, the outline, in-document search, the tray and the
+export all work unchanged, because they work on any document. That is one screen
+to build rather than two, and one set of habits to learn rather than two.
 
-Everything is collapsed until asked for. Thinking is a count. Tool calls are one
-line each: a verb, a target, and — for writes — whether the file was created or
-changed. Results are behind a disclosure, truncated and scrubbed, because that is
-where file contents and command output live.
+The verbs change, though. *Change this* and *cut this* are meaningless against a
+conversation you cannot edit. Two are enough:
+
+- **pick** — take this passage; it goes in the tray
+- **ask** — take it, with a question attached
+
+Same tray, same export, same `⌘⏎`.
 
 ---
 
-## 4. What the session changed
+## 4. Reading it
 
-The same parse yields the file list, with the verb attached:
+### Three densities, because the nine reasons want different things
 
 ```
-Documents            created 3 · edited 2
-  + docs/affix-plan.md                      created
-  ✎ docs/affixes.md                    edited ×7
-  ✎ README.md                          edited ×1
-Other files          31 in src/, 4 in tests/          ▸
+ ① transcript   everything: your turns, Claude's replies, what it did
+ ② prompts      only what you asked — 137 turns become a page you can skim
+ ③ outcomes     only turns that changed a file, with the change named
 ```
 
-Markdown first and named as documents, because that is what this tool is about;
-everything else folded into a count per directory, openable but not in the way.
-A document that belongs to the workspace opens in the reader beside it — the
-split pane already built. One that does not is shown with its repository, since
-a session often crosses repositories.
+Skimming your own prompts is how you find *where* something was discussed;
+outcomes is how you find *what came of it*; transcript is where you read it
+properly. One control, three answers to nine questions.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ hypergol · Plan the affix redesign                    [⤺ resume] [⑂] │
+│ ● fable-5 · main · 137 turns · 4h 20m       ① transcript ② you ③ what│
+├────┬─────────────────────────────────────────────────────────────────┤
+│ ▎  │ ▸ you                                       14:02   ⧉  ↻  ✎     │
+│ ▎  │   lets plan the affix redesign, i want the rolls to …           │
+│ ▊  │                                                                 │
+│ ▊  │ ▸ claude                                    14:02      ✎        │
+│ ▎  │   I'll look at how affixes are rolled today before              │
+│ ▎  │   proposing anything.                                           │
+│ ▎  │   ┌─────────────────────────────────────────────┐               │
+│ ▎  │   │ ⌕ Read   src/affix.ts                       │               │
+│ ▎  │   │ ✎ Edit   docs/affixes.md      edited   ⊕diff│               │
+│ ▎  │   │ + Write  docs/affix-plan.md   created  ⊕open│               │
+│ ▎  │   └─────────────────────────────────────────────┘               │
+│ ▎  │   ⋯ 4 thoughts                                                  │
+│ ══ │   ── context compacted ──                                       │
+│ ▎  │ ▸ you                                       15:41   ⧉  ↻  ✎     │
+└────┴─────────────────────────────────────────────────────────────────┘
+   ▲                                              ⧉ copy  ↻ reuse  ✎ pick
+   the ribbon: the whole session in one column
+```
+
+### The actions, by what they act on
+
+**The session** — resume · fork · open that repository's workspace (a session
+often happened somewhere else) · save the whole thing as a document.
+
+**A turn** — copy it · reuse it, which opens a new session seeded with that
+prompt · continue from here, which resumes with a line saying where to pick up ·
+pick it into the tray.
+
+**A tool call** — open the file it touched, in the reader beside you · show what
+it changed, from the patch the transcript already stores · reveal the path.
+
+**A selection** — pick · ask · copy. The two verbs, on whatever you highlighted.
+
+**The tray** — the same tray as everywhere else: copy the dossier, send it to a
+new session, or **save it as a markdown document** in the workspace. That last
+one is what turns archaeology into an artifact, and the document it writes is
+then a document like any other — readable, markable, and pointing back at the
+session it came from.
+
+### Getting to the right place
+
+- `/` searches inside the conversation, as it does in any document
+- `n` / `p` jump between **your** turns, which is how you scan a session
+- `1` `2` `3` switch density; your position is kept
+- the ribbon is clickable, and marks where files were touched
+- arriving from a search lands on the matching turn, highlighted
+- every turn has an id, so a note can point at one and come back to it
+
+Everything is collapsed until asked for: thinking is a count, tool results are a
+disclosure, and long turns clip with a *more* affordance. The default screen is
+readable prose, not a data dump.
 
 ---
 
@@ -260,16 +334,26 @@ G1–G3 are one sitting. G4–G5 are a second. G6 is small and can wait.
 
 ---
 
-## 8. Decisions for you
+## 8. What was decided
 
-1. **Thinking** — collapsed to a count and expandable, as drawn? Or left out
-   entirely on the grounds that it is Claude's private reasoning and you asked to
-   read the *conversation*?
-2. **Tool results** — collapsed and truncated behind a disclosure, or not shown
-   at all? They are the most useful thing when debugging and the most dangerous
-   thing to render.
-3. **Other files** — fold non-markdown into a count per directory, as drawn, or
-   list them fully? Sessions here touched up to 176 files.
-4. **Provenance for missing transcripts** — say "no record" as drawn, or fall
-   back to git (`git log --diff-filter=A`) to at least name who created the file
-   and when?
+1. **The tray sends.** Its primary action hands the picked passages to a new
+   session in that repository; *save as a document* and *copy* sit beside it.
+   The dossier is the day-to-day output, the document the occasional one.
+2. **Names and diffs, no raw output.** One line per tool call, and for an edit an
+   expandable diff built from the `structuredPatch` the transcript already
+   stores. Command output and file reads are never rendered — that is where the
+   danger is and the diff is the useful half anyway.
+3. **Thinking is a count.** `⋯ 4 thoughts`, expandable. Invisible until a
+   decision needs explaining.
+4. **Provenance falls back to git.** When no transcript survives, say so, but
+   still name when the document first appeared using
+   `git log --diff-filter=A --follow`. "Created 12 March, no session on record"
+   beats a blank.
+
+### What we are deliberately not building
+
+- Not a chat client. No avatars, no bubbles, no replay, no editing history.
+- No raw tool output, at any depth.
+- No pre-indexed conversations. Parsing on demand costs 0.25 s at worst; an
+  index would cost correctness the moment a transcript changed.
+- Nothing in the static tier. No server, no conversation — and it says so.
