@@ -323,14 +323,58 @@ flowchart LR
 
 | | | why here |
 |---|---|---|
-| **G1** | `transcript.py` — parse one transcript into turns and changes; `GET /session?id=` | Everything else is a view of this. Nothing to index; 0.25 s worst case |
-| **G2** | The conversation reader: turn cards, tool strips, collapsed thinking, the ribbon | The thing you asked for |
-| **G3** | What it changed, in the session detail, markdown first with created/edited | Falls out of G1 for free |
+| **G1** ✅ | `transcript.py` — parse one transcript into turns and changes; `GET /session?id=` | Everything else is a view of this. Nothing to index; 0.05 s worst case |
+| **G2** ◐ | The conversation reader: bubbles, tool strips, collapsed thinking. No ribbon, no densities, no per-turn actions — see 7b | The thing you asked for |
+| **G3** ◐ | What it changed, as chips on the turn that wrote it. Only as complete as `toolUseResult` — see 7b | Falls out of G1 for free |
 | **G4** | The reverse index, cached with the session index | One pass, 0.97 s, 482 pairs |
 | **G5** | Provenance line and labelled timeline in the reader | Where it pays off daily |
 | **G6** | `ai-title` as the session title, compaction markers, jump-to-turn from a search hit | The details that make it feel finished |
 
 G1–G3 are one sitting. G4–G5 are a second. G6 is small and can wait.
+
+---
+
+## 7b. What actually got built, and where it departs from this
+
+**G1 shipped as planned.** `share/transcript.py` turns one file into turns,
+`GET /session?id=` serves it, nothing is indexed. Measured on this machine: the
+largest transcript is now 17 MB and parses in **0.05 s** into 350 turns and a
+259 KB payload; the page renders it in **120 ms**.
+
+Two things the plan did not know:
+
+- **`promptSource` is the whole game.** A `user` record is only something you
+  typed when it carries one. Without that test, a third of "your" half is
+  pasted-image descriptors, slash-command echoes, skill preambles and the
+  summary injected after a compaction. Filtering on it lands exactly on
+  `history.jsonl`'s count — 39 prompts for the session I tested against 51
+  naive `user` records.
+- **A reply is not a message.** Claude speaks, runs tools, speaks again, many
+  times before you answer. Concatenating that into one turn produced a single
+  6,700-character block with 81 tool calls attached — unreadable. Speaking again
+  after doing something now starts a new bubble, so an autonomous stretch reads
+  as the dozen exchanges it was.
+
+**G2 changed shape.** The plan said *rendered as markdown and read through the
+existing reader*, to get the review layer for free. What was asked for instead —
+and built — is a **conversation**: your turns on the right, Claude's on the
+left, thinking as a count, tool calls behind a disclosure, files it wrote as
+chips. That is the right call for reading; nobody wants a chat log as one long
+document. The cost is real and worth stating: **a conversation cannot be
+annotated yet**, because the review layer binds to an `article.md` whose
+top-level children carry line numbers, and a bubble is not that.
+
+The way back is open and cheap: each bubble is already a direct child of its
+container, so giving it `data-line-start` against a synthesised source is the
+same trick `renderExtracted` plays for PDFs. That is what *pick* and *ask*
+(§3) will be built on when they land. Until then the ribbon, the three
+densities and the per-turn actions of §4 are unbuilt.
+
+**G3 is half there.** Files show up as chips on the turn that wrote them, from
+`toolUseResult.type`. But that record only appears for the Write and Edit
+tools — a session that edits through Bash produces none, and this one produced
+three across 311 replies. The session's full file list, which comes from the
+`file_path` scan the index already does, remains the honest answer.
 
 ---
 

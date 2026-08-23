@@ -203,6 +203,8 @@ function refresh(){
 
 /* ── the navigator ────────────────────────────────────────────────────── */
 var NAVMODES = [
+  { id:'all', label:'All',
+    icon:'<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>' },
   { id:'docs', label:'Documents',
     icon:'<path d="M4 4h9l5 5v11H4z"/><path d="M13 4v5h5"/>' },
   { id:'sessions', label:'Sessions',

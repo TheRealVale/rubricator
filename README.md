@@ -164,10 +164,15 @@ those it is. `⏎` opens it here, `⌘⏎` in a split, `⇥` filters by kind.
 `⌘W` closes a tab · `⌘⌥[` and `⌘⌥]` step through them · `/` puts the caret in the
 navigator's filter · every divider is draggable.
 
-**Documents** is the navigator's first mode, and the only one that nests — directories are
+**All** is the navigator's first mode: one field over documents, sessions and
+your own notes at once, because when you are hunting for something you remember
+what it was about, not whether you wrote it down, said it to Claude, or
+scribbled it in a margin. With the field empty it shows the most recent of each.
+
+**Documents** is the tree, and the only mode that nests — directories are
 how you remember where a file is. Note counts and a mark where the code a document describes
 has moved on; sorting and filters are behind *sort & filter*, because most of the time you
-are looking for a name. Selecting a document opens it in the focused pane with the full
+are looking for a name. The two carets beside *tree* open and close every folder at once. Selecting a document opens it in the focused pane with the full
 review layer, so marking something up never means leaving the workspace.
 
 **Sessions**, the second mode, is your own history as something you can walk through. Every session you have
@@ -175,9 +180,22 @@ run, newest first, scoped to this repo by default. Each one shows what you asked
 files it changed, and which documents it bears on — worked out from the overlap between the
 files a session touched and the files each document describes.
 
+**Reading one.** `history.jsonl` only ever held your half of the conversation; the other
+half is in the transcript, which is read on demand — 17 MB parses in 0.05 s — and rendered
+as what it was: your turns on the right, Claude's on the left, thinking collapsed to a
+count, tool calls behind a disclosure, and the files it wrote as chips you can open. A
+reply is not one message, so an autonomous stretch reads as the dozen exchanges it was
+rather than one wall of prose. Compactions, interruptions and pasted images are marked
+where they happened.
+
+Only what you actually typed shows up as yours. A `user` record in a transcript is only a
+prompt when it carries a `promptSource`; without that test a third of your half is
+slash-command echoes, skill preambles and the summary injected after a compaction.
+
 A session is **resumable** while its transcript is still on disk and **archived** once it is
 gone: the prompts survive far longer than the transcripts, so most of your history can be
-read and searched but not picked up again. The browser says which is which instead of
+read and searched but not picked up again. An archived session still shows everything you
+said, from the prompt index. The browser says which is which instead of
 offering you a resume command that would fail — for the live ones it hands you
 `cd <project> && claude -r <id>`, ready to paste.
 
@@ -253,6 +271,7 @@ share/render.js     markdown into the reader's DOM — shared by both pages, so 
 share/review.*      annotation layer — anchors, verbs, storage, export
 share/ui.*          outline modes, search, resizable panel, shortcuts
 share/shell.*       the window: navigator, panes, tabs, palette, status strip
+share/transcript.py one conversation, parsed on demand
 share/workspace.*   the repo index and its views
 share/hook.py       blocking review server for --review and --hook
 ```

@@ -152,19 +152,24 @@ Carried from the plan; unresolved ones block the tasks that depend on them.
 See [`conversations-plan.md`](conversations-plan.md). Four decisions open at the
 end of it.
 
-- [ ] **G1 · The conversation model.** `transcript.py` parses one transcript into
-      turns and changes; `GET /session?id=` serves it. On demand, never indexed,
-      never embedded — 0.25 s for the largest transcript on this machine.
-- [ ] **G2 · Read a session.** Rendered as markdown and read through the
-      existing reader, so the outline, in-document search, the tray and export
-      all come for free. Two verbs instead of six — *pick* and *ask*, since
-      *change* and *cut* are meaningless against history. Three densities
-      (transcript · your prompts · what changed), a ribbon for navigating 137
-      turns, thinking as a count, tool calls as one line with an expandable diff.
+- [x] **G1 · The conversation model.** `transcript.py` parses one transcript into
+      turns; `GET /session?id=` serves it. On demand, never indexed, never
+      embedded — 17 MB in 0.05 s, 350 turns, a 259 KB payload. Two findings:
+      `promptSource` is what separates what you typed from what the harness
+      injected wearing your name, and one reply is many messages, so speaking
+      again after running tools starts a new turn.
+- [~] **G2 · Read a session.** Built as a *conversation*, not as a document:
+      your turns on the right, Claude's on the left, thinking as a count, tool
+      calls behind a disclosure, runs of replies grouped under one clock. The
+      plan's *render it as markdown and get the review layer free* was traded
+      for that, deliberately — see §7b of the plan for the cost and the way
+      back. Still open: annotating a turn, the three densities, the ribbon.
 - [ ] **G2b · Actions on a turn.** Copy it · reuse it in a new session ·
       continue from here · pick it into the tray.
-- [ ] **G3 · What it changed.** Documents created and edited, named as such from
-      `toolUseResult.type`; other files folded into a count per directory.
+- [~] **G3 · What it changed.** Files created and edited appear as chips on the
+      turn that wrote them, from `toolUseResult.type`. That record only exists
+      for the Write and Edit tools, so a session that edits through Bash shows
+      none — the session's file list, from the index, stays the honest answer.
 - [ ] **G4 · The reverse index.** document → sessions, from the same pass:
       482 pairs across 38 sessions, 0.97 s for the corpus, cached with the rest.
 - [ ] **G5 · Provenance in the reader.** Who created this document and who has
@@ -212,6 +217,10 @@ Design canvas: the shell, the session reader, and the direction exploration.
       verb in mono caps carrying the colour, and the quote ruled at 1px.
 - [x] **F5 · The divider is the control.** 1px at rest, 11px of hit area, and it
       brightens and switches the cursor rather than growing a grip.
+- [x] **F6b · All, and the whole tree at once.** A fourth navigator mode that
+      searches documents, sessions and notes in one field — because you
+      remember what something was about, not whether you wrote it down or said
+      it. Plus expand-all and collapse-all on the tree.
 - [x] **F6a · Tabs per pane, not per window.** The one disagreement with the
       brief, argued on the canvas and kept: with splits, a single bottom strip
       cannot say which pane a tab belongs to, and per-pane tabs give each pane

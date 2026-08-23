@@ -563,7 +563,11 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         data = dict(state["data"])
         data["base"] = srv.base
         data["caps"] = {"live": 1, "text": 1, "reindex": 1, "notes": 1, "asset": 1,
-                        "watch": 1, "settings": 1,
+                        "conversation": 1,
+                        # a seam for driving the page: an open SSE channel stops
+                        # headless Chrome's virtual clock from ever finishing
+                        "watch": 0 if os.environ.get("RUBRICATOR_NO_WATCH") else 1,
+                        "settings": 1,
                         "launch": 1 if A.enabled() else 0,
                         "reveal": 1 if A.enabled() else 0}
         data["settings"] = A.settings()
@@ -610,6 +614,18 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                 meta[d["rel"]] = {k: d[k] for k in ("words", "pages", "note") if k in d}
             out[d["rel"]] = d.get("text") or ""
         return S.J({"text": out, "meta": meta})
+
+    def session(method, query, body):
+        """The other half of a conversation. Read straight off disk, never
+        indexed: the largest transcript here is 17 MB and parses in 0.05 s,
+        so there is nothing worth caching and nothing to invalidate."""
+        sid = (query.get("id") or [""])[0]
+        try:
+            sys.path.insert(0, str(share))
+            import transcript as _T
+            return S.J(_T.read(sid))
+        except Exception as e:
+            return S.J({"id": sid, "error": str(e)[:200], "turns": []})
 
     def asset(method, query, body):
         rel = (query.get("p") or [""])[0]
@@ -733,7 +749,8 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                              "reveal": 1 if A.enabled() else 0}})
 
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
-              "notes": notes, "act": act, "events": events, "settings": settings}
+              "notes": notes, "act": act, "events": events, "settings": settings,
+              "session": session}
     srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
     if port:
         srv.httpd.server_close()

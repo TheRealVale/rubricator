@@ -37,12 +37,15 @@ function ensureText(rels, cb){
     absorb(j); cb();
   }, cb);
 }
+var textPending = false;
 function ensureAllText(cb){
   if (textAll || !can('text')) { textAll = true; return cb(); }
+  if (textPending) return;              // one corpus fetch, however fast you type
+  textPending = true;
   api('text', { rels: [] }, function(j){
     absorb(j);
-    textAll = true; cb();
-  }, cb);
+    textAll = true; textPending = false; cb();
+  }, function(){ textPending = false; cb(); });
 }
 function docBy(rel){ return D.docs.filter(function(x){ return x.rel === rel; })[0]; }
 /* the server answers with the text and, for anything it had to extract, what it
@@ -204,7 +207,7 @@ function nameHit(d, q){ return !!q && count(d.rel, q) > 0; }
 function searching(){ return can('text') && !textAll && !!query; }
 
 /* ── views ────────────────────────────────────────────────────────────── */
-var query = '', navQ = '', navOpts = false;
+var query = '', navQ = '', allQ = '', navOpts = false;
 var libSort = 'recent', libFlat = false, libFacet = {}, libOpen = {};
 var sesScope = 'here', sesLive = false, sesQuery = '';
 /* which document a row is: the one you are reading is marked, the ones
@@ -326,6 +329,14 @@ function fileRow(d){
     (d.pages ? '<span class="sub">' + d.pages + 'p</span>' : '') +
     (libSort === 'size' && d.words ? '<span class="sub">' + d.words + 'w</span>' : '') +
     '<span class="sub">' + ago(d.mtime) + '</span></div>';
+}
+function libDirs(docs){
+  var out = {};
+  docs.forEach(function(d){
+    var parts = d.rel.split('/');
+    for (var i = 0; i < parts.length - 1; i++) out[parts.slice(0, i + 1).join('/')] = 1;
+  });
+  return Object.keys(out);
 }
 function libTree(docs){
   var root = { dirs:{}, files:[] };
@@ -471,7 +482,7 @@ function relatedDocs(sid){
 
 /* the body of a session surface: what it was, how to pick it up, what it
    touched, and everything you said in it */
-function sessionHTML(sid, q){
+function sessionHTML(sid, q, convo){
   var m = D.sessions[sid];
   if (!m) return '<div class="empty">That session is not in the index.</div>';
   q = q || '';
@@ -536,15 +547,18 @@ function sessionHTML(sid, q){
       (away.length > 12 ? '<div style="color:var(--fg-dim)">…and ' + (away.length - 12) + ' more</div>' : '') +
       '</div>');
   }
-  if (mine.length){
-    out.push('<div class="grp">What you asked <span class="c">' + mine.length + '</span></div>',
-      '<div class="plist">' + mine.map(function(p){
-        var hit = q && count(p.text, q) > 0;
-        return '<div class="pitem' + (hit ? ' hit' : '') + '"><span class="when">' + ago(p.t) +
-               ' ago</span>' + (hit ? snippet(p.text, q, 4000) : esc(p.text)) + '</div>';
-      }).join('') + '</div>');
-  }
+  out.push('<div class="convo">' + (convo || promptList(mine, q)) + '</div>');
   return out.join('');
+}
+/* what survives when the transcript is gone: your half, out of history.jsonl */
+function promptList(mine, q){
+  if (!mine.length) return '';
+  return '<div class="grp">What you asked <span class="c">' + mine.length + '</span></div>' +
+    '<div class="plist">' + mine.map(function(p){
+      var hit = q && count(p.text, q) > 0;
+      return '<div class="pitem' + (hit ? ' hit' : '') + '"><span class="when">' + ago(p.t) +
+             ' ago</span>' + (hit ? snippet(p.text, q, 4000) : esc(p.text)) + '</div>';
+    }).join('') + '</div>';
 }
 
 /* ── E3 · the graph: which documents belong together ─────────────────────── */
@@ -1004,12 +1018,44 @@ function mountReview(S){
 }
 
 function sessionSurface(sid, q){
-  var S = { q: q || '' };
-  S.render = function(host){ S.refresh(host); };
+  var S = { q: q || '', conv: null, err: '', loading: false, host: null };
+
+  S.render = function(host){
+    S.host = host;
+    S.refresh(host);
+    S.load();
+  };
+  /* history.jsonl only ever held your half. The other half is in the
+     transcript, which is read once, on opening, and kept for this tab. */
+  S.load = function(){
+    var m = D.sessions[sid] || {};
+    if (S.conv || S.err || S.loading || !can('conversation') || !m.live) return;
+    S.loading = true;
+    api('session?id=' + encodeURIComponent(sid), undefined, function(j){
+      S.loading = false;
+      if (j && j.turns && j.turns.length) S.conv = j;
+      else S.err = (j && j.error) || 'nothing readable in that transcript';
+      if (S.host) S.refresh(S.host);
+      Shell.paint();                       // the strip can now say how long it is
+    }, function(){
+      S.loading = false;
+      S.err = 'could not read the transcript';
+      if (S.host) S.refresh(S.host);
+    });
+  };
+  S.slot = function(){
+    if (S.conv) return renderConvo(S.conv, S.q);
+    if (S.loading) return '<div class="qnote">Reading the transcript…</div>';
+    if (S.err) return '<div class="qnote">' + esc(S.err) + ' — what you said survives below.</div>';
+    return '';
+  };
   S.refresh = function(host){
-    host.innerHTML = '<div class="inner sdet">' + sessionHTML(sid, S.q) + '</div>';
+    S.host = host;
+    var y = host.scrollTop;
+    host.innerHTML = '<div class="inner sdet">' + sessionHTML(sid, S.q, S.slot()) + '</div>';
+    if (y) host.scrollTop = y;
     if (S.q){
-      var f = host.querySelector('.pitem.hit');
+      var f = host.querySelector('.pitem.hit, .convo mark.hit');
       if (f) setTimeout(function(){ f.scrollIntoView({ block:'center' }); }, 60);
     }
   };
@@ -1019,9 +1065,74 @@ function sessionSurface(sid, q){
   };
   S.hint = function(){
     var m = D.sessions[sid] || {};
+    if (S.conv) return S.conv.you + ' from you · ' + S.conv.claude + ' from Claude';
     return m.live ? 'resumable · claude -r ' + sid.slice(0, 8) : 'archived — the transcript is gone';
   };
   return S;
+}
+
+/* ── a conversation, as a conversation ───────────────────────────────────
+   Yours on the right, Claude's on the left: the one layout convention
+   nobody has to be taught. What Claude *did* between saying things is a
+   quiet line under the bubble — thinking as a count, tools behind a
+   disclosure, and the files it wrote as chips you can open. */
+function renderConvo(c, q){
+  var out = ['<div class="grp">The conversation <span class="c">' +
+    c.you + ' from you · ' + c.claude + ' from Claude' +
+    (c.truncated ? ' · too long to show in full' : '') + '</span></div>'];
+  var last = '';
+  c.turns.forEach(function(t){
+    if (t.who === 'mark'){
+      last = '';
+      out.push('<div class="cmark ' + esc(t.kind) + '"><span>' + esc(t.text || t.kind) + '</span></div>');
+      return;
+    }
+    var mine = t.who === 'you', run = t.who === last;
+    last = t.who;
+    /* Claude usually speaks several times before you answer; a run of them is
+       one exchange, so only the first carries a clock and the gap tightens */
+    out.push('<div class="turn ' + (mine ? 'you' : 'claude') + (run ? ' cont' : '') + '">' +
+      (!run && t.t ? '<div class="tm">' + clock(t.t) + '</div>' : '') +
+      '<div class="bub"><div class="md">' + turnHTML(t.text, q) + '</div>' +
+      (mine ? '' : didHTML(t)) + '</div></div>');
+  });
+  return out.join('');
+}
+function turnHTML(text, q){
+  if (!text) return '<p class="nothing">—</p>';
+  var box = document.createElement('div');
+  try { box.innerHTML = marked.parse(text); } catch(e){ box.textContent = text; }
+  MD.sanitise(box);                        // a transcript is untrusted like anything else
+  if (q) markHits(box, q);
+  return box.innerHTML;
+}
+function didHTML(t){
+  var parts = [];
+  if (t.thinking) parts.push('<span class="th">' + t.thinking + ' thought' +
+    (t.thinking > 1 ? 's' : '') + '</span>');
+  if (t.tools && t.tools.length){
+    parts.push('<details class="tools"><summary>' + t.tools.length + ' tool call' +
+      (t.tools.length > 1 ? 's' : '') + '</summary>' +
+      t.tools.map(function(x){
+        return '<div class="tool"><span class="n">' + esc(x.n) + '</span>' +
+          (x.b ? '<span class="b">' + esc(x.b) + '</span>' : '') +
+          (x.ok === false ? '<span class="err">failed</span>' : '') + '</div>';
+      }).join('') + '</details>');
+  }
+  var files = (t.wrote || []).map(function(f){ return [f, 'created']; })
+    .concat((t.edited || []).map(function(f){ return [f, 'edited']; }));
+  if (files.length){
+    parts.push('<div class="wrote">' + files.map(function(x){
+      var open = docBy(x[0]) ? ' go" data-doc="' + esc(x[0]) + '"' : '"';
+      return '<span class="fchip' + open + ' title="' + esc(x[0]) + '">' +
+        '<i>' + x[1] + '</i>' + esc(x[0].split('/').pop()) + '</span>';
+    }).join('') + '</div>');
+  }
+  return parts.length ? '<div class="did">' + parts.join('') + '</div>' : '';
+}
+function clock(ts){
+  var d = new Date(ts * 1000);
+  return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
 }
 
 /* ── the navigator's three modes ─────────────────────────────────────────── */
@@ -1042,6 +1153,13 @@ function navDocs(){
       '<button data-lmode="tree" class="' + (libFlat ? '' : 'on') + '">tree</button>' +
       '<button data-lmode="flat" class="' + (libFlat ? 'on' : '') + '">flat</button>' +
     '</div>' +
+    (libFlat ? '' :
+      '<button class="opt ico" data-tree="open" title="Expand every folder">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
+        'stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg></button>' +
+      '<button class="opt ico" data-tree="shut" title="Collapse every folder">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
+        'stroke-linecap="round" stroke-linejoin="round"><path d="M7 14l5-5 5 5"/></svg></button>') +
     '<button class="opt' + (navOpts ? ' on' : '') + '" data-navopts="1" title="Sorting and filters">' +
       'sort &amp; filter</button>' +
     '<span class="sp">' + (narrowed ? docs.length + ' of ' + D.docs.length : docs.length) + '</span>' +
@@ -1135,7 +1253,79 @@ function navNotes(){
   return { html: h.join(''), foot: items.length + ' open · across ' + order.length + ' documents' };
 }
 
+/* ── All ─────────────────────────────────────────────────────────────────
+   One field over three kinds, because when you are looking for something you
+   usually remember *what it was about*, not whether you wrote it down, said
+   it to Claude, or scribbled it in a margin. */
+function navAll(){
+  marks();
+  var q = allQ.trim(), lq = q.toLowerCase(), h = [], counts = [];
+  function hit(s){ return !!s && s.toLowerCase().indexOf(lq) >= 0; }
+  if (q && !textAll && can('text')) ensureAllText(function(){ Shell.nav(); });
+
+  var docs = q ? D.docs.filter(function(d){ return hit(d.rel) || hit(d.title) || hit(d.text); })
+                       .sort(function(a, b){
+                         var an = hit(a.rel.split('/').pop()) ? 1 : 0;
+                         var bn = hit(b.rel.split('/').pop()) ? 1 : 0;
+                         return bn - an || b.mtime - a.mtime;
+                       })
+               : D.docs.slice().sort(function(a, b){ return b.mtime - a.mtime; });
+  if (docs.length){
+    counts.push(docs.length + ' doc' + (docs.length > 1 ? 's' : ''));
+    h.push('<div class="grp">Documents <span class="c">' + docs.length + '</span></div>');
+    docs.slice(0, q ? 12 : 6).forEach(function(d){ h.push(fileRow(d)); });
+  }
+
+  if (D.withSessions){
+    var ss = [];
+    for (var sid in D.sessions){
+      var m = D.sessions[sid];
+      if (!q){ ss.push({ sid:sid, m:m, s:0 }); continue; }
+      var r = sessionScore(sid, m, q);
+      if (r.s) ss.push({ sid:sid, m:m, s:r.s, best:r.best });
+    }
+    ss.sort(q ? function(a, b){ return b.s - a.s || b.m.b - a.m.b; }
+               : function(a, b){ return b.m.b - a.m.b; });
+    if (ss.length){
+      counts.push(ss.length + ' session' + (ss.length > 1 ? 's' : ''));
+      h.push('<div class="grp">Sessions <span class="c">' + ss.length + '</span></div>');
+      var cur = curSid();
+      ss.slice(0, q ? 10 : 4).forEach(function(x){
+        h.push('<div class="srow' + (cur === x.sid ? ' on' : '') + '" data-ses="' + esc(x.sid) +
+          '" data-q="' + esc(q) + '" title="' + esc(x.m.t || '') + '">' +
+          '<span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
+          '<span class="ttl">' + esc(x.m.t || '(no prompt recorded)') + '</span>' +
+          '<span class="sub">' + esc(shortRepo(x.m.p)) + '</span></div>');
+      });
+    }
+  }
+
+  var notes = allAnnos().filter(function(i){
+    return i.state !== 'stale' && (!q || hit(i.note) || hit(i.quote) || hit(i.heading));
+  }).sort(function(a, b){ return b._doc.mtime - a._doc.mtime || a.lineStart - b.lineStart; });
+  if (notes.length){
+    counts.push(notes.length + ' note' + (notes.length > 1 ? 's' : ''));
+    h.push('<div class="grp">Notes <span class="c">' + notes.length + '</span></div>');
+    notes.slice(0, q ? 10 : 4).forEach(function(i){
+      h.push('<div class="tfile" data-doc="' + esc(i._doc.rel) + '" data-line="' + (i.lineStart || 0) +
+        '" title="' + esc(i.note || i.quote || '') + '">' +
+        '<span class="kind">' + esc((i.verb || '').slice(0, 4)) + '</span>' +
+        '<span class="nm">' + esc(clip(i.note || i.quote || i.heading || '—', 40)) + '</span>' +
+        '<span class="sub">' + esc(i._doc.rel.split('/').pop()) + '</span></div>');
+    });
+  }
+
+  if (!h.length) h.push('<div class="empty">Nothing matches “' + esc(q) + '”.</div>');
+  else if (!q) h.unshift('<div class="nvnote">The most recent of everything. ' +
+    'Type to search documents, conversations and your own notes at once.</div>');
+  return { html: h.join(''), filter: allQ,
+           placeholder: 'Documents, sessions, notes',
+           onFilter: function(v){ allQ = v; Shell.nav(); },
+           foot: q ? counts.join(' · ') : 'everything, newest first' };
+}
+
 function navFor(mode){
+  if (mode === 'all') return navAll();
   if (mode === 'sessions') return navSessions();
   if (mode === 'notes') return navNotes();
   return navDocs();
@@ -1448,6 +1638,12 @@ document.addEventListener('click', function(e){
     return setOne('editor', f ? f.value.trim() : '', 'editor saved');
   }
   if (e.target.closest('[data-navopts]')){ navOpts = !navOpts; return Shell.nav(); }
+  var tw = e.target.closest('[data-tree]');
+  if (tw){
+    var shut = tw.dataset.tree === 'shut';
+    libDirs(libDocs()).forEach(function(d){ libOpen[d] = !shut; });
+    return Shell.nav();
+  }
   var gb = e.target.closest('[data-graph]');
   if (gb){ graphOn = gb.dataset.graph === '1'; return Shell.refresh(); }
   var dir = e.target.closest('[data-dir]');
