@@ -147,6 +147,27 @@ Carried from the plan; unresolved ones block the tasks that depend on them.
 
 ---
 
+## Planned — reading the conversation
+
+See [`conversations-plan.md`](conversations-plan.md). Four decisions open at the
+end of it.
+
+- [ ] **G1 · The conversation model.** `transcript.py` parses one transcript into
+      turns and changes; `GET /session?id=` serves it. On demand, never indexed,
+      never embedded — 0.25 s for the largest transcript on this machine.
+- [ ] **G2 · Read a session.** Turn cards, tool calls as one line each, thinking
+      collapsed to a count, and a ribbon down the side for navigating 137 turns.
+- [ ] **G3 · What it changed.** Documents created and edited, named as such from
+      `toolUseResult.type`; other files folded into a count per directory.
+- [ ] **G4 · The reverse index.** document → sessions, from the same pass:
+      482 pairs across 38 sessions, 0.97 s for the corpus, cached with the rest.
+- [ ] **G5 · Provenance in the reader.** Who created this document and who has
+      worked on it since, with the existing timeline finally labelled.
+- [ ] **G6 · Finish.** `ai-title` as the session title, compaction markers, and
+      jumping from a search hit to the turn that matched.
+
+---
+
 ## After the plan
 
 - [x] **F1 · Settings screen.** Terminal, launching, editor and deep indexing,
