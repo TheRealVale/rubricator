@@ -476,10 +476,12 @@ def emit_html(data, share, base=None, nonce=""):
     parts = {
         "__NAME__": html.escape(data["name"]),
         "__BASECSS__": design_css(share),
+        "__SHELLCSS__": sh("shell.css"),
         "__REVIEWCSS__": sh("review.css"),
         "__LIBS__": libs_html,
         "__RENDERJS__": sh("render.js"),
         "__REVIEWJS__": sh("review.js"),
+        "__SHELLJS__": sh("shell.js"),
         "__WSJS__": sh("workspace.js"),
         "__DATA__": json.dumps(data, ensure_ascii=False).replace("</", "<\\/"),
         "__NONCE__": nonce,

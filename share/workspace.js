@@ -95,6 +95,19 @@ if (can('notes') && window.MDReview){
   };
 }
 
+/* every note changes two things outside the tray: the count on the tab it was
+   written on, and the navigator. Whoever stores it, the window is told. */
+if (window.MDReview){
+  var _set = window.MDReview.storage.set;
+  window.MDReview.storage.set = function(key, val, path){
+    _set.call(this, key, val, path);
+    clearTimeout(window.__markT);
+    window.__markT = setTimeout(function(){
+      if (window.Shell){ Shell.paint(); Shell.nav(); }
+    }, 60);
+  };
+}
+
 /* annotations live in the reader's local storage, keyed by a hash of the abs path */
 function hash(s){ var h=5381,i=s.length; while(i) h=(h*33^s.charCodeAt(--i))>>>0; return h.toString(36); }
 function annosFor(doc){
@@ -191,9 +204,14 @@ function nameHit(d, q){ return !!q && count(d.rel, q) > 0; }
 function searching(){ return can('text') && !textAll && !!query; }
 
 /* ── views ────────────────────────────────────────────────────────────── */
-var VIEWS = [], view = 'search', query = '';
-var libSort = 'recent', libFlat = false, libFacet = {}, libOpen = {}, libSel = '';
-var sesScope = 'here', sesLive = false, sesSel = '', sesQuery = '';
+var query = '', navQ = '', navOpts = false;
+var libSort = 'recent', libFlat = false, libFacet = {}, libOpen = {};
+var sesScope = 'here', sesLive = false, sesQuery = '';
+/* which document a row is: the one you are reading is marked, the ones
+   sitting in other tabs are marked more quietly, so a split never loses
+   track of itself. Both are recomputed once per navigator render. */
+var OPENSET = {}, CURREL = '';
+function marks(){ OPENSET = openRels(); CURREL = curRel(); }
 function shortRepo(p){ return (p || '?').split('/').pop() || '?'; }
 
 var ROOTS = D.roots || [D.root];
@@ -299,12 +317,14 @@ function libDocs(){
 function fileRow(d){
   var n = noteCount(d), st = D.stale[d.rel] || {};
   var mark = d.kind === 'pdf' ? 'PDF' : (d.kind === 'word' ? 'DOC' : '');
-  return '<div class="tfile' + (libSel === d.rel ? ' on' : '') + '" data-doc="' + esc(d.rel) + '">' +
+  return '<div class="tfile' + (CURREL === d.rel ? ' on' : (OPENSET[d.rel] ? ' open' : '')) +
+    '" data-doc="' + esc(d.rel) + '">' +
     '<span class="nm">' + esc(d.rel.split('/').pop()) + '</span>' +
     (mark ? '<span class="kind">' + mark + '</span>' : '') +
     (n ? '<span class="n">' + n + '</span>' : '') +
-    (isStale(d) ? '<span class="sub w" title="code it describes moved on">⚠ ' + st.targetChurn + '</span>' : '') +
-    '<span class="sub">' + (d.pages ? d.pages + 'p' : (d.words ? d.words + 'w' : '—')) + '</span>' +
+    (isStale(d) ? '<span class="sub w" title="code it describes moved on">⚠</span>' : '') +
+    (d.pages ? '<span class="sub">' + d.pages + 'p</span>' : '') +
+    (libSort === 'size' && d.words ? '<span class="sub">' + d.words + 'w</span>' : '') +
     '<span class="sub">' + ago(d.mtime) + '</span></div>';
 }
 function libTree(docs){
@@ -331,26 +351,6 @@ function libTree(docs){
   }
   return walk(root);
 }
-function viewLibrary(){
-  var docs = libDocs();
-  var sorts = [['recent','recent'],['stale','stale'],['notes','notes'],['size','size'],['title','name']];
-  var out = ['<div class="ctl">' +
-    '<div class="seg">' +
-      '<button data-lmode="tree" class="' + (libFlat ? '' : 'on') + '">tree</button>' +
-      '<button data-lmode="flat" class="' + (libFlat ? 'on' : '') + '">flat</button>' +
-    '</div><div class="seg">' +
-      sorts.map(function(x){ return '<button data-lsort="' + x[0] + '" class="' +
-        (libSort === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') +
-    '</div>' +
-    '<button class="chip' + (libFacet.notes ? ' on' : '') + '" data-lfacet="notes">has notes</button>' +
-    '<button class="chip' + (libFacet.stale ? ' on' : '') + '" data-lfacet="stale">stale</button>' +
-    '<button class="chip' + (libFacet.recent ? ' on' : '') + '" data-lfacet="recent">last 14 days</button>' +
-    '<span class="sp">' + docs.length + ' of ' + D.docs.length + '</span></div>'];
-  if (!docs.length) return out.join('') + '<div class="empty">No document matches those filters.</div>';
-  out.push('<div class="tree">' + (libFlat ? docs.map(fileRow).join('') : libTree(docs)) + '</div>');
-  return out.join('');
-}
-
 function viewStale(){
   if (!D.hasGit) return '<div class="empty">No git history here, so there is nothing to compare documents against.</div>';
   var rows = D.docs.map(function(d){ return { d: d, s: D.stale[d.rel] || {} }; })
@@ -385,7 +385,8 @@ function viewNotes(){
     var list = byVerb[v]; if (!list) return;
     out.push('<div class="grp">' + v + ' <span class="c">' + list.length + '</span></div>');
     list.forEach(function(i){
-      out.push('<div class="row" data-doc="' + esc(i._doc.rel) + '">' +
+      out.push('<div class="row" data-doc="' + esc(i._doc.rel) + '" data-line="' +
+        (i.lineStart || 0) + '">' +
         '<div class="t">' + esc(i.heading || i._doc.title) + '<span class="p">' + esc(i._doc.rel) +
         ':' + i.lineStart + '</span></div>' +
         (i.note ? '<div class="snip">' + esc(i.note) + '</div>' : '') + '</div>');
@@ -451,74 +452,6 @@ function span(m){
   var days = Math.round((m.b - m.a) / DAY);
   return days >= 1 ? days + 'd span' : Math.round((m.b - m.a) / 3600) + 'h span';
 }
-function viewSessions(){
-  if (!D.withSessions) return '<div class="empty">Session data was not indexed.<br><br>' +
-    'Re-run with <span class="f">md --sessions</span> to include your own history. ' +
-    'It stays on this machine and cannot be written to a shareable file.</div>';
-  var q = sesQuery.trim();
-  var all = sessionList(), live = 0;
-  all.forEach(function(x){ if (x.m.live) live++; });
-  var total = Object.keys(D.sessions).length;
-  var out = ['<div class="qbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-    'stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>' +
-    '<input id="sq" type="text" placeholder="Something you said, or the name of a repo…" value="' +
-    esc(sesQuery) + '" autocomplete="off" spellcheck="false">' +
-    '<span class="hint">' + D.prompts.length + ' prompts</span></div>',
-    '<div class="ctl">' +
-    '<div class="seg">' +
-      '<button data-sscope="here" class="' + (sesScope === 'here' ? 'on' : '') + '">this repo</button>' +
-      '<button data-sscope="all" class="' + (sesScope === 'all' ? 'on' : '') + '">everywhere</button>' +
-    '</div>' +
-    '<button class="chip' + (sesLive ? ' on' : '') + '" data-slive="1">resumable only</button>' +
-    '<span class="sp">' + all.length + (q ? ' matching' : ' of ' + total) + ' · ' + live + ' resumable</span></div>'];
-
-  /* the whole point of this search is not knowing which repo it was in */
-  if (q && sesScope === 'here'){
-    var everywhere = sessionList('all').length;
-    if (everywhere > all.length){
-      out.push('<div class="qnote">' + (everywhere - all.length) + ' more in other repositories — ' +
-        '<button class="chip" data-sscope="all">search everywhere</button></div>');
-    }
-  }
-
-  if (!all.length) return out.join('') + '<div class="empty">' + (q
-    ? 'Nothing you said matches “' + esc(q) + '”' + (sesScope === 'here' ? ' in this repository.' : ' in any of them.')
-    : 'No sessions recorded for this directory.<br><br>Switch to <b>everywhere</b> to see the ' +
-      total + ' sessions on this machine.') + '</div>';
-
-  out.push('<div class="qnote">A session is <span class="dot live"></span> resumable while its ' +
-    'transcript is still on disk, and <span class="dot arch"></span> archived once it is gone — ' +
-    'the prompts survive, the files it touched and <span class="f">claude -r</span> do not.</div>');
-
-  if (q){
-    all.slice(0, 40).forEach(function(x){
-      out.push('<div class="row" data-ses="' + esc(x.sid) + '" data-q="' + esc(q) + '">' +
-        '<div class="t"><span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
-          esc(x.m.t || '(no prompt recorded)') + '</div>' +
-        (x.best ? '<div class="snip">' + snippet(x.best.p.text, q, 200) + '</div>' : '') +
-        '<div class="meta"><span class="pill">' + esc(shortRepo(x.m.p)) + '</span>' +
-        '<span>' + x.m.n + ' prompts</span>' +
-        (x.hits ? '<span>' + x.hits + ' mention' + (x.hits > 1 ? 's' : '') + '</span>' : '<span>title match</span>') +
-        '<span>' + ago(x.m.b) + ' ago</span>' +
-        (x.m.live ? '' : '<span class="pill">no transcript</span>') + '</div></div>');
-    });
-    return out.join('');
-  }
-
-  var group = '';
-  all.forEach(function(x){
-    var g = dayLabel(x.m.b);
-    if (g !== group){ group = g; out.push('<div class="grp">' + g + '</div>'); }
-    out.push('<div class="srow' + (sesSel === x.sid ? ' on' : '') + '" data-ses="' + esc(x.sid) + '">' +
-      '<span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
-      '<span class="ttl">' + esc(x.m.t || '(no prompt recorded)') + '</span>' +
-      (sesScope === 'all' ? '<span class="sub">' + esc(shortRepo(x.m.p)) + '</span>' : '') +
-      '<span class="sub">' + x.m.n + 'p</span>' +
-      '<span class="sub">' + span(x.m) + '</span></div>');
-  });
-  return out.join('');
-}
-
 /* B6 — the correlation run backwards: a session touched files, and documents
    name the files they describe, so the overlap says which docs it bears on */
 function relatedDocs(sid){
@@ -536,10 +469,11 @@ function relatedDocs(sid){
   return out.sort(function(a, b){ return b.s - a.s; }).slice(0, 8);
 }
 
-function openSession(sid, q){
+/* the body of a session surface: what it was, how to pick it up, what it
+   touched, and everything you said in it */
+function sessionHTML(sid, q){
   var m = D.sessions[sid];
-  if (!m) return;
-  sesSel = sid;
+  if (!m) return '<div class="empty">That session is not in the index.</div>';
   q = q || '';
   var mine = D.prompts.filter(function(p){ return p.sid === sid; })
                       .sort(function(a, b){ return a.t - b.t; });
@@ -610,18 +544,7 @@ function openSession(sid, q){
                ' ago</span>' + (hit ? snippet(p.text, q, 4000) : esc(p.text)) + '</div>';
       }).join('') + '</div>');
   }
-  $('spath').textContent = shortRepo(m.p) + ' · session ' + sid.slice(0, 8);
-  $('sbody').innerHTML = out.join('');
-  $('spane').classList.add('on', 'side');
-  document.body.classList.add('split');
-  $('spane').scrollTop = 0;
-  render();
-}
-function closeSession(){
-  sesSel = '';
-  $('spane').classList.remove('on', 'side');
-  if (!$('reader').classList.contains('on')) document.body.classList.remove('split');
-  render();
+  return out.join('');
 }
 
 /* ── E3 · the graph: which documents belong together ─────────────────────── */
@@ -730,7 +653,7 @@ function setOne(key, value, note){
     if (j.error) return toast(j.error);
     SET = j.settings;
     if (j.caps){ for (var k in j.caps) CAPS[k] = j.caps[k]; }
-    render();
+    refreshAll();
     toast(note || 'saved');
   }, function(){ toast('could not save that'); });
 }
@@ -809,7 +732,7 @@ var USER_VIEWS = [];
 window.RB = {
   view: function(v){ if (v && v.id && v.render) USER_VIEWS.push(v); },
   data: D, esc: esc, ago: ago, shortPath: shortPath, toast: toast, copy: copy,
-  open: function(rel){ openDoc(rel, '', true); }
+  open: function(rel){ openDoc(rel, {}); }
 };
 (D.views || []).forEach(function(v){
   try { (new Function(v.src)).call(window); }
@@ -857,78 +780,6 @@ function buildDossier(){
   return L.join('\n');
 }
 
-/* ── reader ───────────────────────────────────────────────────────────── */
-function openDoc(rel, q, side){
-  var d = docBy(rel);
-  if (!d) return;
-  if (d.text == null) return ensureText([rel], function(){ if (d.text != null) openDoc(rel, q, side); });
-  libSel = rel;
-  $('rpath').textContent = d.rel;
-  var tl = $('rtime'); if (tl) tl.innerHTML = docTimeline(d);
-
-  /* the same renderer the single-file reader uses, so the document behaves the
-     same here: anchors, alerts, code copy, mermaid — and the same block-to-line
-     mapping the review layer needs */
-  var doc = $('doc'), out, premapped = false;
-  if (d.kind === 'pdf' || d.kind === 'word'){
-    $('fm').innerHTML = d.note
-      ? '<div class="docnote">' + esc(d.note) + '</div>' : '';
-    out = MD.renderExtracted({ doc: doc, text: d.text });
-    premapped = true;
-  } else {
-    $('fm').innerHTML = '';
-    out = MD.render({
-      doc: doc,
-      fm:  $('fm'),
-      raw: d.text,
-      base: 'file://' + d.abs.replace(/[^/]*$/, '')
-    });
-  }
-
-  /* META.path is the absolute path, which is exactly what the reader keys its
-     annotations on — so notes written here are the same notes it shows */
-  if (window.MDReview){
-    window.MDReview.open({
-      doc: doc, premapped: premapped,
-      raw: premapped ? out.raw : d.text,
-      body: premapped ? out.raw : out.body, fmLines: out.fmLines,
-      META: { path: d.abs, rel: d.rel, name: d.rel.split('/').pop(),
-              dir: d.abs.replace(/[^/]*$/, ''), base: 'file://' + d.abs }
-    });
-  }
-
-  if (can('asset')){
-    var pre = 'file://' + D.root + '/';
-    doc.querySelectorAll('img[src],video[src],source[src]').forEach(function(el){
-      var v = el.getAttribute('src') || '';
-      if (v.indexOf(pre) === 0) el.setAttribute('src', BASE + '/asset?p=' + encodeURIComponent(v.slice(pre.length)));
-    });
-  }
-  if (q) markHits(doc, q);
-  $('reader').classList.toggle('side', !!side);
-  document.body.classList.toggle('split', !!side);
-  $('reader').classList.add('on');
-  $('reader').scrollTop = 0;
-  if (side) render();                 // keep the selected row marked in the list
-  var first = doc.querySelector('mark.hit');
-  if (first) setTimeout(function(){ first.scrollIntoView({block:'center'}); }, 60);
-  $('rcopy').onclick = function(){ copy(d.abs); toast('path copied'); };
-  var send = $('rsend');
-  if (send){
-    send.style.display = can('launch') ? '' : 'none';
-    send.onclick = function(){
-      /* the notes you just took become the first thing the session hears */
-      var text = window.__mdReview ? window.__mdReview.build() : '';
-      if (!text) text = 'Read ' + d.rel + ' and tell me what you make of it.';
-      act('launch', d.rel, text, 'session opening in a new terminal window');
-    };
-  }
-  var rev = $('rreveal');
-  if (rev){
-    rev.style.display = can('reveal') ? '' : 'none';
-    rev.onclick = function(){ act('reveal', d.rel, '', 'revealed in Finder'); };
-  }
-}
 /* ── E2 · one document's history on one axis ─────────────────────────────── */
 function docTimeline(d){
   var st = D.stale[d.rel] || {}, commits = (st.ts || []).filter(Boolean);
@@ -975,79 +826,483 @@ function markHits(root, q){
     node.parentNode.replaceChild(frag, node);
   });
 }
-function closeReader(){
-  libSel = '';
-  $('reader').classList.remove('on', 'side');
-  if (!$('spane').classList.contains('on')) document.body.classList.remove('split');
-  $('tray').classList.remove('open');
-  document.body.classList.remove('tray-open');
-  $('composer').classList.remove('show');
-  $('pop').classList.remove('show');
-  render();                       // note counts may have changed while it was open
+
+/* ── surfaces ──────────────────────────────────────────────────────────────
+   A surface is whatever a pane can hold. The shell knows only that it can
+   render itself into a div and say what to call it; everything that is
+   specific to a document, a session or a list lives down here. */
+var TITLES = { search:'Search', stale:'Stale', notes:'Notes', graph:'Graph', settings:'Settings' };
+
+function clip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function grabCaret(host){
+  var a = document.activeElement;
+  if (a && host.contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.id)
+    return { id:a.id, sel:[a.selectionStart, a.selectionEnd] };
+  return null;
 }
-function readerBusy(){
-  return $('composer').classList.contains('show') || $('tray').classList.contains('open');
+function putCaret(c){
+  if (!c) return;
+  var el = $(c.id);
+  if (!el) return;
+  el.focus({ preventScroll:true });
+  try { el.setSelectionRange(c.sel[0], c.sel[1]); } catch(e){}
 }
 
-/* ── shell ────────────────────────────────────────────────────────────── */
-function render(){
-  /* the search box is rebuilt on every render, and renders now come from more
-     than typing — hydration, a watch event, a reindex. Whoever caused it, the
-     caret has to come back exactly where it was or you cannot type. */
-  var act = document.activeElement, sel = null, selId = '';
-  if (act && act.tagName === 'INPUT' && act.id){
-    selId = act.id; sel = [act.selectionStart, act.selectionEnd];
+/* a list, a table, a form — anything that is rebuilt wholesale from data */
+function listSurface(kind){
+  var mine = USER_VIEWS.filter(function(v){ return v.id === kind; })[0];
+  var builtin = { search:viewSearch, stale:viewStale, notes:viewNotes,
+                  graph:viewGraph, settings:viewSettings };
+  var S = {};
+  S.render = function(host){ S.refresh(host); };
+  S.refresh = function(host){
+    var c = grabCaret(host);
+    host.innerHTML = '<div class="inner">' +
+      (mine ? mine.render(D, RB) : (builtin[kind] || viewSearch)()) + '</div>';
+    var q = host.querySelector('#q');
+    if (q) q.addEventListener('input', function(){ query = q.value; S.refresh(host); });
+    var dz = host.querySelector('#dossier');
+    if (dz) dz.onclick = function(){ copy(buildDossier()); toast('dossier copied — paste it to your agent'); };
+    var dw = host.querySelector('#dossier-what');
+    if (dw) dw.onclick = function(){ toast('documents, your open notes, past prompts (scrubbed) and the code most specific to them'); };
+    putCaret(c);
+    if (kind === 'search') needText();
+  };
+  S.label = function(){ return { title: mine ? (mine.label || mine.id) : (TITLES[kind] || kind) }; };
+  S.hint = function(){
+    if (kind === 'search') return 'the whole corpus · ⌘K jumps instead';
+    if (kind === 'settings') return 'saved to ~/.config/rubricator/config.json';
+    return '';
+  };
+  return S;
+}
+
+/* ── a document in a pane ────────────────────────────────────────────────
+   The reader, the review layer and the outline all came for free the moment
+   this stopped being a full-screen overlay and became one surface among
+   others: it renders into its own div and keeps it. */
+function docSurface(rel, q, jump){
+  var S = { rel:rel, q:q || '', jump:jump || 0, out:null, premapped:false, host:null };
+
+  S.render = function(host){
+    S.host = host;
+    host.innerHTML =
+      '<div class="dochead"><span class="p"></span></div>' +
+      '<div class="body"><div class="tlh"></div><div class="fm"></div>' +
+      '<article class="md"></article></div>';
+    S.headEl = host.querySelector('.dochead .p');
+    S.timeEl = host.querySelector('.tlh');
+    S.fmEl   = host.querySelector('.fm');
+    S.docEl  = host.querySelector('article.md');
+    S.paint();
+  };
+
+  S.paint = function(){
+    var d = docBy(rel);
+    if (!d){
+      S.host.innerHTML = '<div class="void">' + esc(rel) + ' is no longer in the index.</div>';
+      return;
+    }
+    if (d.text == null){
+      S.docEl.innerHTML = '<p style="color:var(--fg-dim)">Reading ' + esc(rel) + '…</p>';
+      return ensureText([rel], function(){
+        var f = docBy(rel);
+        if (f && f.text != null && S.docEl.isConnected) S.paint();
+      });
+    }
+    S.headEl.textContent = d.rel;
+    S.timeEl.innerHTML = docTimeline(d);
+
+    /* the same renderer the single-file reader uses, so a document behaves the
+       same here: anchors, alerts, code copy, mermaid — and the same
+       block-to-line mapping the review layer needs */
+    if (d.kind === 'pdf' || d.kind === 'word'){
+      S.fmEl.innerHTML = d.note ? '<div class="docnote">' + esc(d.note) + '</div>' : '';
+      S.out = MD.renderExtracted({ doc: S.docEl, text: d.text });
+      S.premapped = true;
+    } else {
+      S.fmEl.innerHTML = '';
+      S.out = MD.render({ doc: S.docEl, fm: S.fmEl, raw: d.text,
+                          base: 'file://' + d.abs.replace(/[^/]*$/, '') });
+      S.premapped = false;
+    }
+    if (can('asset')){
+      var pre = 'file://' + D.root + '/';
+      S.docEl.querySelectorAll('img[src],video[src],source[src]').forEach(function(el){
+        var v = el.getAttribute('src') || '';
+        if (v.indexOf(pre) === 0) el.setAttribute('src', BASE + '/asset?p=' + encodeURIComponent(v.slice(pre.length)));
+      });
+    }
+    if (S.q) markHits(S.docEl, S.q);
+    mountReview(S);
+    setTimeout(Shell.paint, 0);            // the tab shows the note count
+
+    var target = S.q ? S.docEl.querySelector('mark.hit')
+                     : (S.jump ? blockAtLine(S.docEl, S.jump) : null);
+    if (target) setTimeout(function(){ target.scrollIntoView({ block:'center' }); }, 60);
+    S.jump = 0;
+  };
+
+  /* the tray follows focus: whichever document you are looking at is the one
+     the review layer is bound to, and the tray says which */
+  S.focus = function(){ mountReview(S); };
+  S.refresh = function(){ if (S.headEl){ var d = docBy(rel); if (d) S.headEl.textContent = d.rel; } };
+  S.reload = function(){ if (S.host) S.paint(); };
+  S.goto = function(line, q){
+    S.q = q || '';
+    if (q && S.docEl){ markHits(S.docEl, q); }
+    var t = line ? blockAtLine(S.docEl, line) : (q ? S.docEl.querySelector('mark.hit') : null);
+    if (t) t.scrollIntoView({ block:'center' });
+  };
+  S.label = function(){
+    var d = docBy(rel), n = d ? noteCount(d) : 0;
+    return { title: rel.split('/').pop(), tip: rel, badge: n || '',
+             kd: d && d.kind === 'pdf' ? 'PDF' : (d && d.kind === 'word' ? 'DOC' : '') };
+  };
+  S.actions = function(){
+    var d = docBy(rel), a = [];
+    if (!d) return a;
+    if (can('launch')) a.push({ label:'Send to Claude', cls:'go', fn:function(){
+      mountReview(S);                       /* build from *this* document */
+      var text = window.__mdReview ? window.__mdReview.build() : '';
+      if (!text) text = 'Read ' + d.rel + ' and tell me what you make of it.';
+      act('launch', d.rel, text, 'session opening in a new terminal window');
+    }});
+    if (can('reveal')) a.push({ label:'reveal', fn:function(){ act('reveal', d.rel, '', 'revealed in Finder'); }});
+    a.push({ label:'copy path', fn:function(){ copy(d.abs); toast('path copied'); }});
+    return a;
+  };
+  S.hint = function(){ return 'c ? x e a mark up · f notes · j k move'; };
+  return S;
+}
+
+function blockAtLine(root, line){
+  var out = null;
+  [].forEach.call(root.children, function(el){
+    if (out || !el.dataset.lineStart) return;
+    if (+el.dataset.lineStart <= line && line <= +(el.dataset.lineEnd || el.dataset.lineStart)) out = el;
+  });
+  return out;
+}
+
+/* the review layer is one chrome for many documents — it is re-pointed, never
+   rebuilt, and the tray header says which document it is showing */
+function mountReview(S){
+  if (!window.MDReview || !S.out) return;
+  var d = docBy(S.rel);
+  if (!d || d.text == null) return;
+  window.MDReview.open({
+    doc: S.docEl, premapped: S.premapped,
+    raw:  S.premapped ? S.out.raw : d.text,
+    body: S.premapped ? S.out.raw : S.out.body,
+    fmLines: S.out.fmLines,
+    META: { path: d.abs, rel: d.rel, name: d.rel.split('/').pop(),
+            dir: d.abs.replace(/[^/]*$/, ''), base: 'file://' + d.abs }
+  });
+  var th = document.querySelector('#tray .th .t');
+  if (th) th.textContent = d.rel.split('/').pop();
+}
+
+function sessionSurface(sid, q){
+  var S = { q: q || '' };
+  S.render = function(host){ S.refresh(host); };
+  S.refresh = function(host){
+    host.innerHTML = '<div class="inner sdet">' + sessionHTML(sid, S.q) + '</div>';
+    if (S.q){
+      var f = host.querySelector('.pitem.hit');
+      if (f) setTimeout(function(){ f.scrollIntoView({ block:'center' }); }, 60);
+    }
+  };
+  S.label = function(){
+    var m = D.sessions[sid] || {};
+    return { title: clip(m.t || sid.slice(0, 8), 30), tip: m.t || sid, kd:'SES' };
+  };
+  S.hint = function(){
+    var m = D.sessions[sid] || {};
+    return m.live ? 'resumable · claude -r ' + sid.slice(0, 8) : 'archived — the transcript is gone';
+  };
+  return S;
+}
+
+/* ── the navigator's three modes ─────────────────────────────────────────── */
+function navDocs(){
+  marks();
+  var docs = libDocs(), all = docs.length;
+  if (navQ){
+    var s = navQ.toLowerCase();
+    docs = docs.filter(function(d){
+      return d.rel.toLowerCase().indexOf(s) >= 0 || (d.title || '').toLowerCase().indexOf(s) >= 0;
+    });
+  }
+  var sorts = [['recent','recent'],['stale','stale'],['notes','notes'],['size','size'],['title','name']];
+  var facets = [['notes','has notes'],['stale','stale'],['recent','14 days']];
+  var narrowed = docs.length !== D.docs.length;
+  var h = ['<div class="nvctl"><div class="r">' +
+    '<div class="seg">' +
+      '<button data-lmode="tree" class="' + (libFlat ? '' : 'on') + '">tree</button>' +
+      '<button data-lmode="flat" class="' + (libFlat ? 'on' : '') + '">flat</button>' +
+    '</div>' +
+    '<button class="opt' + (navOpts ? ' on' : '') + '" data-navopts="1" title="Sorting and filters">' +
+      'sort &amp; filter</button>' +
+    '<span class="sp">' + (narrowed ? docs.length + ' of ' + D.docs.length : docs.length) + '</span>' +
+    '</div>'];
+  if (navOpts){
+    h.push('<div class="r"><div class="seg">' +
+      sorts.map(function(x){ return '<button data-lsort="' + x[0] + '" class="' +
+        (libSort === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div></div>');
+    h.push('<div class="r">' + facets.map(function(f){
+      return '<button class="chip' + (libFacet[f[0]] ? ' on' : '') + '" data-lfacet="' + f[0] + '">' +
+             f[1] + '</button>'; }).join('') + '</div>');
+  }
+  h.push('</div>');
+  h.push(docs.length
+    ? '<div class="tree">' + ((libFlat || navQ) ? docs.map(fileRow).join('') : libTree(docs)) + '</div>'
+    : '<div class="empty">Nothing matches those filters.</div>');
+  var kinds = { pdf:0, word:0 };
+  D.docs.forEach(function(d){ if (kinds[d.kind] != null) kinds[d.kind]++; });
+  var foot = [D.docs.length + ' documents'];
+  if (kinds.pdf || kinds.word) foot.push((kinds.pdf + kinds.word) + ' not markdown');
+  return { html: h.join(''), filter: navQ, placeholder: 'Filter by name',
+           onFilter: function(v){ navQ = v; Shell.nav(); },
+           foot: foot.join(' · ') };
+}
+
+function navSessions(){
+  marks();
+  if (!D.withSessions) return { html:'<div class="empty">Session data was not indexed.<br><br>' +
+    'Re-run with <span class="f">md --sessions</span> to include your own history.</div>', foot:'' };
+  var q = sesQuery.trim(), all = sessionList(), live = 0, sel = curSid();
+  all.forEach(function(x){ if (x.m.live) live++; });
+  var h = ['<div class="ctl">' +
+    '<div class="seg">' +
+      '<button data-sscope="here" class="' + (sesScope === 'here' ? 'on' : '') + '">this repo</button>' +
+      '<button data-sscope="all" class="' + (sesScope === 'all' ? 'on' : '') + '">everywhere</button>' +
+    '</div>' +
+    '<button class="chip' + (sesLive ? ' on' : '') + '" data-slive="1">resumable</button>' +
+    '<span class="sp">' + all.length + (q ? ' matching' : '') + ' · ' + live + ' resumable</span></div>'];
+
+  /* the whole point of this search is not knowing which repo it was in */
+  if (q && sesScope === 'here'){
+    var everywhere = sessionList('all').length;
+    if (everywhere > all.length)
+      h.push('<div class="nvnote">' + (everywhere - all.length) + ' more elsewhere — ' +
+             '<button data-sscope="all">search everywhere</button></div>');
+  }
+  if (!all.length){
+    h.push('<div class="empty">' + (q ? 'Nothing you said matches that.'
+      : 'No sessions recorded for this directory. Switch to <b>everywhere</b>.') + '</div>');
+    return { html:h.join(''), filter:sesQuery, placeholder:'Something you said',
+             onFilter:function(v){ sesQuery = v; Shell.nav(); }, foot:'' };
+  }
+  var group = '';
+  all.slice(0, 300).forEach(function(x){
+    var g = q ? '' : dayLabel(x.m.b);
+    if (g && g !== group){ group = g; h.push('<div class="grp">' + g + '</div>'); }
+    h.push('<div class="srow' + (sel === x.sid ? ' on' : '') + '" data-ses="' + esc(x.sid) +
+      '" data-q="' + esc(q) + '" title="' + esc(x.m.t || '') + '">' +
+      '<span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
+      '<span class="ttl">' + esc(x.m.t || '(no prompt recorded)') + '</span>' +
+      ((sesScope === 'all' || q) ? '<span class="sub">' + esc(shortRepo(x.m.p)) + '</span>' : '') +
+      '<span class="sub">' + x.m.n + 'p</span></div>');
+  });
+  return { html: h.join(''), filter: sesQuery, placeholder: 'Something you said',
+           onFilter: function(v){ sesQuery = v; Shell.nav(); },
+           foot: Object.keys(D.sessions).length + ' sessions · ' + D.prompts.length + ' prompts' };
+}
+
+function navNotes(){
+  marks();
+  var items = allAnnos().filter(function(i){ return i.state !== 'stale'; });
+  if (!items.length) return { html:'<div class="empty">Nothing marked up yet.<br><br>' +
+    'Open a document, select a line and press <b>c</b>, <b>?</b>, <b>x</b>, <b>e</b> or <b>a</b>.</div>',
+    foot:'' };
+  var by = {}, order = [];
+  items.forEach(function(i){
+    var k = i._doc.rel;
+    if (!by[k]){ by[k] = []; order.push(k); }
+    by[k].push(i);
+  });
+  var cur = curRel(), h = [];
+  order.forEach(function(rel){
+    h.push('<div class="grp">' + esc(rel.split('/').pop()) + ' <span class="c">' + by[rel].length + '</span></div>');
+    by[rel].forEach(function(i){
+      h.push('<div class="tfile' + (cur === rel ? ' open' : '') + '" data-doc="' + esc(rel) +
+        '" data-line="' + (i.lineStart || 0) + '" title="' + esc(i.note || i.quote || '') + '">' +
+        '<span class="kind">' + esc((i.verb || '').slice(0, 4)) + '</span>' +
+        '<span class="nm">' + esc(clip(i.note || i.quote || i.heading || '—', 46)) + '</span></div>');
+    });
+  });
+  return { html: h.join(''), foot: items.length + ' open · across ' + order.length + ' documents' };
+}
+
+function navFor(mode){
+  if (mode === 'sessions') return navSessions();
+  if (mode === 'notes') return navNotes();
+  return navDocs();
+}
+
+/* ── find anything ───────────────────────────────────────────────────────
+   Four kinds in one list, because when you are looking for something you
+   rarely know which of them it is. */
+function palSearch(q, kind){
+  q = (q || '').trim();
+  var lq = q.toLowerCase(), groups = [], total = 0;
+  function want(k){ return !kind || kind === k; }
+  function hit(s){ return s && s.toLowerCase().indexOf(lq) >= 0; }
+
+  if (want('doc')){
+    var docs = D.docs.filter(function(d){ return !q || hit(d.rel) || hit(d.title) || hit(d.text); });
+    docs.sort(function(a, b){
+      if (q){
+        var an = hit(a.rel.split('/').pop()) ? 1 : 0, bn = hit(b.rel.split('/').pop()) ? 1 : 0;
+        if (an !== bn) return bn - an;
+      }
+      return b.mtime - a.mtime;
+    });
+    total += docs.length;
+    groups.push({ label: q ? 'Documents' : 'Recent documents', rows: docs.slice(0, 8).map(function(d){
+      var n = noteCount(d);
+      return { kind: d.kind === 'md' ? 'doc' : d.kind, title: d.rel.split('/').pop(),
+               sub: d.rel.indexOf('/') > 0 ? d.rel.replace(/\/[^/]*$/, '') : (n ? n + ' notes' : ''),
+               open: { kind:'doc', id:d.rel, q:q, title:d.rel.split('/').pop(), tip:d.rel } };
+    }) });
   }
 
-  $('tabs').innerHTML = VIEWS.map(function(v){
-    return '<button data-v="' + v.id + '" class="' + (v.id===view?'on':'') + '">' + v.label +
-      (v.n != null ? '<span class="n">' + v.n + '</span>' : '') + '</button>';
-  }).join('');
-  var builtin = { search:viewSearch, docs:viewLibrary, stale:viewStale,
-                  notes:viewNotes, sessions:viewSessions, graph:viewGraph,
-                  settings:viewSettings };
-  var mine = USER_VIEWS.filter(function(v){ return v.id === view; })[0];
-  $('page').innerHTML = mine ? mine.render(D, RB) : (builtin[view] || viewSearch)();
-
-  var q = $('q');
-  if (q) q.addEventListener('input', function(){ query = q.value; render(); });
-  var sq = $('sq');
-  if (sq) sq.addEventListener('input', function(){ sesQuery = sq.value; render(); });
-
-  var focusOn = selId ? $(selId) : ((view === 'search' && query) ? q : null);
-  if (focusOn){
-    focusOn.focus({ preventScroll: true });
-    if (sel) { try { focusOn.setSelectionRange(sel[0], sel[1]); } catch(e){} }
+  if (want('session') && D.withSessions){
+    var ss = [];
+    for (var sid in D.sessions){
+      var m = D.sessions[sid];
+      if (!q){ ss.push({ sid:sid, m:m, s:0 }); continue; }
+      var r = sessionScore(sid, m, q);
+      if (r.s) ss.push({ sid:sid, m:m, s:r.s, best:r.best });
+    }
+    ss.sort(q ? function(a, b){ return b.s - a.s || b.m.b - a.m.b; }
+               : function(a, b){ return b.m.b - a.m.b; });
+    total += ss.length;
+    groups.push({ label: q ? 'Sessions' : 'Recent sessions', rows: ss.slice(0, 6).map(function(x){
+      return { kind:'session', title: clip(x.m.t || '(no prompt recorded)', 64),
+               sub: shortRepo(x.m.p) + ' · ' + x.m.n + 'p',
+               open: { kind:'session', id:x.sid, q:q, title:clip(x.m.t || x.sid, 30) } };
+    }) });
   }
-  needText();          // may render again later; the caret is already restored
-  var dz = $('dossier');
-  if (dz) dz.onclick = function(){ copy(buildDossier()); toast('dossier copied — paste it to your agent'); };
-  var dw = $('dossier-what');
-  if (dw) dw.onclick = function(){ toast('documents, your open notes, past prompts (scrubbed) and the code most specific to them'); };
-}
-function setView(v){ view = v; render(); }
 
-/* the first search is the moment the page needs every document body */
+  if (want('note') && q){
+    var notes = allAnnos().filter(function(i){
+      return i.state !== 'stale' && (hit(i.note) || hit(i.quote) || hit(i.heading));
+    });
+    total += notes.length;
+    groups.push({ label:'Notes', rows: notes.slice(0, 5).map(function(i){
+      return { kind:'note', title: clip(i.note || i.quote, 60), sub: i._doc.rel.split('/').pop(),
+               open: { kind:'doc', id:i._doc.rel, jump:i.lineStart,
+                       title:i._doc.rel.split('/').pop(), tip:i._doc.rel } };
+    }) });
+  }
+
+  if (want('surface')){
+    var rows = [];
+    Object.keys(TITLES).forEach(function(k){
+      if (q && !hit(TITLES[k])) return;
+      rows.push({ kind:'surface', title:TITLES[k], sub:'a surface',
+                  open:{ kind:k, id:'', title:TITLES[k] } });
+    });
+    USER_VIEWS.forEach(function(v){
+      if (q && !hit(v.label || v.id)) return;
+      rows.push({ kind:'surface', title:v.label || v.id, sub:'yours',
+                  open:{ kind:v.id, id:'', title:v.label || v.id } });
+    });
+    if (q) rows.unshift({ kind:'search', title:'Search everything for “' + q + '”', sub:'the whole corpus',
+                          run:function(split){ query = q; Shell.open({ kind:'search', id:'', title:'Search' },
+                                                                     split ? 'split' : 'here'); } });
+    if (can('reindex') && (!q || hit('reindex')))
+      rows.push({ kind:'do', title:'Reindex', sub:'r', run:function(){ reindex(); } });
+    if (can('act') && (!q || hit('open project')))
+      rows.push({ kind:'do', title:'Open a project…', sub:'a folder', run:function(){ openProject(''); } });
+    if (!q || hit('theme'))
+      rows.push({ kind:'do', title:'Next theme', sub:'t', run:function(){ pickTheme(MD.nextTheme()); } });
+    groups.push({ label:'Go to', rows: rows });
+  }
+
+  var kinds = ['doc'];
+  if (D.withSessions) kinds.push('session');
+  kinds.push('note', 'surface');
+  return { groups: groups, kinds: kinds,
+           count: q ? total + (total === 1 ? ' hit' : ' hits') : '' };
+}
+
+function menuItems(){
+  var out = [];
+  Object.keys(TITLES).forEach(function(k){
+    if (k === 'settings') out.push({ sep:true });
+    out.push({ label: TITLES[k], run: function(){ Shell.open({ kind:k, id:'', title:TITLES[k] }); } });
+  });
+  if (USER_VIEWS.length){
+    out.push({ sep:true });
+    USER_VIEWS.forEach(function(v){
+      out.push({ label: v.label || v.id, run: function(){
+        Shell.open({ kind:v.id, id:'', title:v.label || v.id }); } });
+    });
+  }
+  out.push({ sep:true });
+  out.push({ label:'Split the pane', key:'⌘\\', run: function(){ Shell.split(); } });
+  if (can('reindex')) out.push({ label:'Reindex', key:'r', run: function(){ reindex(); } });
+  return out;
+}
+
+/* ── opening things ─────────────────────────────────────────────────────── */
+function openDoc(rel, opts){
+  opts = opts || {};
+  var d = docBy(rel);
+  if (!d) return null;
+  var t = Shell.open({ kind:'doc', id:rel, title:rel.split('/').pop(), tip:rel,
+                       q:opts.q || '', jump:opts.jump || 0 },
+                     opts.where || 'here');
+  /* already open: re-point it at what you asked for rather than opening a copy */
+  if (t && t.surf.goto && (opts.q || opts.jump) && t.surf.out) t.surf.goto(opts.jump, opts.q);
+  return t;
+}
+function openSession(sid, opts){
+  opts = opts || {};
+  if (!D.sessions || !D.sessions[sid]) return null;
+  var m = D.sessions[sid];
+  return Shell.open({ kind:'session', id:sid, title:clip(m.t || sid.slice(0, 8), 30),
+                      tip:m.t || sid, q:opts.q || '' }, opts.where || 'here');
+}
+function curRel(){ var t = Shell.active(); return t && t.kind === 'doc' ? t.id : ''; }
+function curSid(){ var t = Shell.active(); return t && t.kind === 'session' ? t.id : ''; }
+function openRels(){
+  var m = {};
+  Shell.each(function(t){ if (t.kind === 'doc') m[t.id] = 1; });
+  return m;
+}
+
+function specFor(kind, id){
+  if (kind === 'doc') return docBy(id) ? { kind:'doc', id:id, title:id.split('/').pop(), tip:id } : null;
+  if (kind === 'session') return (D.sessions && D.sessions[id])
+    ? { kind:'session', id:id, title:clip(D.sessions[id].t || id.slice(0, 8), 30) } : null;
+  if (TITLES[kind]) return { kind:kind, id:'', title:TITLES[kind] };
+  if (USER_VIEWS.some(function(v){ return v.id === kind; })) return { kind:kind, id:'', title:kind };
+  return null;
+}
+function makeSurface(spec){
+  if (spec.kind === 'doc') return docSurface(spec.id, spec.q, spec.jump);
+  if (spec.kind === 'session') return sessionSurface(spec.id, spec.q);
+  return listSurface(spec.kind);
+}
+
+/* ── the sweep: new data, same window ───────────────────────────────────── */
+function refreshAll(){ stat(); Shell.refresh(); }
 function needText(){
   if (!query || textAll || !can('text')) return;
-  ensureAllText(function(){ render(); });
+  ensureAllText(function(){ Shell.refresh(); });
 }
-
-if (D.withSessions){
-  var anyHere = false;
-  for (var k in D.sessions){ if (inRepo(D.sessions[k].p)){ anyHere = true; break; } }
-  if (!anyHere) sesScope = 'all';        // this repo has no history of its own yet
+/* the strip says what the server is doing; how many documents there are is the
+   navigator's business, and saying it twice made the window look duplicated */
+function stat(){
+  var bits = [can('watch') ? 'watching for changes' : (can('live') ? 'served locally' : 'a static page')];
+  bits.push('indexed in ' + D.took + 's');
+  if (D.withSessions) bits.push(Object.keys(D.sessions).length + ' sessions');
+  Shell.status(bits.join(' · '));
 }
-
-VIEWS = [
-  { id:'search', label:'Search' },
-  { id:'docs', label:'Library', n: D.docs.length },
-  { id:'stale', label:'Stale' },
-  { id:'notes', label:'Notes' },
-  { id:'sessions', label:'Sessions', n: D.withSessions ? Object.keys(D.sessions).length : null },
-  { id:'graph', label:'Graph' },
-  { id:'settings', label:'Settings' }
-].concat(USER_VIEWS.map(function(v){ return { id:v.id, label:v.label || v.id }; }));
 
 /* ── reindex, and the heartbeat that decides how long the server lives ───── */
 function reindex(done){
@@ -1057,32 +1312,32 @@ function reindex(done){
     ['docs','stale','prompts','sessions','touches','hasGit','took','notes'].forEach(function(k){
       if (j[k] !== undefined) D[k] = j[k];
     });
-    textAll = false;
+    textAll = false; byS = null;
     if (D.notes && window.MDReview) DISK = D.notes;
     if (b) b.classList.remove('busy');
-    stat(); render();
-    if (window.MDReview && $('reader').classList.contains('on') && libSel){
-      var d = docBy(libSel);
-      if (d) { d.text = null; openDoc(libSel, '', $('reader').classList.contains('side')); }
-    }
+    /* every open document is re-read where you were reading it */
+    Shell.each(function(t){
+      if (t.kind !== 'doc' || !t.el) return;
+      var d = docBy(t.id);
+      if (d) d.text = null;
+      var y = t.el.scrollTop;
+      t.surf.reload();
+      setTimeout(function(){ t.el.scrollTop = y; }, 60);
+    });
+    refreshAll();
     toast('reindexed — ' + D.docs.length + ' documents');
     done && done();
   }, function(){ if (b) b.classList.remove('busy'); toast('reindex failed'); done && done(); });
 }
-function stat(){
-  $('wstat').textContent = D.docs.length + ' docs · indexed in ' + D.took + 's' +
-    (D.withSessions ? ' · ' + D.prompts.length + ' prompts' : '');
-}
+
 if (can('live')){
-  var bar = document.querySelector('.wsbar'), themeBtn = $('theme');
   var rb = document.createElement('button');
   rb.id = 'reidx'; rb.className = 'btn'; rb.title = 'Reindex (r)';
   rb.setAttribute('aria-label', 'Reindex');
-  rb.style.cssText = 'all:unset;cursor:pointer;padding:6px;border-radius:7px;color:var(--fg-muted)';
   rb.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
     'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>';
-  bar.insertBefore(rb, themeBtn);
+  document.querySelector('.bar').insertBefore(rb, $('navbtn'));
   rb.addEventListener('click', function(){ reindex(); });
 
   /* the server exits when this stops, so closing the window cleans up after
@@ -1104,16 +1359,19 @@ if (can('watch') && window.EventSource){
       changed.forEach(function(rel){ var d = docBy(rel); if (d) d.text = null; });
       if ((j.added || []).length || (j.gone || []).length) return reindex();
       if (!changed.length) return;
-      if (libSel && changed.indexOf(libSel) >= 0){
+      var reloaded = 0;
+      Shell.each(function(t){
+        if (t.kind !== 'doc' || !t.el || changed.indexOf(t.id) < 0) return;
         /* reload the open document where you were reading it, not at the top */
-        var pane = $('reader'), y = pane.scrollTop, side = pane.classList.contains('side');
-        openDoc(libSel, '', side);
-        setTimeout(function(){ pane.scrollTop = y; }, 40);
-        toast(libSel + ' changed on disk — reloaded');
-      } else {
-        toast(changed.length + (changed.length > 1 ? ' documents' : ' document') + ' changed on disk');
-        render();
-      }
+        var y = t.el.scrollTop;
+        t.surf.reload();
+        setTimeout(function(){ t.el.scrollTop = y; }, 60);
+        reloaded++;
+      });
+      toast(reloaded
+        ? changed[0] + ' changed on disk — reloaded'
+        : changed.length + (changed.length > 1 ? ' documents' : ' document') + ' changed on disk');
+      refreshAll();
     };
   } catch(e){}
 }
@@ -1158,12 +1416,9 @@ function openProject(id){
 
 $('wname').textContent = D.name;
 $('wpath').textContent = D.root.replace(/^\/Users\/[^/]+/, '~');
-stat();
 
+/* ── everything you can click ───────────────────────────────────────────── */
 document.addEventListener('click', function(e){
-  var tab = e.target.closest('#tabs button');
-  if (tab) return setView(tab.dataset.v);
-
   var seg = e.target.closest('[data-lmode],[data-lsort],[data-lfacet],[data-sscope],[data-slive]');
   if (seg){
     var d = seg.dataset;
@@ -1172,7 +1427,7 @@ document.addEventListener('click', function(e){
     if (d.lfacet) libFacet[d.lfacet] = !libFacet[d.lfacet];
     if (d.sscope) sesScope = d.sscope;
     if (d.slive)  sesLive = !sesLive;
-    return render();
+    return Shell.nav();
   }
   if (e.target.closest('#wname')) return projectMenu();
   var rp = e.target.closest('[data-recent]');
@@ -1192,12 +1447,13 @@ document.addEventListener('click', function(e){
     var f = $('s-editor');
     return setOne('editor', f ? f.value.trim() : '', 'editor saved');
   }
+  if (e.target.closest('[data-navopts]')){ navOpts = !navOpts; return Shell.nav(); }
   var gb = e.target.closest('[data-graph]');
-  if (gb){ graphOn = gb.dataset.graph === '1'; return render(); }
+  if (gb){ graphOn = gb.dataset.graph === '1'; return Shell.refresh(); }
   var dir = e.target.closest('[data-dir]');
   if (dir){
     libOpen[dir.dataset.dir] = libOpen[dir.dataset.dir] === false;
-    return render();
+    return Shell.nav();
   }
   var ab = e.target.closest('[data-act]');
   if (ab) return act(ab.dataset.act, ab.dataset.id, '',
@@ -1206,36 +1462,37 @@ document.addEventListener('click', function(e){
   var cmd = e.target.closest('[data-copy]');
   if (cmd){ copy(cmd.dataset.copy); return toast('copied — paste it into a terminal'); }
 
+  var where = (e.metaKey || e.ctrlKey) ? 'split' : 'here';
   var ses = e.target.closest('[data-ses]');
-  if (ses){
-    if (view !== 'sessions' && !$('spane').classList.contains('on')) setView('sessions');
-    var got = openSession(ses.dataset.ses, ses.dataset.q || '');
-    /* jump to the first matching prompt rather than making you hunt for it */
-    var first = $('sbody').querySelector('.pitem.hit');
-    if (first) setTimeout(function(){ first.scrollIntoView({ block:'center' }); }, 60);
-    return got;
-  }
+  if (ses) return openSession(ses.dataset.ses, { q: ses.dataset.q || '', where: where });
 
   var row = e.target.closest('[data-doc]');
-  if (row && !e.target.closest('#reader')){
-    /* opened from a list: the reader takes the right half and the list stays put */
-    var beside = view === 'docs' || $('spane').classList.contains('on');
-    return openDoc(row.dataset.doc, row.dataset.q || query.trim(), beside);
+  if (row && !e.target.closest('article.md')){
+    return openDoc(row.dataset.doc, { q: row.dataset.q || '', where: where,
+                                      jump: +(row.dataset.line || 0) });
   }
-  if (e.target.id === 'rclose') closeReader();
-  if (e.target.id === 'sclose') closeSession();
 });
+
 document.addEventListener('keydown', function(e){
-  var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName);
+  var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable;
   if (e.key === 'Escape'){
-    if ($('reader').classList.contains('on')){ if (!readerBusy()) closeReader(); }
-    else if ($('spane').classList.contains('on')) closeSession();
-    else if (typing) e.target.blur();
+    /* the review layer only hears Escape while a document is on screen; from a
+       list the tray would otherwise be stuck open */
+    if (typing) return e.target.blur();
+    var tray = $('tray'), t = Shell.active();
+    if (tray.classList.contains('open') && (!t || t.kind !== 'doc')) $('tray-close').click();
     return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.key === '/'){ e.preventDefault(); if (view !== 'search') setView('search'); var q=$('q'); if (q) q.focus(); }
-  if (e.key === 'r' && can('reindex')){ e.preventDefault(); reindex(); return; }
+  if (e.key === '/'){
+    e.preventDefault();
+    if (Shell.navMode() === 'notes') Shell.setNavMode('docs');
+    Shell.nav();
+    var i = $('nvq-i');
+    if (i) i.focus(); else Shell.palette(true);
+    return;
+  }
+  if (e.key === 'r' && can('reindex')){ e.preventDefault(); return reindex(); }
   if (e.key === 't'){ pickTheme(MD.nextTheme()); }
 });
 $('theme').addEventListener('click', function(){ pickTheme(MD.nextTheme()); });
@@ -1244,18 +1501,32 @@ $('theme').addEventListener('click', function(){ pickTheme(MD.nextTheme()); });
    one you actually chose, so the reader opened on its own agrees */
 function pickTheme(name){
   var t = MD.setTheme(name);
-  if (view === 'settings') render();
+  Shell.refresh();
   if (can('settings')) api('settings', { set: { theme: t } });
   return t;
 }
 MD.restoreTheme(SET && SET.values ? SET.values.theme : '');
 marked.setOptions({ gfm:true });
-render();
-if (D.open) openDoc(D.open, '');
-window.__ws = { data: D, dossier: buildDossier, setView: setView, caps: CAPS,
+
+if (D.withSessions){
+  var anyHere = false;
+  for (var k in D.sessions){ if (inRepo(D.sessions[k].p)){ anyHere = true; break; } }
+  if (!anyHere) sesScope = 'all';        // this repo has no history of its own yet
+}
+
+/* ── go ─────────────────────────────────────────────────────────────────── */
+var restored = Shell.init({
+  storeKey: 'rubricator:layout:' + hash(D.root),
+  make: makeSurface, spec: specFor, nav: navFor, search: palSearch, menu: menuItems,
+  onFocus: function(){ Shell.nav(); }
+});
+stat();
+if (D.open) openDoc(D.open, {});
+else if (!restored) Shell.open({ kind:'search', id:'', title:'Search' });
+
+window.__ws = { data: D, dossier: buildDossier, caps: CAPS,
                 reindex: reindex, ensureText: ensureText, ensureAllText: ensureAllText,
-                openDoc: openDoc, closeDoc: closeReader,
-                openSession: openSession, closeSession: closeSession,
-                related: relatedDocs,
-                setQuery: function(q){ query = q; render(); } };
+                openDoc: openDoc, openSession: openSession, related: relatedDocs,
+                shell: window.Shell, refresh: refreshAll,
+                setQuery: function(q){ query = q; Shell.refresh(); } };
 })();

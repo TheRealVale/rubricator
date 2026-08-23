@@ -193,6 +193,12 @@ ws_run() {
   fi
 }
 
+# the theme you chose in the workspace is the default here too — read straight
+# out of the settings file, so the reader keeps needing nothing but bash and awk
+THEME="$( { sed -n 's/.*"theme"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' \
+  "${RUBRICATOR_CONFIG:-$HOME/.config/rubricator/config.json}" 2>/dev/null || true; } | head -1 )"
+case "$THEME" in rubric|slate|bone) ;; *) THEME="rubric" ;; esac
+
 # review modes hand off to the python runner (they block on a browser round-trip)
 case "${1:-}" in
   --workspace|-w)
@@ -264,11 +270,6 @@ case "${1:-}" in
     exec "$PY" "$SHARE/hook.py" manual "$1" ;;
 esac
 
-# the theme you chose in the workspace is the default here too — read straight
-# out of the settings file, so the reader keeps needing nothing but bash and awk
-THEME="$( { sed -n 's/.*"theme"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' \
-  "${RUBRICATOR_CONFIG:-$HOME/.config/rubricator/config.json}" 2>/dev/null || true; } | head -1 )"
-case "$THEME" in rubric|slate|bone) ;; *) THEME="rubric" ;; esac
 OPEN_MODE="app"; OUT=""; TO_STDOUT=0
 FILE=""; SESSIONS=""; EXTRA_DIRS=()
 

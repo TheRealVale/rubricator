@@ -212,6 +212,10 @@ Design canvas: the shell, the session reader, and the direction exploration.
       verb in mono caps carrying the colour, and the quote ruled at 1px.
 - [x] **F5 · The divider is the control.** 1px at rest, 11px of hit area, and it
       brightens and switches the cursor rather than growing a grip.
+- [x] **F6a · Tabs per pane, not per window.** The one disagreement with the
+      brief, argued on the canvas and kept: with splits, a single bottom strip
+      cannot say which pane a tab belongs to, and per-pane tabs give each pane
+      its own history.
 - [x] **F7 · Open a project.** The repository name in the bar is a switcher:
       recents the server remembered, plus a native folder chooser it opens
       itself. A second project opens in its own window. The page never sends a
@@ -221,8 +225,17 @@ Design canvas: the shell, the session reader, and the direction exploration.
       every token into a live `<div>`. Both halves fixed: the renderer sanitises
       inside an inert `<template>`, and the served page carries a nonce-based
       CSP so an inline handler cannot run even if the sanitiser misses one.
-- [ ] **F6 · The shell itself** — navigator, tabbed splittable panes, a tray that
-      follows focus. Designed and agreed; not built.
+- [x] **F6 · The shell itself.** One window: a navigator with three modes down the
+      left, panes with their own tabs in the middle, the review tray down the
+      right, a status strip along the bottom, and `⌘K` across all of it. The
+      page-level tab strip is gone — it mixed *which list am I looking at* with
+      *which document am I reading*, and separating those is what made room for
+      panes. `share/shell.js` owns the window and knows a surface only as
+      something that renders into a div; `share/workspace.js` owns what the
+      surfaces are. A tab keeps its DOM for as long as it lives, so a document
+      leaves and comes back with its annotations, its diagrams and its scroll
+      position intact. The tray follows focus rather than multiplying per pane.
+      The layout — panes, tabs, navigator mode and width — survives a reload.
 
 ---
 

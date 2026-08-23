@@ -1,0 +1,201 @@
+/* ── the shell ────────────────────────────────────────────────────────────
+   One window, four fixed edges and one elastic middle: a bar across the top,
+   the navigator down the left, the review rail down the right, a status strip
+   along the bottom, and panes filling whatever is left. Nothing here knows
+   what a document is — surfaces do. */
+html,body{overflow:hidden}   /* the shell owns the viewport; nothing behind it scrolls */
+#app{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg)}
+/* the tray does not float over the window, it takes a bite out of it — the
+   same 352px review.css gives it, given back to the shell */
+body.tray-open{padding-right:0}
+@media (min-width:821px){ body.tray-open #app{right:352px} }
+
+/* ── the bar ─────────────────────────────────────────────────────────────
+   Identity on the left, one way in through the middle, verbs on the right. */
+.bar{flex:none;display:flex;align-items:center;gap:11px;height:46px;padding:0 9px 0 16px;
+  border-bottom:1px solid var(--border-soft);position:relative;z-index:30}
+.bar .who{font-weight:640;font-size:13.5px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;color:var(--fg)}
+.bar .who::after{content:"";width:0;height:0;border:3.5px solid transparent;
+  border-top-color:var(--fg-dim);margin-top:3px}
+.bar .who:hover::after{border-top-color:var(--fg)}
+.bar .path{font-family:var(--mono);font-size:11px;color:var(--fg-dim);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:34%}
+.bar .sp{flex:1}
+.bar .btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:7px;color:var(--fg-muted);flex:none}
+.bar .btn:hover{background:var(--bg-elev);color:var(--fg)}
+.bar .btn.on{background:var(--bg-elev);color:var(--fg)}
+/* the search box is a button: it opens the palette, it never holds a caret */
+.find{all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;height:28px;
+  padding:0 9px;border:1px solid var(--border);border-radius:8px;color:var(--fg-dim);
+  font-size:12px;min-width:210px;max-width:280px}
+.find:hover{border-color:var(--fg-dim);color:var(--fg-muted)}
+.find svg{width:13px;height:13px;flex:none}
+.find .t{flex:1}
+.find kbd{font-family:var(--mono);font-size:10px;color:var(--fg-dim);border:1px solid var(--border-soft);
+  border-radius:4px;padding:1px 4px}
+
+/* ── the middle ──────────────────────────────────────────────────────── */
+.mid{flex:1;display:flex;min-height:0;min-width:0}
+
+/* ── the navigator ───────────────────────────────────────────────────────
+   Three modes and one job: get you to a thing. Documents nests because
+   directories are how you remember where a file is; the other two are flat. */
+#nav{width:252px;flex:none;display:flex;flex-direction:column;min-height:0;
+  background:var(--bg-soft);border-right:1px solid var(--border-soft)}
+.nvh{display:flex;gap:2px;padding:8px 8px 7px;flex:none}
+.nvh button{all:unset;cursor:pointer;font-size:11.5px;padding:5px 9px;border-radius:7px;
+  color:var(--fg-dim)}
+.nvh button:hover{color:var(--fg)}
+.nvh button.on{background:var(--bg-elev);color:var(--fg)}
+.nvq{flex:none;padding:0 10px 8px}
+.nvq input{all:unset;box-sizing:border-box;width:100%;font-family:var(--font);font-size:12px;
+  color:var(--fg);padding:5px 9px;border:1px solid var(--border-soft);border-radius:7px;
+  background:var(--bg)}
+.nvq input:focus{border-color:var(--accent)}
+.nvq input::placeholder{color:var(--fg-dim)}
+.nvb{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:0 8px 14px;min-height:0}
+.nvf{flex:none;border-top:1px solid var(--border-soft);padding:7px 12px;
+  font-family:var(--mono);font-size:10px;color:var(--fg-dim);display:flex;gap:9px;
+  align-items:center;white-space:nowrap;overflow:hidden}
+.nvf button{all:unset;cursor:pointer;color:var(--fg-dim)}
+.nvf button:hover{color:var(--fg)}
+/* collapsed: the modes survive as a rail, so the navigator is never gone */
+#nav.rail{width:42px}
+#nav.rail .nvh{flex-direction:column;align-items:center;gap:4px;padding:9px 0}
+#nav.rail .nvh button{width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+  padding:0;font-size:0}
+#nav.rail .nvh button svg{width:15px;height:15px}
+#nav.rail .nvq,#nav.rail .nvb,#nav.rail .nvf{display:none}
+
+/* ── the divider is the control (F5, applied to the shell) ─────────────── */
+.rz{flex:none;width:11px;margin:0 -5px;cursor:col-resize;position:relative;z-index:3;
+  transition:background .12s}
+.rz::after{content:'';position:absolute;left:5px;top:0;bottom:0;width:1px;
+  background:var(--border);transition:background .12s,width .12s,left .12s}
+.rz:hover,body.resizing .rz.act{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.rz:hover::after,body.resizing .rz.act::after{left:4.5px;width:2px;background:var(--accent)}
+
+/* ── panes ───────────────────────────────────────────────────────────── */
+#panes{flex:1;display:flex;min-width:0;min-height:0}
+.pane{flex:1 1 0;display:flex;flex-direction:column;min-width:0;min-height:0}
+.tstrip{flex:none;display:flex;align-items:stretch;height:33px;background:var(--bg-soft);
+  border-bottom:1px solid var(--border-soft)}
+.tstrip .tabs{display:flex;align-items:stretch;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+.tstrip .tabs::-webkit-scrollbar{display:none}
+.tab{display:flex;align-items:center;gap:7px;padding:0 9px 0 12px;font-size:12px;
+  color:var(--fg-dim);border-right:1px solid var(--border-soft);cursor:pointer;
+  white-space:nowrap;max-width:230px;flex:none;position:relative}
+.tab:hover{color:var(--fg-muted)}
+.tab .nm{overflow:hidden;text-overflow:ellipsis}
+.tab .kd{font-family:var(--mono);font-size:8.5px;letter-spacing:.09em;color:var(--fg-dim);
+  border:1px solid var(--border);padding:0 3px;line-height:13px;flex:none}
+.tab .n{font-size:9.5px;padding:0 5px;line-height:15px;border-radius:9px;
+  background:var(--accent-soft);color:var(--fg)}
+.tab .x{all:unset;cursor:pointer;width:15px;height:15px;border-radius:4px;display:flex;
+  align-items:center;justify-content:center;color:var(--fg-dim);opacity:0;flex:none;font-size:13px}
+.tab:hover .x,.tab.on .x{opacity:1}
+.tab .x:hover{background:var(--bg-elev);color:var(--fg)}
+.tab.on{background:var(--bg);color:var(--fg);box-shadow:inset 0 -2px 0 var(--border)}
+.pane.focus .tab.on{box-shadow:inset 0 -2px 0 var(--accent)}
+.tacts{display:flex;align-items:center;gap:3px;padding:0 6px;flex:none;
+  border-left:1px solid var(--border-soft)}
+.tacts:empty{display:none}
+.tacts button{all:unset;cursor:pointer;font-size:11.5px;color:var(--fg-dim);padding:4px 8px;
+  border-radius:6px;white-space:nowrap}
+.tacts button:hover{color:var(--fg);background:var(--bg-elev)}
+.tacts button.go{color:var(--accent)}
+.pbody{flex:1;position:relative;min-height:0;background:var(--bg)}
+.surf{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;display:none}
+.surf.on{display:block}
+.surf .inner{max-width:1000px;margin:0 auto;padding:20px 26px 40vh}
+.surf .body{max-width:820px;margin:0 auto;padding:26px 26px 40vh}
+.surf mark.hit{background:var(--yellow);color:#0b0d11;border-radius:3px}
+/* a pane can be half a window wide, so inline code has to be able to break —
+   in the full-width reader it never had to */
+.surf .md :not(pre) > code{overflow-wrap:anywhere}
+.pane .void{display:flex;align-items:center;justify-content:center;height:100%;
+  color:var(--fg-dim);font-size:12.5px;text-align:center;line-height:1.8;padding:0 30px}
+
+/* ── the review rail ──────────────────────────────────────────────────── */
+#rail{width:42px;flex:none;border-left:1px solid var(--border-soft);background:var(--bg-soft);
+  display:flex;flex-direction:column;align-items:center;padding:9px 0;gap:6px}
+#rail .rb{all:unset;cursor:pointer;position:relative;width:28px;height:28px;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;color:var(--fg-muted)}
+#rail .rb:hover{background:var(--bg-elev);color:var(--fg)}
+#rail .rb.on{background:var(--accent-soft);color:var(--accent)}
+#rail .rb svg{width:15px;height:15px}
+#rail .cnt{position:absolute;top:-3px;right:-4px;min-width:14px;height:14px;border-radius:8px;
+  background:var(--accent);color:var(--bg);font-size:9px;font-weight:700;display:flex;
+  align-items:center;justify-content:center;padding:0 3px;font-family:var(--mono)}
+#rail .lbl{writing-mode:vertical-rl;font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--fg-dim);margin-top:2px;user-select:none}
+
+/* ── the status strip ─────────────────────────────────────────────────── */
+.stat{flex:none;height:24px;display:flex;align-items:center;gap:14px;padding:0 12px;
+  border-top:1px solid var(--border-soft);background:var(--bg-soft);
+  font-family:var(--mono);font-size:10.5px;color:var(--fg-dim);white-space:nowrap;overflow:hidden}
+.stat .r{margin-left:auto;overflow:hidden;text-overflow:ellipsis}
+.stat b{font-weight:400;color:var(--fg-muted)}
+.stat .busy{color:var(--accent)}
+
+/* ── find anything ────────────────────────────────────────────────────── */
+#pal{position:fixed;inset:0;z-index:90;display:none;align-items:flex-start;justify-content:center;
+  padding-top:11vh;background:rgba(0,0,0,.42)}
+html[data-mode="light"] #pal{background:rgba(60,50,35,.20)}
+#pal.on{display:flex}
+#pal .box{width:min(640px,92vw);max-height:74vh;display:flex;flex-direction:column;
+  background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;
+  box-shadow:var(--shadow);overflow:hidden}
+#pal .qb{display:flex;align-items:center;gap:11px;padding:13px 16px;
+  border-bottom:1px solid var(--border-soft);flex:none}
+#pal .qb svg{width:15px;height:15px;color:var(--fg-dim);flex:none}
+#pal input{all:unset;flex:1;font-family:var(--font);font-size:15px;color:var(--fg)}
+#pal input::placeholder{color:var(--fg-dim)}
+#pal .cnt{font-size:11px;color:var(--fg-dim);font-family:var(--mono);white-space:nowrap}
+#pal .list{overflow-y:auto;padding:5px 0 7px;min-height:0}
+#pal .grp{margin:9px 0 3px;padding:0 16px;font-size:10px;text-transform:uppercase;
+  letter-spacing:.09em;color:var(--fg-dim);font-weight:650}
+#pal .row{display:flex;align-items:center;gap:10px;padding:7px 16px;font-size:13px;
+  color:var(--fg-muted);cursor:pointer;position:relative}
+#pal .row::before{content:"";position:absolute;left:6px;top:50%;margin-top:-7px;width:3px;height:14px;
+  background:transparent}
+#pal .row.on::before{background:var(--accent)}
+#pal .row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pal .row .sub{font-family:var(--mono);font-size:10.5px;color:var(--fg-dim);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:42%}
+#pal .row.on{background:var(--bg-soft);color:var(--fg)}
+#pal .row.on .kind{color:var(--fg-muted)}
+#pal .row.on .go{color:var(--fg-dim)}
+#pal .go{font-family:var(--mono);font-size:10px;color:transparent}
+#pal .kind{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--fg-dim);border:1px solid var(--border);border-radius:4px;padding:1px 4px;flex:none}
+#pal .kind.on{border-color:var(--accent);color:var(--accent)}
+#pal mark{background:var(--accent-soft);color:var(--fg);padding:0 1px;border-radius:2px}
+#pal .none{padding:26px 16px;color:var(--fg-dim);font-size:12.5px;line-height:1.7}
+#pal .foot{flex:none;display:flex;gap:15px;padding:9px 16px;border-top:1px solid var(--border-soft);
+  font-family:var(--mono);font-size:10px;color:var(--fg-dim)}
+#pal .foot .kf{margin-left:auto;display:flex;gap:5px}
+#pal .foot .kf button{all:unset;cursor:pointer;border:1px solid var(--border-soft);border-radius:4px;
+  padding:1px 5px;color:var(--fg-dim)}
+#pal .foot .kf button.on{border-color:var(--accent);color:var(--accent)}
+
+/* ── the surface menu on the bar ──────────────────────────────────────── */
+#more{position:absolute;top:40px;right:9px;z-index:60;min-width:210px;background:var(--bg-elev);
+  border:1px solid var(--border);box-shadow:var(--shadow);padding:5px;border-radius:10px}
+#more button{all:unset;cursor:pointer;display:flex;align-items:baseline;gap:10px;padding:7px 10px;
+  width:100%;box-sizing:border-box;font-size:12.5px;color:var(--fg-muted);border-radius:6px}
+#more button:hover{background:var(--bg-soft);color:var(--fg)}
+#more .k{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--fg-dim)}
+#more .sep{height:1px;background:var(--border-soft);margin:5px 0}
+
+/* ── a document inside a pane ─────────────────────────────────────────── */
+.dochead{display:flex;align-items:center;gap:10px;padding:9px 26px 0;max-width:820px;
+  margin:0 auto;font-size:11px;color:var(--fg-dim)}
+.dochead .p{font-family:var(--mono);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+@media (max-width:900px){
+  #nav:not(.rail){position:absolute;left:0;top:46px;bottom:24px;z-index:20;box-shadow:var(--shadow)}
+  .stat .r{display:none}
+}

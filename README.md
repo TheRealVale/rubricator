@@ -140,12 +140,37 @@ It walks every markdown file the repo tracks, reads `git log`, and builds one st
 — 328 documents and 3,800 prompts index in about a second, so there is nothing to cache
 and nothing to invalidate.
 
-**Library** is the tree: every document, with its note count and a mark where the code it
-describes has moved on. Sort by recency, staleness, notes, size or name; filter to the ones
-you have annotated. Selecting a document opens it beside the tree, with the full review
-layer — so marking something up never means leaving the workspace.
+### The shell
 
-**Sessions** is your own history as something you can walk through. Every session you have
+One window: the **navigator** down the left, **panes** in the middle, the review **tray**
+down the right, and a status strip along the bottom that says what the server is doing.
+
+A **pane** holds any surface — a document, a session, a search, the graph, settings — and
+keeps its own tabs and its own history. `⌘\` splits the window; ⌘-click anything to open it
+in the split rather than here. Tabs sit at the top of each pane rather than along the bottom
+of the window, because with two panes a single strip cannot say which pane a tab belongs to.
+A tab owns its DOM for as long as it lives, so leaving a document for something else and
+coming back keeps its annotations, its diagrams and where you were reading.
+
+The **tray follows focus**. The review layer is one chrome for many documents, so rather
+than a tray per pane there is one tray showing whichever document you are looking at, with
+its name in the header. Notes are stored per document, so nothing is lost when focus moves.
+
+`⌘K` is **find anything** — documents, sessions, your own notes and the surfaces of this
+window in one list, because when you are hunting for something you rarely know which of
+those it is. `⏎` opens it here, `⌘⏎` in a split, `⇥` filters by kind.
+
+`⌘B` collapses the navigator to a rail · `⌘E` cycles its modes · `⌘1`–`⌘9` focus a pane ·
+`⌘W` closes a tab · `⌘⌥[` and `⌘⌥]` step through them · `/` puts the caret in the
+navigator's filter · every divider is draggable.
+
+**Documents** is the navigator's first mode, and the only one that nests — directories are
+how you remember where a file is. Note counts and a mark where the code a document describes
+has moved on; sorting and filters are behind *sort & filter*, because most of the time you
+are looking for a name. Selecting a document opens it in the focused pane with the full
+review layer, so marking something up never means leaving the workspace.
+
+**Sessions**, the second mode, is your own history as something you can walk through. Every session you have
 run, newest first, scoped to this repo by default. Each one shows what you asked, which
 files it changed, and which documents it bears on — worked out from the overlap between the
 files a session touched and the files each document describes.
@@ -156,15 +181,15 @@ read and searched but not picked up again. The browser says which is which inste
 offering you a resume command that would fail — for the live ones it hands you
 `cd <project> && claude -r <id>`, ready to paste.
 
-**Search** every document at once, by name or by content — typing part of a filename finds
+**Search**, a surface of its own, covers every document at once, by name or by content — typing part of a filename finds
 that file first, and works before its body has even been read. Matches come with context;
 click a result to read it.
 
-**Finding a conversation you half-remember.** The Sessions tab searches everything you have
+**Finding a conversation you half-remember.** The Sessions mode searches everything you have
 ever typed, across every repository, and tells you which one it was in. That is usually the
 question: not *what did I say* but *where was I when I said it*. Results carry the line that
 matched, the repository, and how long ago; opening one jumps straight to that prompt with
-the word highlighted. Prompt hits in the main Search tab are clickable for the same reason.
+the word highlighted. Prompt hits in the Search surface are clickable for the same reason.
 Scoped to the current repository by default, with a count of how many more are elsewhere and
 one button to widen.
 
@@ -172,7 +197,7 @@ one button to widen.
 files each document actually mentions or links, so it flags *"this spec describes code that
 changed 392 times since you last touched it"* rather than *"this repo is busy"*.
 
-**Notes** collects your annotations across every document — every open Question, everything
+**Notes**, the third mode, collects your annotations across every document — every open Question, everything
 marked Cut — because what you are hunting is often your own reaction, not the text.
 
 **With `--sessions`** a topic also resolves to the sessions that discussed it and the code
@@ -227,6 +252,7 @@ share/render.js     markdown into the reader's DOM — shared by both pages, so 
                     document behaves the same wherever it is opened
 share/review.*      annotation layer — anchors, verbs, storage, export
 share/ui.*          outline modes, search, resizable panel, shortcuts
+share/shell.*       the window: navigator, panes, tabs, palette, status strip
 share/workspace.*   the repo index and its views
 share/hook.py       blocking review server for --review and --hook
 ```
@@ -271,7 +297,8 @@ attributed and 1,579.
 Two directories, both optional:
 
 - `~/.config/rubricator/views/*.js` — each file may call
-  `RB.view({id, label, render})` and gets its own tab. `RB` hands you the index,
+  `RB.view({id, label, render})` and becomes a surface of its own, reachable from ⌘K
+  and the surface menu. `RB` hands you the index,
   the helpers and `RB.open(rel)`.
 - `~/.config/rubricator/providers/*.py` — each file may define `provide(root)`,
   and whatever it returns lands in the page as `D.extra[name]`.
@@ -372,7 +399,7 @@ workspace you chose it in.
 
 ## Settings
 
-The workspace has a **Settings** tab: the theme, which terminal sessions open in, whether the
+The workspace has a **Settings** surface: the theme, which terminal sessions open in, whether the
 page may start anything at all, your editor, and whether indexing counts subagent work. Changing
 what may be launched takes effect at once — no restart, and the buttons appear and
 disappear with it.
