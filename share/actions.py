@@ -60,8 +60,11 @@ SETTABLE = {
     "editor":       lambda v: v == "" or _is_program(v),
     "deep":         lambda v: isinstance(v, bool),
     "idle":         lambda v: isinstance(v, int) and 30 <= v <= 86400,
+    "theme":        lambda v: v in THEMES,
 }
-DEFAULTS = {"terminal": "", "allow_launch": False, "editor": "", "deep": False, "idle": 120}
+THEMES = ("rubric", "slate", "bone")
+DEFAULTS = {"terminal": "", "allow_launch": False, "editor": "", "deep": False,
+            "idle": 120, "theme": "rubric"}
 
 
 def _is_program(v):

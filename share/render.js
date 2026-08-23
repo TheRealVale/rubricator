@@ -133,7 +133,7 @@ function initMermaid(){
   if (mermaidReady || !window.mermaid) return;
   var cs = getComputedStyle(document.documentElement);
   var v = function(n){ return cs.getPropertyValue(n).trim(); };
-  var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var dark = document.documentElement.getAttribute('data-mode') !== 'light';
   mermaid.initialize({ startOnLoad:false, theme: dark ? 'dark' : 'default', securityLevel:'strict',
     themeVariables:{
       fontFamily:'-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif',
@@ -180,5 +180,32 @@ function render(o){
   return { body: fm.body, fmLines: fm.lines, headings: headings };
 }
 
-window.MD = { render: render, esc: esc };
+/* ── themes ───────────────────────────────────────────────────────────────
+   Three palettes; each is either light or dark, and a few rules need to know
+   which. Older pages stored "dark" and "light" — those still resolve. */
+var THEMES = { rubric:'dark', slate:'dark', bone:'light' };
+var LEGACY = { dark:'rubric', light:'bone' };
+function theme(name){ return THEMES[name] ? name : (LEGACY[name] || 'rubric'); }
+function current(){ return theme(document.documentElement.getAttribute('data-theme')); }
+function setTheme(name){
+  name = theme(name);
+  var r = document.documentElement;
+  r.setAttribute('data-theme', name);
+  r.setAttribute('data-mode', THEMES[name]);
+  try { localStorage.setItem('md-theme', name); } catch(e){}
+  return name;
+}
+function nextTheme(){
+  var k = Object.keys(THEMES);
+  return k[(k.indexOf(current()) + 1) % k.length];
+}
+function restoreTheme(fallback){
+  var saved = null;
+  try { saved = localStorage.getItem('md-theme'); } catch(e){}
+  if (saved || fallback) setTheme(saved || fallback);
+  else setTheme(current());          // still normalise what the page was built with
+}
+
+window.MD = { render: render, esc: esc, themes: THEMES, theme: current,
+              setTheme: setTheme, nextTheme: nextTheme, restoreTheme: restoreTheme };
 })();

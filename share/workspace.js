@@ -729,6 +729,26 @@ function viewSettings(){
   var v = SET.values, forced = SET.forced || {};
   var out = [];
 
+  out.push('<div class="grp">Theme</div>');
+  var SWATCH = {
+    rubric: ['#101013','#17171b','#e8e6e3','#cf4b26', 'warm graphite · red is reserved for your marks'],
+    slate:  ['#0e1013','#151a20','#e4e9ee','#8fa7bd', 'near-monochrome · status by lightness, not hue'],
+    bone:   ['#f4f1ea','#e9e4d9','#22201c','#a8341c', 'paper and iron gall · the light one, done properly']
+  };
+  var now_ = MD.theme();
+  out.push('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:6px">');
+  ['rubric','slate','bone'].forEach(function(name){
+    var sw = SWATCH[name], on = now_ === name;
+    out.push('<div class="thc' + (on ? ' on' : '') + '" data-theme-pick="' + name + '">' +
+      '<div class="sws">' + sw.slice(0,4).map(function(c){
+        return '<i style="background:' + c + '"></i>'; }).join('') + '</div>' +
+      '<div class="thn">' + name + (on ? '<span>in use</span>' : '') + '</div>' +
+      '<div class="thd">' + sw[4] + '</div></div>');
+  });
+  out.push('</div>');
+  out.push('<div class="qnote">Kept in the settings file and in this browser, so a document you ' +
+    'open on its own matches. <span class="f">t</span> cycles them.</div>');
+
   out.push('<div class="grp">Where a session opens</div>');
   var terms = [['', 'whatever ran md']].concat(SET.terminals.map(function(t){
     return [t === 'iTerm' ? 'iTerm.app' : t + '.app', t];
@@ -1094,6 +1114,8 @@ document.addEventListener('click', function(e){
     if (d.slive)  sesLive = !sesLive;
     return render();
   }
+  var tp = e.target.closest('[data-theme-pick]');
+  if (tp) return pickTheme(tp.dataset.themePick);
   var sb = e.target.closest('[data-set]');
   if (sb){
     var key = sb.dataset.set, raw = sb.dataset.val;
@@ -1150,16 +1172,19 @@ document.addEventListener('keydown', function(e){
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === '/'){ e.preventDefault(); if (view !== 'search') setView('search'); var q=$('q'); if (q) q.focus(); }
   if (e.key === 'r' && can('reindex')){ e.preventDefault(); reindex(); return; }
-  if (e.key === 't'){
-    var r = document.documentElement, t = r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    r.setAttribute('data-theme', t); try { localStorage.setItem('md-theme', t); } catch(e2){}
-  }
+  if (e.key === 't'){ pickTheme(MD.nextTheme()); }
 });
-$('theme').addEventListener('click', function(){
-  var r = document.documentElement, t = r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  r.setAttribute('data-theme', t); try { localStorage.setItem('md-theme', t); } catch(e){}
-});
-try { var th = localStorage.getItem('md-theme'); if (th) document.documentElement.setAttribute('data-theme', th); } catch(e){}
+$('theme').addEventListener('click', function(){ pickTheme(MD.nextTheme()); });
+
+/* the setting is the default for every window; the browser remembers the last
+   one you actually chose, so the reader opened on its own agrees */
+function pickTheme(name){
+  var t = MD.setTheme(name);
+  if (view === 'settings') render();
+  if (can('settings')) api('settings', { set: { theme: t } });
+  return t;
+}
+MD.restoreTheme(SET && SET.values ? SET.values.theme : '');
 marked.setOptions({ gfm:true });
 render();
 if (D.open) openDoc(D.open, '');

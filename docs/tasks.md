@@ -174,6 +174,26 @@ end of it.
 
 ---
 
+## Look and feel
+
+Design canvas: the shell, the session reader, and the direction exploration.
+
+- [x] **F2 · Three themes.** Rubric (default), Slate and Bone, defined once in
+      `template.html` and inherited by every surface. `data-mode` carries light
+      vs dark for the handful of rules that must know; the old `dark` / `light`
+      values still resolve. Chosen in Settings, cycled with `t`, or `--theme`.
+- [x] **F3 · Selection without the accent bar.** The mark moved into a gutter
+      column every row shares, so it lines up down the list and the row itself
+      is never decorated — no fill, no inset accent, no rounded pill.
+- [x] **F4 · A tray made of type.** No card and no left border: a hairline, the
+      verb in mono caps carrying the colour, and the quote ruled at 1px.
+- [x] **F5 · The divider is the control.** 1px at rest, 11px of hit area, and it
+      brightens and switches the cursor rather than growing a grip.
+- [ ] **F6 · The shell itself** — navigator, tabbed splittable panes, a tray that
+      follows focus. Designed and agreed; not built.
+
+---
+
 ## After the plan
 
 - [x] **F1 · Settings screen.** Terminal, launching, editor and deep indexing,

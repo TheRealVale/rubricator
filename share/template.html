@@ -1,37 +1,52 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="rubric" data-mode="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <style>
-html[data-theme="dark"]{
+html[data-mode="dark"]{
 <!--@include vendor/hljs-dark.css-->
 }
-html[data-theme="light"]{
+html[data-mode="light"]{
 <!--@include vendor/hljs-light.css-->
 }
 </style>
 <style>
+/* ── themes ──────────────────────────────────────────────────────────────
+   Three palettes, each with a rule rather than a mood. Rubric is the default:
+   the tool is named after the scribe who added the red marks, so red is
+   reserved for your annotations and status wears earth pigments instead.
+   data-mode says light or dark for the handful of rules that must know. */
+:root, html[data-theme="rubric"], html[data-theme="dark"]{
+  --bg:#101013; --bg-elev:#17171b; --bg-soft:#131317;
+  --fg:#e8e6e3; --fg-muted:#9b968e; --fg-dim:#6a655e;
+  --border:#26262b; --border-soft:#1d1d21;
+  --accent:#cf4b26; --accent-soft:rgba(207,75,38,.15);
+  --green:#5f8f7a; --yellow:#b8863b; --red:#a8342a; --purple:#8a7f9e;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 8px 24px rgba(0,0,0,.30);
+}
+html[data-theme="slate"]{
+  --bg:#0e1013; --bg-elev:#151a20; --bg-soft:#11151a;
+  --fg:#e4e9ee; --fg-muted:#8794a1; --fg-dim:#5a6570;
+  --border:#222a31; --border-soft:#1a2128;
+  --accent:#8fa7bd; --accent-soft:rgba(143,167,189,.16);
+  --green:#7f9e8c; --yellow:#a99268; --red:#b3868a; --purple:#9095a8;
+  --shadow:0 1px 2px rgba(0,0,0,.45), 0 8px 24px rgba(0,0,0,.30);
+}
+html[data-theme="bone"], html[data-theme="light"]{
+  --bg:#f4f1ea; --bg-elev:#e9e4d9; --bg-soft:#efece4;
+  --fg:#22201c; --fg-muted:#6f6a60; --fg-dim:#9b958a;
+  --border:#ddd7cb; --border-soft:#e7e2d7;
+  --accent:#a8341c; --accent-soft:rgba(168,52,28,.10);
+  --green:#3f6f56; --yellow:#9a6d21; --red:#a8341c; --purple:#6b5a8a;
+  --shadow:0 1px 2px rgba(60,50,35,.07), 0 8px 24px rgba(60,50,35,.09);
+}
 :root{
-  --bg:#0f1116; --bg-elev:#161a21; --bg-soft:#12151b;
-  --fg:#e7eaf0; --fg-muted:#98a2b3; --fg-dim:#6b7484;
-  --border:#232833; --border-soft:#1b2029;
-  --accent:#7aa2f7; --accent-soft:rgba(122,162,247,.16);
-  --green:#7ec699; --yellow:#e0af68; --red:#f7768e; --purple:#bb9af7;
-  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
   --radius:10px;
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;
   --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
   --measure:png;
-}
-html[data-theme="light"]{
-  --bg:#ffffff; --bg-elev:#f7f8fa; --bg-soft:#f6f8fa;
-  --fg:#1f2328; --fg-muted:#59636e; --fg-dim:#8c959f;
-  --border:#d8dee4; --border-soft:#eaeef2;
-  --accent:#0969da; --accent-soft:rgba(9,105,218,.10);
-  --green:#1a7f37; --yellow:#9a6700; --red:#cf222e; --purple:#8250df;
-  --shadow:0 1px 2px rgba(31,35,40,.06), 0 8px 24px rgba(31,35,40,.08);
 }
 *{box-sizing:border-box}
 html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;scroll-behavior:smooth;scroll-padding-top:80px}
@@ -63,8 +78,8 @@ body{
 }
 .btn:hover{background:var(--bg-elev);color:var(--fg)}
 .btn svg{width:15px;height:15px;display:block}
-html[data-theme="dark"] .i-sun{display:block} html[data-theme="dark"] .i-moon{display:none}
-html[data-theme="light"] .i-sun{display:none} html[data-theme="light"] .i-moon{display:block}
+html[data-mode="dark"] .i-sun{display:block} html[data-mode="dark"] .i-moon{display:none}
+html[data-mode="light"] .i-sun{display:none} html[data-mode="light"] .i-moon{display:block}
 
 /* ── layout ──────────────────────────────────────────── */
 .wrap{max-width:812px;margin:0 auto;padding:56px 28px 45vh}
@@ -317,15 +332,14 @@ html[data-theme="light"] .i-sun{display:none} html[data-theme="light"] .i-moon{d
 
   /* ── theme ── */
   var root = document.documentElement;
-  var saved = null; try { saved = localStorage.getItem('md-theme'); } catch(e){}
-  if (saved) root.setAttribute('data-theme', saved);
+  MD.restoreTheme();
   function toggleTheme(){
-    var t = root.getAttribute('data-theme')==='dark' ? 'light' : 'dark';
-    root.setAttribute('data-theme', t);
-    try { localStorage.setItem('md-theme', t); } catch(e){}
-    if (window.mermaid) location.reload();
+    MD.setTheme(MD.nextTheme());
+    if (window.mermaid) location.reload();   // the diagrams are drawn in the old colours
   }
-  document.getElementById('theme').addEventListener('click', toggleTheme);
+  var themeBtn = document.getElementById('theme');
+  themeBtn.addEventListener('click', toggleTheme);
+  themeBtn.title = 'Theme (t)';
   document.addEventListener('keydown', function(e){
     if (e.metaKey||e.ctrlKey||e.altKey||/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
     if (e.key==='t') toggleTheme();

@@ -306,10 +306,26 @@ cross-site, and exits when the window closes. Session ids are matched against a 
 pattern before they reach a command line, and a session with no transcript is refused
 rather than attempted.
 
+## Themes
+
+Three, and each has a rule rather than a mood:
+
+- **Rubric** *(default)* — warm graphite and vermilion. A rubricator was the scribe who added
+  the red marks, so red here is reserved for *your* annotations and status wears earth
+  pigments instead. The two never argue over the same colour.
+- **Slate** — near-monochrome and cool. One steel signal; status is told by lightness and
+  shape rather than hue, so nothing on screen is coloured for decoration.
+- **Bone** — the light theme taken seriously: warm paper and iron-gall text, not an inverted
+  dark UI.
+
+Pick one under **Settings**, press `t` to cycle, or `md --theme slate`. The choice is stored
+in the settings file *and* in the browser, so a document you open on its own matches the
+workspace you chose it in.
+
 ## Settings
 
-The workspace has a **Settings** tab: which terminal sessions open in, whether the page may
-start anything at all, your editor, and whether indexing counts subagent work. Changing
+The workspace has a **Settings** tab: the theme, which terminal sessions open in, whether the
+page may start anything at all, your editor, and whether indexing counts subagent work. Changing
 what may be launched takes effect at once — no restart, and the buttons appear and
 disappear with it.
 

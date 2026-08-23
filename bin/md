@@ -48,7 +48,9 @@ OPTIONS
   -o, --out FILE    write the standalone .html to FILE and don't open anything
   -p, --print       print the generated HTML to stdout
   -n, --no-open     generate only; print the cache path
-      --light       start in light mode (default is dark)
+      --light       start in the light theme (same as --theme bone)
+      --theme NAME  rubric (default — warm graphite, vermilion), slate
+                    (near-monochrome) or bone (paper). Also under Settings.
   -h, --help        show this help
   -v, --version     show version
       --vendor      re-download the render libraries and exit
@@ -158,7 +160,7 @@ ws_run() {
   if [ "$doopen" = 1 ] && [ -z "$out" ] && [ "${WS_STATIC:-0}" != 1 ]; then
     local urlfile
     urlfile="$(mktemp "$CACHE/.serve.XXXXXX")"
-    RUBRICATOR_HOME="$SHARE" RUBRICATOR_OPEN="$opendoc" \
+    RUBRICATOR_HOME="$SHARE" RUBRICATOR_THEME="$THEME" RUBRICATOR_OPEN="$opendoc" \
       RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
       nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} --serve >"$urlfile" 2>/dev/null &
     local i=0 url=""
@@ -179,7 +181,7 @@ ws_run() {
   fi
 
   file="${out:-$CACHE/workspace-$(printf '%s' "$abs" | shasum -a 1 | cut -c1-10).html}"
-  RUBRICATOR_HOME="$SHARE" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
+  RUBRICATOR_HOME="$SHARE" RUBRICATOR_THEME="$THEME" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
     "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} >/dev/null || exit 1
   if [ "$doopen" = 1 ] && [ -z "$out" ]; then
     url="file://$(urlenc "$file")"
@@ -235,7 +237,7 @@ case "${1:-}" in
     [ -n "$SV_PORT" ] && SV_ARGS+=("--port=$SV_PORT")
     ensure_vendor
     printf 'rubricator: serving %s — ctrl-c to stop\n' "${SV_DIRS[*]}" >&2
-    exec env RUBRICATOR_HOME="$SHARE" RUBRICATOR_TERM="${TERM_PROGRAM:-}" \
+    exec env RUBRICATOR_HOME="$SHARE" RUBRICATOR_THEME="$THEME" RUBRICATOR_TERM="${TERM_PROGRAM:-}" \
       RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
       "$PY" "$SHARE/workspace.py" "${SV_DIRS[@]}" "${SV_ARGS[@]}" ;;
   --hook|--review)
@@ -262,7 +264,12 @@ case "${1:-}" in
     exec "$PY" "$SHARE/hook.py" manual "$1" ;;
 esac
 
-OPEN_MODE="app"; OUT=""; THEME="dark"; TO_STDOUT=0
+# the theme you chose in the workspace is the default here too — read straight
+# out of the settings file, so the reader keeps needing nothing but bash and awk
+THEME="$( { sed -n 's/.*"theme"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' \
+  "${RUBRICATOR_CONFIG:-$HOME/.config/rubricator/config.json}" 2>/dev/null || true; } | head -1 )"
+case "$THEME" in rubric|slate|bone) ;; *) THEME="rubric" ;; esac
+OPEN_MODE="app"; OUT=""; TO_STDOUT=0
 FILE=""; SESSIONS=""; EXTRA_DIRS=()
 
 while [ $# -gt 0 ]; do
@@ -271,7 +278,9 @@ while [ $# -gt 0 ]; do
     -n|--no-open)          OPEN_MODE="none" ;;
     -p|--print)            TO_STDOUT=1; OPEN_MODE="none" ;;
     -o|--out)              shift; [ $# -gt 0 ] || die "--out needs a path"; OUT="$1"; OPEN_MODE="none" ;;
-    --light)               THEME="light" ;;
+    --light)               THEME="bone" ;;
+    --theme)               shift; THEME="${1:?--theme needs rubric, slate or bone}"
+                           case "$THEME" in rubric|slate|bone) ;; *) die "unknown theme: $THEME" ;; esac ;;
     --sessions)            SESSIONS="--sessions" ;;
     --deep)                SESSIONS="--sessions"; DEEP=1 ;;
     --static)              WS_STATIC=1 ;;
@@ -387,7 +396,10 @@ function rep(s, tok, val,   i, out) {
   }
   line = rep(line, "__TITLE__", title)
   line = rep(line, "__META__",  meta)
-  if (line ~ /^<html /) line = rep(line, "data-theme=\"dark\"", "data-theme=\"" theme "\"")
+  if (line ~ /^<html /) {
+    mode = (theme == "bone") ? "light" : "dark"
+    line = rep(line, "data-theme=\"rubric\" data-mode=\"dark\"", "data-theme=\"" theme "\" data-mode=\"" mode "\"")
+  }
   print line
 }' "$TPL" > "$TMP/out.html"
 

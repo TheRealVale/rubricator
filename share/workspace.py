@@ -401,6 +401,20 @@ def emit_html(data, share, base=None):
         data = dict(data, docs=[{k: x for k, x in d.items() if k != "text"} for d in data["docs"]])
     else:
         libs_html = "".join("<script>" + v(n) + "</script>" for n in libs)
+    # a static page has no server to ask, so the theme is baked in at build time
+    theme = os.environ.get("RUBRICATOR_THEME") or ""
+    if theme not in ("rubric", "slate", "bone"):
+        try:
+            sys.path.insert(0, str(share))
+            import actions as _A
+            theme = _A.config().get("theme") or "rubric"
+        except Exception:
+            theme = "rubric"
+        if theme not in ("rubric", "slate", "bone"):
+            theme = "rubric"
+    page = page.replace('<html lang="en" data-theme="rubric" data-mode="dark">',
+                        f'<html lang="en" data-theme="{theme}" '
+                        f'data-mode="{"light" if theme == "bone" else "dark"}">', 1)
     parts = {
         "__NAME__": html.escape(data["name"]),
         "__BASECSS__": design_css(share),
@@ -415,7 +429,7 @@ def emit_html(data, share, base=None):
         page = page.replace(k, val)
     hl = share / "vendor/hljs-dark.css"
     if hl.is_file():
-        page = page.replace("</head>", "<style>html[data-theme=\"dark\"]{" +
+        page = page.replace("</head>", "<style>html[data-mode=\"dark\"]{" +
                             hl.read_text(encoding="utf-8") + "}</style>\n</head>", 1)
     return page
 
