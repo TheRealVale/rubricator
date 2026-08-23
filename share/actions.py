@@ -102,12 +102,75 @@ def save_settings(patch):
         if not SETTABLE[k](v):
             raise ValueError(f"{k} cannot be set to {v!r}")
         stored[k] = v
+    _write_config(stored)
+    return settings()
+
+
+def _write_config(d):
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     tmp = CONFIG.with_suffix(".part")
-    tmp.write_text(json.dumps(stored, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(d, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     os.chmod(tmp, 0o600)                 # your machine, your settings, nobody else's
     tmp.replace(CONFIG)
-    return settings()
+
+
+# ── projects ─────────────────────────────────────────────────────────────────
+# The page never sends a path. It asks for the picker, which the *server* opens,
+# or it names one of the projects the server itself remembered — so an arbitrary
+# directory can never be indexed on a page's say-so.
+RECENTS = 8
+
+
+def recents():
+    out, seen = [], set()
+    for p in (config().get("recents") or []):
+        if isinstance(p, str) and p not in seen and os.path.isdir(p):
+            seen.add(p)
+            out.append(p)
+    return out[:RECENTS]
+
+
+def remember_project(path):
+    path = str(Path(path).resolve())
+    stored = config()
+    keep = [p for p in (stored.get("recents") or []) if isinstance(p, str) and p != path]
+    stored["recents"] = ([path] + keep)[:RECENTS]
+    try:
+        _write_config(stored)
+    except Exception:
+        pass
+    return stored["recents"]
+
+
+def choose_folder():
+    """A native folder chooser, opened by the server. Standard Additions, not
+    app scripting, so no Automation permission and no dialog about a dialog."""
+    osa = ('POSIX path of (choose folder with prompt '
+           '"Open a project in rubricator")')
+    try:
+        r = subprocess.run(["osascript", "-e", osa], timeout=300, capture_output=True)
+    except subprocess.TimeoutExpired:
+        return None
+    if r.returncode != 0:
+        return None                       # cancelled, which is not an error
+    path = r.stdout.decode("utf-8", "replace").strip().rstrip("/")
+    return path if path and os.path.isdir(path) else None
+
+
+def open_project(path, sessions=False):
+    """Open a second workspace, the way an editor opens a second window. This
+    starts rubricator on a directory — never an arbitrary program."""
+    md = os.environ.get("RUBRICATOR_BIN") or str(HOME / ".local/bin/md")
+    if not os.path.isfile(md):
+        raise RuntimeError("cannot find the md command to open a second window")
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("RUBRICATOR_OUT", "RUBRICATOR_OPEN", "RUBRICATOR_INJECT",
+                                "RUBRICATOR_HOME", "RUBRICATOR_JSON"))}
+    argv = [md, str(path)] + (["--sessions"] if sessions else [])
+    subprocess.Popen(argv, env=env, cwd=str(path), start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    remember_project(path)
+    return {"ok": True, "opened": str(path)}
 
 
 def enabled():

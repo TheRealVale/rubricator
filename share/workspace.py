@@ -494,6 +494,7 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
 
     import actions as A
     root = Path(roots[0]) if isinstance(roots, list) else Path(roots)
+    A.remember_project(root)        # opening it is what makes it recent
     state = {"data": build(roots, with_sessions, deep)}
     state["data"]["open"] = open_rel or ""
 
@@ -505,6 +506,7 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                         "launch": 1 if A.enabled() else 0,
                         "reveal": 1 if A.enabled() else 0}
         data["settings"] = A.settings()
+        data["recents"] = [p for p in A.recents() if p != str(root)]
         data["views"] = user_views()
         data["notes"] = read_notes(root)
         html_out = emit_html(data, share, base=srv.base)
@@ -553,6 +555,20 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
 
     def act(method, query, body):
         """A verb and an id. Everything else is resolved here, from the index."""
+        b0 = S.json_body(body)
+        if b0.get("verb") in ("open-project", "open-recent"):
+            try:
+                if b0["verb"] == "open-project":
+                    chosen = A.choose_folder()
+                    if not chosen:
+                        return S.J({"cancelled": True})
+                else:
+                    chosen = b0.get("id") or ""
+                    if chosen not in A.recents():        # only what we remembered
+                        return S.J({"error": "that project is not on the list"}, 400)
+                return S.J(A.open_project(chosen, sessions=with_sessions))
+            except Exception as e:
+                return S.J({"error": str(e)}, 500)
         if not A.enabled():
             return S.J({"error": "actions are off — start with md --allow-launch"}, 403)
         b = S.json_body(body)

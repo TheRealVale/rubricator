@@ -11,7 +11,23 @@
 .wsbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:14px;height:52px;
   padding:0 var(--wscol);background:color-mix(in srgb,var(--bg) 82%,transparent);
   backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--border-soft)}
-.wsbar .who{font-weight:640;font-size:14px;letter-spacing:-.01em;white-space:nowrap}
+.wsbar{position:relative}
+.wsbar .who{font-weight:640;font-size:14px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px}
+.wsbar .who::after{content:"";width:0;height:0;border:3.5px solid transparent;border-top-color:var(--fg-dim);
+  margin-top:3px}
+.wsbar .who:hover{color:var(--fg)}
+.wsbar .who:hover::after{border-top-color:var(--fg)}
+#projmenu{position:absolute;top:44px;left:var(--wscol);z-index:60;min-width:290px;
+  background:var(--bg-elev);border:1px solid var(--border);box-shadow:var(--shadow);padding:5px}
+#projmenu button{all:unset;cursor:pointer;display:flex;align-items:baseline;gap:10px;
+  padding:7px 10px;width:100%;box-sizing:border-box}
+#projmenu button:hover{background:var(--bg-soft)}
+#projmenu .nm{font-size:12.5px;color:var(--fg)}
+#projmenu .pp{font-family:var(--mono);font-size:10.5px;color:var(--fg-dim);margin-left:auto;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
+#projmenu .sep{height:1px;background:var(--border-soft);margin:5px 0}
+#projmenu .none{font-size:11.5px;color:var(--fg-dim);padding:8px 10px;line-height:1.5}
 .wsbar .path{font-size:11.5px;color:var(--fg-dim);white-space:nowrap}
 .wsbar .stat{margin-left:auto;font-size:11.5px;color:var(--fg-dim);font-variant-numeric:tabular-nums;white-space:nowrap}
 .tabs{display:flex;gap:2px;padding:0 var(--wscol);border-bottom:1px solid var(--border-soft);
@@ -179,7 +195,7 @@ body.split .page{padding-right:calc(min(62%,880px) + 28px)}
 </head>
 <body>
 <div class="wsbar">
-  <span class="who" id="wname"></span>
+  <span class="who" id="wname" title="Switch project"></span>
   <span class="path" id="wpath"></span>
   <span class="stat" id="wstat"></span>
   <button class="btn" id="theme" title="Toggle theme (t)" style="all:unset;cursor:pointer;padding:6px;border-radius:7px;color:var(--fg-muted)">

@@ -189,6 +189,10 @@ Design canvas: the shell, the session reader, and the direction exploration.
       verb in mono caps carrying the colour, and the quote ruled at 1px.
 - [x] **F5 · The divider is the control.** 1px at rest, 11px of hit area, and it
       brightens and switches the cursor rather than growing a grip.
+- [x] **F7 · Open a project.** The repository name in the bar is a switcher:
+      recents the server remembered, plus a native folder chooser it opens
+      itself. A second project opens in its own window. The page never sends a
+      path — it asks for the picker or names something already on the list.
 - [ ] **F6 · The shell itself** — navigator, tabbed splittable panes, a tray that
       follows focus. Designed and agreed; not built.
 

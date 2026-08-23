@@ -160,7 +160,7 @@ ws_run() {
   if [ "$doopen" = 1 ] && [ -z "$out" ] && [ "${WS_STATIC:-0}" != 1 ]; then
     local urlfile
     urlfile="$(mktemp "$CACHE/.serve.XXXXXX")"
-    RUBRICATOR_HOME="$SHARE" RUBRICATOR_THEME="$THEME" RUBRICATOR_OPEN="$opendoc" \
+    RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OPEN="$opendoc" \
       RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
       nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} --serve >"$urlfile" 2>/dev/null &
     local i=0 url=""
@@ -181,7 +181,7 @@ ws_run() {
   fi
 
   file="${out:-$CACHE/workspace-$(printf '%s' "$abs" | shasum -a 1 | cut -c1-10).html}"
-  RUBRICATOR_HOME="$SHARE" RUBRICATOR_THEME="$THEME" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
+  RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
     "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} >/dev/null || exit 1
   if [ "$doopen" = 1 ] && [ -z "$out" ]; then
     url="file://$(urlenc "$file")"
@@ -237,7 +237,7 @@ case "${1:-}" in
     [ -n "$SV_PORT" ] && SV_ARGS+=("--port=$SV_PORT")
     ensure_vendor
     printf 'rubricator: serving %s — ctrl-c to stop\n' "${SV_DIRS[*]}" >&2
-    exec env RUBRICATOR_HOME="$SHARE" RUBRICATOR_THEME="$THEME" RUBRICATOR_TERM="${TERM_PROGRAM:-}" \
+    exec env RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_TERM="${TERM_PROGRAM:-}" \
       RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
       "$PY" "$SHARE/workspace.py" "${SV_DIRS[@]}" "${SV_ARGS[@]}" ;;
   --hook|--review)

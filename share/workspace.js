@@ -1096,6 +1096,44 @@ if (can('watch') && window.EventSource){
   } catch(e){}
 }
 
+/* ── the project switcher ─────────────────────────────────────────────────
+   Rubricator is started on a directory, and until now that was the only way to
+   change it. A second project opens as a second window, the way an editor does
+   — the running one keeps its panes, its notes and its watch. */
+function projectMenu(){
+  var m = $('projmenu');
+  if (m){ m.remove(); return; }
+  m = document.createElement('div');
+  m.id = 'projmenu';
+  var out = [];
+  (D.recents || []).forEach(function(p){
+    out.push('<button data-recent="' + esc(p) + '"><span class="nm">' + esc(p.split('/').pop()) +
+      '</span><span class="pp">' + esc(p.replace(/^\/Users\/[^/]+/, '~')) + '</span></button>');
+  });
+  if (!(D.recents || []).length){
+    out.push('<div class="none">No other projects yet — the ones you open show up here.</div>');
+  }
+  out.push('<div class="sep"></div>');
+  out.push('<button data-openproj="1"><span class="nm">Open a project…</span>' +
+           '<span class="pp">choose a folder</span></button>');
+  m.innerHTML = out.join('');
+  $('wname').parentNode.appendChild(m);
+  setTimeout(function(){
+    document.addEventListener('mousedown', function away(e){
+      if (!m.contains(e.target)){ m.remove(); document.removeEventListener('mousedown', away); }
+    });
+  }, 0);
+}
+function openProject(id){
+  var m = $('projmenu'); if (m) m.remove();
+  toast(id ? 'opening ' + id.split('/').pop() + '…' : 'choose a folder…');
+  api('act', { verb: id ? 'open-recent' : 'open-project', id: id || '' }, function(j){
+    if (j.error) return toast(j.error);
+    if (j.cancelled) return;
+    toast('opened ' + (j.opened || '').split('/').pop() + ' in its own window');
+  }, function(){ toast('could not open that project'); });
+}
+
 $('wname').textContent = D.name;
 $('wpath').textContent = D.root.replace(/^\/Users\/[^/]+/, '~');
 stat();
@@ -1114,6 +1152,10 @@ document.addEventListener('click', function(e){
     if (d.slive)  sesLive = !sesLive;
     return render();
   }
+  if (e.target.closest('#wname')) return projectMenu();
+  var rp = e.target.closest('[data-recent]');
+  if (rp) return openProject(rp.dataset.recent);
+  if (e.target.closest('[data-openproj]')) return openProject('');
   var tp = e.target.closest('[data-theme-pick]');
   if (tp) return pickTheme(tp.dataset.themePick);
   var sb = e.target.closest('[data-set]');

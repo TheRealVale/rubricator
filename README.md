@@ -306,6 +306,22 @@ cross-site, and exits when the window closes. Session ids are matched against a 
 pattern before they reach a command line, and a session with no transcript is refused
 rather than attempted.
 
+## Switching project
+
+Click the repository name in the bar. The menu lists the projects you have opened before and
+offers a folder chooser; picking one opens it in **its own window**, the way an editor opens a
+second project — the workspace you were in keeps its panes, its notes and its watch.
+
+This matters more than it sounds, because session search already spans every repository on the
+machine: you find the conversation in `hypergol` from a `werdewaerts` workspace, and now there
+is somewhere to go with it.
+
+The page never sends a path. It either asks the server to open the chooser — a native dialog,
+Standard Additions rather than app scripting, so macOS asks for nothing — or it names a project
+the server itself remembered. Anything else is refused, including a traversal dressed up as a
+recent one. Opening a project is deliberately *not* behind `--allow-launch`: the only thing it
+can start is rubricator, on a folder you picked.
+
 ## Themes
 
 Three, and each has a rule rather than a mood:
