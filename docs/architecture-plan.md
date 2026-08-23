@@ -1,7 +1,8 @@
 ---
 title: One door, one shell
 subtitle: Restructuring rubricator around a workspace that can act
-status: delivered — all five phases shipped, see docs/tasks.md
+status: delivered — all five phases shipped. §2 and §4 describe a shell that F6
+        has since replaced; the register in docs/tasks.md is current
 ---
 
 # One door, one shell

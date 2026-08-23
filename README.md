@@ -136,9 +136,10 @@ md --sessions            # also index your own agent history (local only)
 md -w                    # the same thing, named explicitly
 ```
 
-It walks every markdown file the repo tracks, reads `git log`, and builds one static page
-— 328 documents and 3,800 prompts index in about a second, so there is nothing to cache
-and nothing to invalidate.
+It walks every markdown file the repo tracks, reads `git log`, and indexes 328 documents
+and 3,800 prompts in about a second — so there is nothing to cache and nothing to
+invalidate. That opens as the live tier described above; `md --static` gives you the
+self-contained file instead.
 
 ### The shell
 
@@ -271,8 +272,11 @@ share/render.js     markdown into the reader's DOM — shared by both pages, so 
 share/review.*      annotation layer — anchors, verbs, storage, export
 share/ui.*          outline modes, search, resizable panel, shortcuts
 share/shell.*       the window: navigator, panes, tabs, palette, status strip
+share/workspace.*   the repo index, and what each surface looks like
+share/serve.py      the local server: ephemeral port, per-run token, idle exit
+share/actions.py    the verb allowlist — the only place the page can cause anything
+share/extract.py    PDF and Word into text, cached on mtime and size
 share/transcript.py one conversation, parsed on demand
-share/workspace.*   the repo index and its views
 share/hook.py       blocking review server for --review and --hook
 ```
 
@@ -284,8 +288,10 @@ they live in the browser's local storage, keyed by the document's absolute path 
 the same key from either page, so a note written in the workspace is there when you open
 the file on its own. Nothing is written into your files and nothing leaves the machine.
 
-Where rubricator is going next is written down: [`docs/architecture-plan.md`](docs/architecture-plan.md)
-for the shape, [`docs/tasks.md`](docs/tasks.md) for the work.
+Everything is written down. [`docs/tasks.md`](docs/tasks.md) is the register — one line
+per task, and a table at the top saying where each plan stands. The plans themselves keep
+the reasoning and are not rewritten once shipped; when reality disagreed with one, the
+disagreement is recorded in it rather than edited out.
 
 ## Watching, and the rest
 
@@ -448,10 +454,17 @@ CSS block at the top of `share/template.html`.
 ## Limitations
 
 - macOS only in practice (uses `open`; the Chrome app window is a nicety, any browser works)
-- annotations are per-browser-profile; they don't sync between machines
-- raw HTML inside markdown is rendered, not sanitised — same as VS Code's preview. Render
-  documents you trust
+- notes from the workspace live in the repo, at `.rubricator/notes.json`; a static page
+  keeps them in that browser profile instead. Neither syncs between machines on its own —
+  the repo file does if you commit it
+- a conversation can be read but not yet annotated: the review layer binds to a document,
+  and a chat bubble is not one. See §7b of `docs/conversations-plan.md`
+- continuing a session from the window is designed but unbuilt — `docs/continue-plan.md`
 - the Claude Code hook is Claude Code specific; the clipboard and `--review` paths are not
+
+This list used to say that raw HTML in markdown was rendered unsanitised. That stopped
+being true when an `<img onerror>` executed during testing — see *Why it is off by
+default* above for what replaced it.
 
 ## Licence
 

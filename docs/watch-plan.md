@@ -1,6 +1,6 @@
 ---
 title: rubricator — watch mode
-status: proposal
+status: shipped as E1 — SSE, not polling
 date: 2026-08-19
 ---
 

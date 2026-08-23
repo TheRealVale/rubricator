@@ -1,6 +1,6 @@
 ---
 title: rubricator — review mode
-status: tier 0 shipped
+status: shipped, and hardened since — documents are sanitised (F8)
 date: 2026-08-18
 ---
 

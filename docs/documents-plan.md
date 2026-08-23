@@ -1,7 +1,7 @@
 ---
 title: PDF and Word
 subtitle: Indexing, searching and reading the documents that are not markdown
-status: plan
+status: H1–H4 shipped · H5–H7 open, and no longer blocked by the shell
 ---
 
 # PDF and Word
@@ -225,3 +225,10 @@ rather than sequenced behind the shell:
 
 That makes the Anforderungsdokument searchable and markable today without
 building a document view twice.
+
+> **Since then.** The left column shipped, and the shell (F6) shipped after it,
+> so the right column is no longer blocked. H5 is now what it was always meant
+> to be: a second tab on the same document — *text* and *original* — in a pane
+> that already knows how to hold two of anything. It still needs `object-src
+> 'self'` in the policy for Chrome's PDF viewer, which is the one place the
+> security posture has to give a little.

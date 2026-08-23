@@ -1,6 +1,6 @@
 ---
 title: rubricator — workspace mode
-status: plan
+status: delivered — superseded in shape by docs/architecture-plan.md and the shell
 date: 2026-08-20
 ---
 

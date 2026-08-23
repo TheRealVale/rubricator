@@ -1,15 +1,28 @@
 ---
 title: Task register
-subtitle: Phases A–E from docs/architecture-plan.md
+subtitle: Every phase, and where each plan stands
 status: living
 ---
 
 # Task register
 
-Companion to [`architecture-plan.md`](architecture-plan.md). One line per task, an
-explicit *done when*, and nothing tracked that git cannot confirm.
+One line per task, an explicit *done when*, and nothing tracked that git cannot
+confirm. This is the current document; the plans are the reasoning behind it and
+are not rewritten once shipped.
 
 Legend: `[ ]` open · `[~]` in progress · `[x]` done
+
+## The plans
+
+| | | where it stands |
+|---|---|---|
+| [`architecture-plan.md`](architecture-plan.md) | one door, one shell — phases A–E | delivered. §2 and §4 describe the shell F6 replaced |
+| [`workspace-plan.md`](workspace-plan.md) | the first workspace: index, correlate, trust boundary | delivered, and superseded in shape by the above |
+| [`review-design.md`](review-design.md) | the annotation layer and its verbs | shipped, hardened since (F8) |
+| [`watch-plan.md`](watch-plan.md) | refresh when a file changes | shipped as E1, over SSE rather than polling |
+| [`conversations-plan.md`](conversations-plan.md) | reading a session | G1 shipped · G2–G3 partly · see its §7b |
+| [`documents-plan.md`](documents-plan.md) | PDF and Word | H1–H4 shipped · H5–H7 open |
+| [`continue-plan.md`](continue-plan.md) | adding a turn to a session from the window | agreed in shape, unbuilt |
 
 ---
 
@@ -179,9 +192,11 @@ end of it.
 
 ---
 
-## PDF and Word — extraction done, viewing after the shell
+## PDF and Word — extraction done, the original view unblocked
 
-See [`documents-plan.md`](documents-plan.md). Both extractors ship with macOS:
+See [`documents-plan.md`](documents-plan.md). The shell has since shipped, so
+H5 is what it was always meant to be: a second tab on the same document.
+Both extractors ship with macOS:
 `textutil` for Word, PDFKit through the JXA bridge for PDF — measured here at
 0.19 s per PDF across 16 of them, 0.76 s for 3 Word files.
 
@@ -199,6 +214,32 @@ See [`documents-plan.md`](documents-plan.md). Both extractors ship with macOS:
       `textutil -convert html` for Word, and `object-src 'self'` in the policy.
 - [ ] **H6 · Background warm-up** with progress over the SSE channel.
 - [ ] **H7 · OCR on request** through Vision, for the scans.
+
+---
+
+## Planned — continuing a session
+
+See [`continue-plan.md`](continue-plan.md). Agreed: the window is where you
+think, the terminal is where you work, and they are the same session — a turn
+taken here appends to the same transcript, verified.
+
+- [ ] **J1 · `converse.py`.** One long-lived `claude -p --resume --input-format
+      stream-json` per session, a lock file so two windows cannot drive one, and
+      a hard stop. `POST /say {sid, text}` in, the existing SSE channel out.
+- [ ] **J2 · The composer.** At the foot of the conversation; a bubble that
+      fills from `content_block_delta` and finalises on `assistant`. Cost from
+      `result` on the status strip.
+- [ ] **J3 · Read-only by construction.** `--disallowedTools Bash Write Edit
+      NotebookEdit`, enforced by the agent in subagents too, and *said* on the
+      surface rather than discovered. *Resume in a terminal* sits beside it.
+- [ ] **J4 · Survive the window.** A turn in flight when the page closes: the
+      process detaches, and the page reattaches by re-reading the transcript,
+      which is already the source of truth.
+
+Not planned: a permission UI. Headless Claude does not ask — verified, including
+under `--permission-mode manual` — and the callback that would let rubricator
+ask on its behalf lives in the Agent SDK, which is a Node dependency this tool
+does not otherwise need.
 
 ---
 
@@ -259,9 +300,9 @@ Design canvas: the shell, the session reader, and the direction exploration.
 
 ## Done
 
-All five phases are in. What the plan called *room deliberately left* is now
-reachable rather than hypothetical: a provider is a file in
-`~/.config/rubricator/providers/`, a view is a file in
+All five phases are in, plus the shell they were leading to. What the plan called
+*room deliberately left* is now reachable rather than hypothetical: a provider is
+a file in `~/.config/rubricator/providers/`, a view is a file in
 `~/.config/rubricator/views/`, and a workspace can hold more than one repo.
 
 What is deliberately still missing, and why:
@@ -270,5 +311,12 @@ What is deliberately still missing, and why:
   ordinary path still starts a server that dies with its window.
 - **No cloud, no sync, no account.** Session history never leaves the machine;
   `--sessions` still refuses `--out`.
+- **No agent loop in the window.** A session can be read here and continued
+  here (J1–J4), but only for thinking — the tools that change your repo stay in
+  the terminal. See [`continue-plan.md`](continue-plan.md) for why that is a
+  decision rather than a gap.
+- **A conversation is not annotatable.** The review layer binds to a document
+  and a chat bubble is not one; §7b of the conversations plan says what it would
+  take.
 - **macOS only.** The window handling, the terminal dispatch and the Finder
   verbs are all platform-specific. Nothing else is.

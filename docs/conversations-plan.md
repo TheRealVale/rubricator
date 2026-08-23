@@ -1,7 +1,7 @@
 ---
 title: Reading the conversation
 subtitle: Sessions you can read, what they changed, and how documents point back
-status: plan
+status: G1 shipped · G2–G3 partly, see §7b · G4–G6 open
 ---
 
 # Reading the conversation
