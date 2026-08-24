@@ -148,6 +148,27 @@ That gives you an "unresolved" list across iterations instead of starting fresh 
 
 **Effort:** ~60 lines.
 
+> **Since then.** The quote-hash was never built. `share/review.js:119` is
+> `raw.indexOf(it.anchor)` — the stored anchor text, exact substring, first
+> occurrence, no normalisation, no offset hint and no fallback. The first bullet
+> therefore holds only for text that survived byte for byte, and the second
+> shipped harder than it was written: a miss sets `state = 'stale'`, and *stale*
+> is then reported as **resolved** at `:347`, tagged `gone` at `:370`, dropped
+> from the export at `:414`, and filtered out by six `workspace.js` sites. Nothing
+> in the shipped tray says *possibly addressed*. One bit was carrying two facts —
+> *your text was edited* and *your text was deleted* — and the tool reports the
+> second as an accomplishment. M1–M4 replace it: all occurrences collected and the
+> one nearest the stored `lineStart` chosen; on a miss, the anchor's own lines
+> tried longest-first, which recovers **62.6% / 40.2% of vanished anchors at
+> 98.6% / 96.5% precision** measured over 2,985 commit pairs in five
+> repositories; and one bit
+> becomes three anchor states — `attached` · `moved` · `orphaned` — with an
+> orphaned *Approve* surfaced in a header line rather than filed under *resolved*.
+> That also answers the first of the open questions at the end of this document.
+> The stale/resolved distinction did not hold up, and what it needed was not an
+> explicit human *done* state — that stays deferred until someone has run a second
+> round — but an honest account of which of the two things happened.
+
 > [!TIP]
 > Items 1, 2, 5 and 6 are the 80%. Roughly 270 lines in `template.html` plus passing the
 > absolute source path through `META`. No new dependencies, no server, no daemon.

@@ -376,6 +376,31 @@ tools — a session that edits through Bash produces none, and this one produced
 three across 311 replies. The session's full file list, which comes from the
 `file_path` scan the index already does, remains the honest answer.
 
+> **Since then.** Two corrections. **The figure is stale.** The largest transcript
+> on this machine is **105.0 MB** and `transcript.read()` parses it in **0.28 s**
+> into **795 turns** — measured 2026-08-23, `ls -S` then the minimum of three warm
+> runs. The *17 MB in 0.05 s* above is a year of typing out of date, and §1 of this
+> same document already says 105 MB, so the two halves of one plan disagreed with
+> each other. The conclusion is unchanged and in fact stronger for being re-taken:
+> at 0.28 s there is still nothing worth caching and nothing to invalidate. The old
+> number is quoted in four other places that all need it too —
+> `share/transcript.py:8`, `share/workspace.py:620`, `README.md:185` and G1's line
+> in `docs/tasks.md`. **And the way back is closed, not cheap.** Annotating a
+> bubble is refused (X25). The mechanism is right — a synthesised `data-line-start`
+> is the trick `renderExtracted` already plays — but it needs a *second* binding
+> model in `review.js` beside the document one, and the single-document invariant
+> it would sit next to is itself buggy with merely two documents in play. Adding a
+> second kind of bindable thing before the first kind is correct is the wrong
+> order. The second reason is the one that settles it: Anthropic documents a
+> **thirty-day default retention** on `~/.claude/projects/`, adjustable via
+> `cleanupPeriodDays`. A mark anchored into a transcript has a shelf life the
+> document it was made against does not, and would silently orphan itself — a worse
+> version of exactly the problem M1–M4 exist to fix, in the one place where no
+> re-anchoring ladder can help, because the text is not rewritten but gone. So *a
+> conversation cannot be annotated* is a decision now, not a gap. *Pick* and *ask*
+> (§3), the ribbon, the three densities and the per-turn actions of §4 stay
+> unbuilt.
+
 ---
 
 ## 8. What was decided

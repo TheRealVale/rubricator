@@ -1,0 +1,76 @@
+name: ci
+
+# The job exists for one bug. install.sh named eight of the eighteen files in
+# share/ — correct when it was written, then render.js was lifted out of
+# template.html and nobody updated the list — so every install but the
+# maintainer's produced a blank page and exited 0. Nothing noticed for five
+# days because there was nothing to notice with.
+#
+# Three layers, cheapest first, because they fail for different reasons:
+#   1 · inventory  — anything that fails to reach the install, listed by name
+#   2 · artefact   — render.js present but not inlined
+#   3 · rendered   — the code is there and still does not run
+#
+# Layer 2 asserts on 'md renderer', the first line of share/render.js and the
+# only occurrence of that string in bin/ or share/. It must NOT assert on
+# 'window.MD': review.js defines window.MDReview, and review.js was one of the
+# eight files the broken install did copy — so that check passes on the exact
+# bug it was written to catch. Measured: on the broken page,
+# `grep -c 'window.MD'` is 1 and `grep -c 'md renderer'` is 0.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'      # layer 3 weekly; see `rendered` below
+  workflow_dispatch:
+
+jobs:
+  install:
+    name: install, and prove it renders
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        # install.sh reads the file list from `git ls-files share/`, so this
+        # needs to stay a real checkout rather than an archive.
+
+      - name: install into an isolated prefix
+        run: PREFIX="$RUNNER_TEMP/pfx" ./install.sh --no-shell
+        # install.sh:68 runs `md --vendor`, and --vendor forces a re-fetch, so
+        # this re-downloads ~3.7 MB of pinned libraries on every run. Left as
+        # it is: caching it would mean the checksum path is never exercised,
+        # which is the one thing worth exercising about it.
+
+      - name: layer 1 · every file in share/ reached the install
+        run: |
+          diff -rq --exclude=vendor --exclude=__pycache__ \
+            share/ "$RUNNER_TEMP/pfx/share/rubricator/"
+
+      - name: layer 2 · the renderer is inlined in the page
+        run: |
+          printf '# ci fixture\n\nbody\n' > "$RUNNER_TEMP/f.md"
+          "$RUNNER_TEMP/pfx/bin/md" -o "$RUNNER_TEMP/out.html" "$RUNNER_TEMP/f.md"
+          # md -o exits 0 on a broken install, so status proves nothing here.
+          grep -q 'md renderer' "$RUNNER_TEMP/out.html" \
+            || { echo "::error::render.js did not reach the page"; exit 1; }
+
+      - name: smoke tests
+        run: ./tests/smoke.sh
+
+  rendered:
+    name: layer 3 · a reader would see the document
+    # Not on the per-push path. One headless run exceeded a two-minute budget
+    # during this work and had to be killed, and no command line or wall time
+    # was kept for it — one flake, not a measurement, but reason enough not to
+    # gate every push on a browser until someone has watched it run ten times.
+    # Layers 1 and 2 already fail on the bug.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: install
+        run: PREFIX="$RUNNER_TEMP/pfx" ./install.sh --no-shell
+      - name: smoke tests, with the browser
+        run: ./tests/smoke.sh --browser

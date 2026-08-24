@@ -150,6 +150,20 @@ Rules, not preferences:
 **Build the scrubber early.** The dossier is worth more than everything else here and is
 blocked without it.
 
+> **Since then.** Rule 1 shipped and is enforced — `bin/md:149` dies with
+> *"refusing --out with --sessions: your history stays on this machine"* — but it
+> guards one write path. The default static build takes the other one: every
+> `md --workspace --sessions` leaves `~/.cache/rubricator/workspace-<hash>.html`
+> on disk, **7,984,399 bytes at mode 0644**, carrying **7,792 occurrences of
+> `"sid"`** and the prompt text with them. That is the same corpus the flag
+> refuses to hand to `--out`, written without being asked, world-readable, in the
+> one cache directory macOS does not exclude from Time Machine, and never pruned.
+> The rule was right and the enforcement was partial. N2 drops `prompts` from any
+> static build and serves them instead, so that no `.html` on disk contains prompt
+> text and the refusal at `bin/md:149` becomes true of every write path rather
+> than one; N1 takes the cache to 0600, excludes it from backup, and gives the
+> session index a seven-day life.
+
 ---
 
 ## 5. The features
@@ -186,6 +200,27 @@ A crude repo-wide version already found real hits here:
 
 Pure git plus the corpus — **no session data needed**, so it can ship before any of the
 archaeology. **Half a session.**
+
+> **Since then.** It shipped, and it is not the one that pays. Measured against
+> five repositories it is the least trustworthy signal in the tool. On
+> repo A the detector resolved **zero targets for 87 of 99 documents** and
+> printed *"Nothing looks stale — every document that names code has been touched
+> since that code last changed"* anyway. The navigator glyph and this surface use
+> different predicates, so repo C shows **231 triangles against 129 rows**,
+> of which **40** are displayed with nothing said about the other 89. `repo_churn`
+> is computed once per document — 26% of the git pass — and read by no JavaScript
+> at all. Of the documents it *can* judge it fires on 71.5% (repo C) to
+> 92.4% (repo D). The obvious repair, widening the target whitelist so more
+> documents resolve, was measured and declined: **5.03 s on repo C, eleven
+> times the entire current index**, and it takes the navigator from 46% to 62%
+> flagged — worse on the half it does not fix (X14). L4 keeps the surface and
+> makes it honest: the glyph goes, `repo_churn` goes, the empty state distinguishes
+> *nothing is stale* from *nothing could be judged*, the truncation says
+> `showing 40 of 154`, and the name changes to what the subhead already says —
+> *documents whose named files kept changing after the document stopped*.
+> Staleness as the product's thesis is refused outright (X13): the ordering
+> correlates **r = 0.84** with how many paths a document quotes and **r = 0.12**
+> with its age, so what this ranks is verbosity.
 
 ### 5.4 Session index + topic join — *the engine*
 

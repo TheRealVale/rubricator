@@ -72,6 +72,20 @@ the thing a PDF viewer would not give you.
 Anchors are content hashes already, so a note survives re-extraction. Page
 headings make a quote citable: *"p. 12"* rather than *"somewhere in the PDF"*.
 
+> **Since then.** The first sentence is false, and it was false when it was
+> written. There is no hash anywhere in the annotation store: `share/review.js:119`
+> keeps the anchor *text* and finds it again with `raw.indexOf(it.anchor)` — exact
+> substring, first occurrence, no normalisation. A note survives re-extraction only
+> where re-extraction reproduces the paragraph byte for byte; a single whitespace
+> difference from a `textutil` or PDFKit upgrade loses it, and the tray then reports
+> the loss as *resolved* rather than as a loss. The claim is worth correcting rather
+> than deleting because it is load-bearing three times over — `review-design.md:142`
+> specifies the per-item quote-hash this sentence assumes exists, and `README.md:122`
+> promises re-anchoring *by content, not line number* two lines above telling the
+> reader that notes whose text is gone are *resolved*. What makes it true is M1–M4,
+> in the review layer, not anything in the extractor. Until then the second
+> sentence stands on its own: page headings do make a quote citable.
+
 ---
 
 ## 3. Reading one

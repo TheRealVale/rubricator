@@ -28,6 +28,31 @@ Everything below was run against `claude` 2.1.241 on this machine.
 | `--disallowedTools Bash Write Edit` | **genuinely blocks** — *"No such tool available: Bash. Bash is disabled for this session, in subagents as well as here"* |
 | the event stream | `system/init`, `system/status`, `stream_event/*` deltas, `assistant`, `user` tool results, `result` with `total_cost_usd`, `rate_limit_event` |
 
+> **Since then.** Rows three and four were confounded, and since this section is
+> the one that says *measured, not assumed*, the correction belongs on the page
+> rather than in a commit message. Both rows were run under this machine's own
+> `~/.claude/settings.json`, which carries `"permissions": {"defaultMode":
+> "auto"}`. What they measured was that setting, not headless Claude. Re-run on
+> `claude` 2.1.241 in an untrusted directory, with the default mode and again with
+> `--permission-mode manual`, the identical shell call is **denied** — visibly, as
+> an entry in `result.permission_denials` on the JSON stream, with the assistant
+> saying *"the permission layer flagged it … there's no way for that approval
+> prompt to be answered"* and the directory it was told to create not created. So
+> the rows should read *auto-denied, and visible in `result.permission_denials`*,
+> and this table should carry the build and the date it was taken against:
+> **claude 2.1.241, measured 2026-08-23**. One row is missing besides. A
+> `PermissionRequest` hook event now exists and is documented — *"Runs when Claude
+> Code is about to ask you for permission … in sessions that can't show a prompt
+> … if no hook returns a decision, it denies the tool call"* — which is precisely
+> the channel this table's silence stood for. On 2.1.241 it **fired zero times**
+> under `claude -p` across five configurations: at top level, for a subagent, from
+> `--settings`, from project settings, and with `--debug hooks` on, while
+> `PreToolUse` from the identical config fired every time. §2 and the read-only
+> scope of J1–J4 are unaffected — there is still no prompt to answer and no event
+> to answer it with — but they stand for a different reason than the one written
+> here: not *headless Claude does not ask*, but *headless Claude refuses, and the
+> hook that could speak for it does not run*.
+
 The first line is the one that makes this worth doing: **a turn taken here is
 indistinguishable from a turn taken in your terminal.** You can start a thought
 in the window, finish it in iTerm, and come back — one session, one transcript,

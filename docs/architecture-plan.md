@@ -311,6 +311,20 @@ break first on a large monorepo.
 - Document bodies stay out of the page in the live tier: fetch on open. Static
   tier keeps embedding them, because it must.
 
+> **Since then.** The first bullet was never built and the source now argues
+> against it. `grep -rn roothash` over the repository returns nothing; the cache
+> helpers exist but `_cache_read` and `_cache_write` are called for sessions only —
+> so the second bullet shipped, and the expensive half is indeed the half that got
+> the cache. `share/workspace.py:6-7` states the reversal in the code:
+> *"Everything here is recomputed on every run: at ~0.6s for 500 MB there is
+> nothing worth caching, and nothing to invalidate."* That is a defensible position
+> at this corpus size and it may stay the answer; the monorepo this section worried
+> about has not arrived. What is not defensible is that `docs/tasks.md` carries
+> **C7 · Index cache** as `[x]`, describing the invalidation strategy of a file
+> that does not exist. It is one of four register lines O1 found in that state.
+> Either the line goes or the cache gets built, and the register's answer is that
+> the line goes.
+
 ### Notes on disk
 
 Annotations live in `localStorage`, keyed by a hash of the absolute path. That
