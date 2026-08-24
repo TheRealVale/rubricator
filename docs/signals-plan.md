@@ -739,10 +739,14 @@ hazard, and the anchoring budget belongs to fuzziness instead.
 L1 and L2 are one commit. Everything else is independent and can ship in any
 order.
 
-Phase L comes after `install-plan.md` and before `anchoring-plan.md`, for one
-reason: these are the surfaces that make the tool's own output trustworthy enough
-to judge the anchoring work by. It is difficult to evaluate whether a mark
-survived a rewrite in a window whose note counts read an empty store.
+Phase L comes before `anchoring-plan.md`, for one reason: these are the surfaces
+that make the tool's own output trustworthy enough to judge the anchoring work
+by. It is difficult to evaluate whether a mark survived a rewrite in a window
+whose note counts read an empty store. It no longer comes directly after
+`install-plan.md`: the owner's answer to open question 3 on 2026-08-24 put
+`retention-plan.md`'s phase N second, so the order is K, N, L, M, O, P, Q. The
+register's *Phases K–Q* preamble says why. Nothing in this document moves — L3
+still lands before M6, and the week's wait makes nothing here harder.
 
 ---
 

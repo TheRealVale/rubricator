@@ -160,7 +160,7 @@ Carried from the plan; unresolved ones block the tasks that depend on them.
 |---|---|---|---|
 | 1 | Bare `md` opens the workspace with the README pre-opened | A1 | **accepted** |
 | 2 | Launch is opt-in behind a flag | D6 | **accepted** — `md --allow-launch`, or `{"allow_launch": true}` in the config |
-| 3 | Notes move to `.rubricator/notes.json` | C6 | **accepted** — kept out of git via `.git/info/exclude`, so nothing tracked is touched and committing it stays a choice |
+| 3 | Notes move to `.rubricator/notes.json` | C6 | **accepted**, second half superseded — the move stands; keeping them out of git via `.git/info/exclude` does not. Standing rule 3 was withdrawn on 2026-08-24: committing the notes is the supported path, and M6 stops appending that line and removes the one already written |
 | 4 | A+B ships as its own release before C+D | — | superseded — A through E shipped in sequence, each on its own commit |
 
 
@@ -318,8 +318,31 @@ Design canvas: the shell, the session reader, and the direction exploration.
 > the install copies every file in `share/` rather than eight of eighteen, the
 > installer renders a test page and exits non-zero if it cannot, `tests/smoke.sh`
 > holds eight assertions and CI runs them. K5 is deliberately not done — it turns
-> on a question only a human at a keyboard can answer (open question 5). So the
+> on a measurement only a human at a keyboard can take: standing rule 12 wants the
+> hook fired once against the installed build before the code is written. That
+> same fire answers open question 5, which is now the only one of the six still
+> open — and it is waiting on a measurement rather than on an answer. So the
 > defect this programme opens with is closed; the rest of it is not.
+>
+> **The order changed on 2026-08-24: K, then N, then L, M, O, P, Q.** Phase N sat
+> fourth on one measurement — that the only person whose prompts are in the cache
+> is the person who wrote it. The owner has answered open question 3:
+> `md --sessions` already runs on a machine with client work on it. Not one word
+> of phase N's content changes; what changes is whose material the 33
+> world-readable files, the 8 MB static page and the unscoped `⌘K` hold. N4 stops
+> being an embarrassment and becomes a disclosure, N3 stops being a false comment
+> and becomes a false assurance about somebody else's credentials, and the
+> register's own condition — *it moves ahead of M the day there is client work on
+> the machine* — is met. It moves ahead of L as well, and the *probably* resolves
+> on a distinction the register did not draw: L's defects are the tool lying to
+> its own user, which the maintainer can decide to tolerate for a week, and N's
+> are other people's material at mode 0644 in the one cache directory the backup
+> does not skip, which he cannot decide on their behalf. N is also the cheaper
+> phase to front-load — six items, every one an evening, five of them
+> subtractions — so L is delayed by about a week and nothing in L is made harder
+> by the wait. The `## Phase` sections below stay in letter order: K1–K4 shipped
+> under their letters and every plan document cites its items by theirs, so the
+> letters are names and this paragraph is the order.
 >
 > **What was already good, since the list below is nine indictments long and does
 > not say so.** The reader is finished work. The review layer's verbs, its
@@ -330,7 +353,7 @@ Design canvas: the shell, the session reader, and the direction exploration.
 > a scale bomb in it failed. PDF and Word extraction works, adds no dependency, and
 > hands the whole review layer to a contract you can quote a page from. The action
 > bus is carefully argued and holds. Forty-four repairs against that is a short
-> list, and 36 of them are an evening or less. — the programme that survived
+> list, and 35 of them are an evening or less.
 
 A–J were features. K–Q are repairs, and there are 44 of them. Every item below
 is justified by a claim that was independently re-measured and survived a
@@ -350,7 +373,7 @@ zero targets for 87 of 99 documents. A tray that calls a deleted paragraph
 copy of every prompt from twenty projects. Four `[x]` lines above describing
 features that were never built.
 
-**36 of the 44 are S and 8 are M. None is longer.** That is the finding, not a
+**35 of the 44 are S and 9 are M. None is longer.** That is the finding, not a
 rounding. The programme that survived verification is small; what did not
 survive is most of the ambition — no diff review, no MCP server, no transcript
 archive, no code-knowledge map. All of it is in [Killed](#killed), which is the
@@ -374,7 +397,9 @@ silent: `md: wrote out.html`, exit 0, blank page. Nothing downstream can be
 dogfooded, measured or recommended until this works. Build order is K1, K3, K2,
 K4, K5 — K3 before K2 because the installer's self-check and CI's assertion are
 the same assertion, and getting it wrong in one place is getting it wrong in
-both. See [`install-plan.md`](install-plan.md).
+both. K5 waits on one hook fire against the installed build, which standing rule
+12 wants before the code is written; that same fire settles open question 5, so
+take the two together. See [`install-plan.md`](install-plan.md).
 
 - [x] **K1 · Install by glob, not by list.** `install.sh:59` names seven files
       plus `hook.py`; `share/` holds eighteen. `render.js` is not among them, so
@@ -453,7 +478,9 @@ both. See [`install-plan.md`](install-plan.md).
 The places a stranger meets the defect in minute two. Seven of the eight are a
 subtraction or a correction; only L1 adds behaviour. They come before the
 anchoring work because they are what makes the tool's own output trustworthy
-enough to judge that work by. See [`signals-plan.md`](signals-plan.md).
+enough to judge that work by. Phase N now comes before them — the build-order
+paragraph above says why, and nothing here is made harder by the week's wait.
+See [`signals-plan.md`](signals-plan.md).
 
 - [ ] **L1 · Search requires every term.** `count()` at `workspace.js:157-162`
       is one case-insensitive `indexOf` of the whole query. On repo B's 330
@@ -573,8 +600,10 @@ re-anchored by content; the code is `raw.indexOf(it.anchor)` at
 `review.js:119`, exact substring, first occurrence, and a miss sets
 `state = 'stale'`, which seven aggregate views filter out and the tray counts as
 *resolved*. Two of the eight items are the whole mechanical fix and come to
-about fifteen lines. Build order is M1, M3, M2, then the rest in number order:
-M3 is one line and must land before M2 starts moving items. See
+about fifteen lines. Build order is M1, M3, M2, M6, then the rest in number
+order: M3 is one line and must land before M2 starts moving items, and M6 is
+independent of all of them, is the phase's only **M**, and is the only item here
+another phase waits on — N6's plan-text half. See
 [`anchoring-plan.md`](anchoring-plan.md).
 
 - [ ] **M1 · Re-anchor to the nearest occurrence, not the first.** Collect all
@@ -637,22 +666,50 @@ M3 is one line and must land before M2 starts moving items. See
       *Done when:* reopening a document an agent rewrote states the two counts
       before you scroll. **S**
 
-- [ ] **M6 · `notes.json` — relative keys, a timestamp, and a version.**
-      `write_notes`' own docstring says *keyed by absolute document path*, and
-      the one key on this machine is an absolute README path, so the file cannot
-      survive a second checkout — while README Limitations says it syncs *"if
-      you commit it"*. Key by the path relative to the workspace root, migrating
-      absolute keys on read. Add a per-item `at` stamp: eleven fields are stored
-      and none is a timestamp, and unlike everything else here it is
-      irrecoverable later. Add `"v": 1` and reserve the right to break it. Make
-      `write_notes` find the enclosing repository by walking up for `.git`
-      rather than assuming `root/.git`, and put `.rubricator/` in rubricator's
-      own `.gitignore` — the fresh-clone case does not reproduce, but
-      `md docs/` leaves `?? docs/.rubricator/` and does.
+- [ ] **M6 · `notes.json` becomes a directory, with relative keys, `at`, `by` and
+      a version.** `write_notes` (`workspace.py:526`) documents itself as *"one
+      file per repo, keyed by absolute document path"* and does exactly that; the
+      one key on this machine is an absolute README path, so the file cannot
+      survive a second checkout while `README.md:459` says notes sync *"if you
+      commit it"*. Standing rule 3 now makes committing them the supported path,
+      which makes this one commit rather than four. **Relative keys**, migrated
+      from absolute on read, relative to the **enclosing git repository** rather
+      than to the directory the human typed — otherwise `md .` and `md docs/` in
+      one repository keep two disjoint stores, and two people who invoke the tool
+      differently never see each other's marks. **One file per document**, at
+      `.rubricator/notes/<relative path>.json`: `git status` then names the
+      document whose marks changed, `git log` on that path is that document's
+      mark history, two people marking different documents never touch the same
+      file, and a conflict, when it comes, is in the one document they both
+      marked. The wire format does not move — `data["notes"]`
+      (`workspace.py:576`) stays one object and `/notes` still takes
+      `{path, store}`; only the disk layout and the `DISK` key
+      (`workspace.js:74`, which L3 has just touched) change. **A per-item `at`
+      and `by`** — eleven fields are stored and none of them is a clock. `at` is
+      epoch milliseconds, like the `store.saved` already written by `save()`;
+      `by` is `git config user.name`, omitted when git does not know one and
+      never guessed from the OS account. Both are written at creation and never
+      rewritten, for M3's reason. The name is already in every commit in the same
+      repository, so the notes file adds no exposure the history does not already
+      carry. And **`"v": 1`**, with the right to break it, said in the docstring.
+      Two behaviours reverse. `write_notes:540-546` stops appending
+      `.rubricator/` to `.git/info/exclude`, and removes the line it wrote on the
+      first run after the upgrade, saying so once — the tool wrote that line, so
+      the tool takes it back, and nothing else in the file is touched. And
+      rubricator's own `.gitignore` does **not** gain the line the previous
+      version of this item asked for: it would hide the file its own maintainers
+      are now meant to commit. `md docs/` therefore leaves `.rubricator/` in
+      `git status`, which is no longer noise but the point. The walk-up for `.git`
+      survives with a new job — it locates the notes root, falling back to the
+      directory itself outside a repository. `review.js`'s localStorage key is not
+      touched, so the `file://` reader is unaffected.
       *Done when:* a notes file written in one clone loads in a second clone of
-      the same repo at a different path, every new item carries `at`, and
-      `git status` is clean after a live run whose root is a subdirectory of a
-      git repository. **S**
+      the same repository at a different path; `md .` and `md docs/` read and
+      write the same marks; every new item carries `at`, and `by` wherever git
+      knows a name; two people marking different documents in one repository can
+      both commit without a conflict; `.git/info/exclude` gains no `.rubricator/`
+      line and loses the one this tool wrote; and `git status` after a live run
+      shows `.rubricator/`. **M**
 
 - [ ] **M7 · A verb cannot land on a document you are not looking at.**
       `shell.js:390-397` focuses a pane on mousedown, so select-and-mark is
@@ -685,11 +742,15 @@ The README says *nothing leaves the machine* and `bin/md:149` enforces it by
 refusing `--out` with `--sessions` — while `index/sessions.json` under the cache
 root holds 3,998 prompts across 419 sessions and 20 project paths at mode 0644,
 is never pruned, and sits in the one cache directory macOS does not exclude from
-Time Machine. Today's victim count is one, which is why this is fourth; it
-moves ahead of M the day there is client work on the machine (open question 3).
-Build order is N5 first — it is small and it unblocks Q1 — then N1, N2, N4, N3,
-one commit each, and N6 last because it is the only item here that adds a file
-rather than removing an exposure. See [`retention-plan.md`](retention-plan.md).
+Time Machine. The victim count was one, and that one was the maintainer, who
+owns every prompt in the index — which is why this sat fourth. Open question 3
+was answered on 2026-08-24: `md --sessions` already runs on a machine with client
+work on it. The population changed, not a measurement; nothing below moved. The
+phase now runs second, after K, and the build-order paragraph above says why it
+also goes ahead of L. Build order inside the phase is unchanged: N5 first — it
+is small and it unblocks Q1 — then N1, N2, N4, N3, one commit each, and N6 last
+because it is the only item here that adds a file rather than removing an
+exposure. See [`retention-plan.md`](retention-plan.md).
 
 - [ ] **N1 · The prompt cache stops being world-readable and immortal.** Three
       fixes. Mode 0600 on files and 0700 on the directory — `actions.py:113` and
@@ -699,8 +760,10 @@ rather than removing an exposure. See [`retention-plan.md`](retention-plan.md).
       Time Machine: `tmutil isexcluded ~/Library/Caches` → Excluded,
       `tmutil isexcluded ~/.cache/rubricator` → **Included**. Assert the
       property, not the mechanism — moving to `~/Library/Caches/rubricator` and
-      `tmutil addexclusion` both reach it, and which one is right depends on
-      open question 4. Prune `index/sessions*.json` on the seven-day schedule
+      `tmutil addexclusion` both reach it. Open question 4 was answered on
+      2026-08-24 and does not pick between them: it removes the portability
+      argument for the second, and leaves the choice to this item's own commit.
+      Prune `index/sessions*.json` on the seven-day schedule
       `bin/md:413` already applies to rendered HTML, which `-maxdepth 1` and
       `-name '*.html'` currently miss.
       *Done when:* `find ~/.cache/rubricator -type f ! -perm 600 | wc -l` is 0,
@@ -752,10 +815,12 @@ rather than removing an exposure. See [`retention-plan.md`](retention-plan.md).
       do not write the file** — a markdown reader that edits another tool's
       51-line config with a hooks block is one malformed write from bricking the
       user's agent (rule 1).
-      *Done when:* the strip shows a labelled ratio from a single named source
-      — 452/68 counted from `history.jsonl` directly, or the index's own 419/78,
-      not a mix — the sentence appears once per install, and nothing under
-      `~/.claude` is written. **S**
+      *Done when:* the strip shows a labelled ratio from a single named source —
+      **452/68, the session ids counted from `history.jsonl` directly**, which
+      the reorder decides: L6 now lands after this item, so the index's own
+      419/78 would move under an unrelated phase after the strip had already
+      printed it. Not a mix, either way. The sentence appears once per install,
+      and nothing under `~/.claude` is written. **S**
 
 - [ ] **N6 · The hook leaves a record.** A plan review produces a decision, a
       `systemMessage` and nothing on disk, and because every invocation is a
@@ -768,10 +833,15 @@ rather than removing an exposure. See [`retention-plan.md`](retention-plan.md).
       session id into `.rubricator/`. Grep-readable, `rm`-deletable, no new UI
       surface, no migration. This is a named design change: the hook stops being
       fire-and-forget. Add a navigator group only if the file accumulates
-      anything.
-      *Done when:* three hook fires leave three lines, an approval leaves the
-      plan text, and `md` never reads either file. **S** — the plan-text half
-      after M6, or the hook writes the exclude line itself.
+      anything. **The two halves ship apart, under the one number.** The
+      `reviews.jsonl` line lands here, in phase N. The approved-plan-text half
+      lands with M6 in phase M, because M6 decides what `.rubricator/` is on
+      disk — and the escape hatch this item used to carry, *the hook writes the
+      exclude line itself*, is retired by M6, which stops writing that line at
+      all. Writing it here for phase M to delete is the same work done twice in
+      opposite directions.
+      *Done when:* three hook fires leave three lines and `md` never reads the
+      file; the approved plan text follows with M6. **S**
 
 ---
 
@@ -844,12 +914,14 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       hook broken. The degradation is cosmetic — every guard falls back to plain
       `open` — so fix it as a one-time chore with one rule: **all four sites or
       none**, searching `/Applications`, `~/Applications` and `mdfind`.
-      Separately, write the capability matrix into `docs/` as a decision record:
-      the six macOS-bound capabilities — app window, AppleScript window close,
-      native folder chooser, `.command`/LaunchServices dispatch, `textutil` +
-      JXA/PDFKit, `shasum` — each with its honest Linux answer. **Do not extract
-      `share/platform.py`**: a seam built before the port it must accommodate is
-      the wrong seam.
+      Separately, write the capability matrix into `docs/` as a decision record,
+      and write it as a **closed** question: open question 4 was answered on
+      2026-08-24 — macOS-only is a decision, not a *not yet*. The six macOS-bound
+      capabilities — app window, AppleScript window close, native folder chooser,
+      `.command`/LaunchServices dispatch, `textutil` + JXA/PDFKit, `shasum` —
+      each with its honest Linux answer, and nothing promised beyond them. **Do
+      not extract `share/platform.py`**: a seam built before the port it must
+      accommodate is the wrong seam, and the port is not coming.
       *Done when:* all four guard sites resolve Chrome the same way, and the
       matrix answers the first question a Linux visitor asks without promising
       anything. **M**
@@ -862,10 +934,14 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       day. The numbers are load-bearing: four plan documents cite rules by
       number, so a rule may gain a clause but the list may not be renumbered.
       Record with them the honest amendment to the README's *nothing is written
-      into your files*: `workspace.py:540-546` appends `.rubricator/` to
-      `.git/info/exclude` when the first note is saved.
+      into your files*. M6 now lands before this phase and withdraws the append
+      at `workspace.py:540-546`, so what O5 records is the post-M6 state: the
+      notes file is not hidden, it appears in `git status` by design, and
+      committing it is the supported path (rule 3). Do not describe a behaviour
+      that will already be gone.
       *Done when:* the twelve are in [`scope-plan.md`](scope-plan.md) §5, each
-      with its justification, and the README's sentence is amended. **M**
+      with its justification, and the README's sentence is amended to the post-M6
+      truth. **M**
 
 - [ ] **O6 · The shipped plans name four private repositories.**
       `workspace-plan.md:183-185` tabulates `<repo>/requirements.md`,
@@ -905,7 +981,11 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       the same-origin policy makes impossible — the sidecar is a **decision**,
       not a compromise; `README.md:185` says *17 MB parses in 0.05 s* when the
       largest transcript here is 105.0 MB and parses in 0.28 s; and
-      `README.md:124` calls a lost anchor *resolved*.
+      `README.md:124` calls a lost anchor *resolved*. **One sentence in here
+      waits, and only that one:** whether the page may say the hook's Approve
+      approves turns on open question 5, which is awaiting a measurement rather
+      than an answer. Write the rest and leave that sentence out until the
+      keypress has been taken; do not stall the item on it.
       *Done when:* line 26 states the real surface, the trust material is above
       the fold, no sentence promises cross-origin note sharing, `README.md:185`
       carries the measured 105 MB / 0.28 s, and `README.md:124` no longer calls
@@ -916,19 +996,27 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       4,074-word, twenty-heading README — advertising an extension API before
       you have a user invites the reader to ask who else is building on it.
       Backfill with three things, in this order. (a) **The review layer over
-      documents that keep changing** — the only candidate whose mechanism works
-      today on the first file a stranger opens; the document↔session↔git join is
-      **88% empty** (49 of 419 sessions carry a file list) and has a thirty-day
-      half-life by construction. (b) **PDF and Word**, which already carry the
-      full review layer with the page number surviving into the export, and are
-      unmentioned until line 377 of 473. (c) The **durable** half of the history
-      index: every prompt typed in 18 project directories over 128 days, in one
-      field, in a second. Do not attach the file-join to that sentence. Add the
+      documents that keep changing** — open question 1, answered on 2026-08-24:
+      *living documents*. The page opens with the owner's own wording, which is
+      the plainest statement of the thesis this project has produced: *"Mark up a
+      document an agent is going to rewrite, and still have your marks
+      afterwards. Read it, mark the parts that matter, send the marks to your
+      agent. When it rewrites the file, your notes follow their text to the new
+      lines — and the ones whose text is gone say so."* `scope-plan.md` §7
+      carries it verbatim, and the two paragraphs of its argument follow it here.
+      It is the only candidate whose mechanism works today on the first file a
+      stranger opens; the document↔session↔git join is **88% empty** (49 of 419
+      sessions carry a file list) and has a thirty-day half-life by construction.
+      (b) **PDF and Word**, which already carry the full review layer with the
+      page number surviving into the export, and are unmentioned until line 377
+      of 473. (c) The **durable** half of the history index: every prompt typed
+      in 18 project directories over 128 days, in one field, in a second. Do not attach the file-join to that sentence. Add the
       two missing screenshots, move `--sessions` into the first code block, and
       rewrite the GitHub description. Editorial rule throughout: *does this help
       a stranger decide, or an existing user operate?*
       *Done when:* the four sections are gone, the first three paragraphs are
-      the three above, and both screenshots are in the repo. **M**
+      the three above, the page opens with the owner's wording as quoted, and
+      both screenshots are in the repo. **M**
 
 - [ ] **P3 · Delete the graph.** Not for the reason first given — the spring
       loop was ported verbatim to V8 and runs in **19.5 ms** at 299 nodes,
@@ -1005,9 +1093,10 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       to *the Bash tool's* PATH, not the human's interactive shell, so the
       channel delivers the hook and only the hook. **Skip the
       community-directory submission** — `anthropics/claude-plugins-community`
-      lists 2,282 plugins; entry 2,283 is not distribution. Blocked on open
-      question 2: a distribution channel is only worth building for a second
-      reader, and today the measured count is zero.
+      lists 2,282 plugins; entry 2,283 is not distribution. No longer blocked:
+      open question 2 was answered on 2026-08-24, and several people using the
+      tool without effort or blockers is a goal, so the channel has someone to
+      deliver to. Both limits above stand unchanged.
       *Done when:* a clean machine can install the hook through
       `/plugin install` with no shell script, and `install-hook.sh` is deleted
       or reduced to a wrapper. **S**
@@ -1087,7 +1176,14 @@ this register does not trust. Q has no plan document of its own.
       N2's rule applied to a second write path.
       *Done when:* `md --json .` prints a parseable index to stdout, exits 0,
       starts no server, and contains neither a `stale` verdict field nor prompt
-      text. **M** — depends on L4.
+      text. **M** — depends on L4 and M6. It stays in Q even though *readable by
+      agents* is now part of what the tool is for: `.rubricator/` is already
+      clean JSON an agent can `cat`, which is the sentence X9 was killed on, so
+      nothing about the purpose is blocked on this. What Q5 adds is an interface,
+      and an interface ships last — before L4 it would carry the staleness
+      verdict through a door built for automation, where nobody reads the caveat
+      under the table, and before M6 its note keys are absolute paths from one
+      machine.
 
 ---
 
@@ -1154,18 +1250,27 @@ Twelve, adopted by this register. Each is stated here in one line; the
 measurement or enumeration under each is in
 [`scope-plan.md`](scope-plan.md) §5, which O5 writes. Four plan documents cite
 these by number, so a rule may gain a clause and the list may not be renumbered.
+Rule 3 was withdrawn and replaced on 2026-08-24, when the owner answered open
+question 2; it keeps its number for that reason, its text here is §5's word for
+word rather than a shorter restatement of it, and rule 1 gained a clause in the
+same round.
 
 1. **The write rule.** Rubricator may write only inside `.rubricator/` in a root
-   it was pointed at, inside `~/.config/rubricator/`, `~/.cache/rubricator/` and
-   `~/.local/state/rubricator/`, and to a path the human typed in the same
-   gesture. Never a file git tracks, never a file it found by indexing.
-   Proposing a change the human applies is an export; applying it is not — at
+   it was pointed at — whose enclosing git repository reads as that root for
+   `.rubricator/` itself, and for nothing else — inside `~/.config/rubricator/`,
+   `~/.cache/rubricator/` and `~/.local/state/rubricator/`, and to a path the
+   human typed in the same gesture. Never a file git tracks, never a file it
+   found by indexing. Proposing a change the human applies is an export; applying it is not — at
    any confidence, behind any flag.
 2. **Nothing that must survive a restart may live in `localStorage`.** Per-root
    state in `.rubricator/`, per-user state in `config.json` behind the
    whitelist; `localStorage` is within-run convenience only.
-3. **Single reader.** Committing `notes.json` is permitted (`git add -f`) and
-   unsupported.
+3. **More than one reader, and git is the transport.** Committing the notes is
+   the supported path: one file per document, so two people's marks merge rather
+   than collide, and each mark carries a `by` and an `at`. No server, no account,
+   no sync, no locking — two people who mark the same document get a git conflict
+   in a small JSON file, and rubricator's only help is that the file is small
+   enough to resolve by hand in a minute.
 4. **Persist the selection, never the assembly.** Rebuild on every open.
 5. **No MCP server.** The machine-readable door for a local CLI is a flag.
 6. **No database.** The Logseq DB split is the standing argument.
@@ -1188,17 +1293,37 @@ these by number, so a rule may gain a clause and the list may not be renumbered.
 
 ## Open questions — the owner's, not the register's
 
-Everything else in phases K–Q was measured. These six cannot be, and each blocks
-something.
+Everything else in phases K–Q was measured. These six could not be, and each
+blocked something. The owner answered all six on **2026-08-24**. Five are
+decisions and are recorded here rather than deleted — a register that quietly
+drops its own questions is the defect this programme is about — and the sixth is
+not an answer but a measurement the owner will take, so it stays open.
 
-| # | question | settled by | blocks |
+| # | question | the answer, and its date | blocks |
 |---|---|---|---|
-| 1 | **What is `md` for, in one sentence?** The register's answer is *the review layer for documents that keep being rewritten*, chosen because it is the only candidate whose mechanism works today. If the answer is the document↔session join instead, P2 changes and so does everything after it — but that join is 88% empty and has a thirty-day half-life. | the owner writing the sentence before P1 starts | P1, P2 |
-| 2 | **Is there a second reader, actual or intended, within six months?** Almost everything deferred — multi-root, per-document note files, authorship, threads, the plugin channel — turns on this, and today the measured answer is no. | naming the person, or accepting rule 3 permanently | O2, O5, P7 |
-| 3 | **Will `md --sessions` run on a machine with client work on it?** If yes, N moves ahead of M and probably ahead of L. Nothing in phase N's content changes either way — only its place in the queue. | the owner saying which repositories are on the machine | N1–N4's position |
-| 4 | **Is macOS-only a decision or a "not yet"?** O4's matrix cannot be written honestly without an answer, and the answer decides whether N1 moves the cache or excludes it in place. | one line in the README | O4, N1's mechanism |
-| 5 | **Does Approve actually skip Claude Code's approval menu?** Two vendor pages disagree, and the disagreement is exactly about the interactive case rubricator runs in. It cannot be settled by an agent — it needs one human pressing Approve once and watching. | one plan, one keypress | P1 |
-| 6 | **Is the diff lane off the table permanently, or a 2027 bet?** This register cedes it (X8). If the owner disagrees, P4 says something different about the incumbent and phase Q's value changes. | an explicit decision recorded in `scope-plan.md` | P4 |
+| 1 | **What is `md` for, in one sentence?** The register's answer was *the review layer for documents that keep being rewritten*, chosen because it is the only candidate whose mechanism works today. The alternative was the document↔session join, which is 88% empty and has a thirty-day half-life. | **Living documents** — 2026-08-24. The owner's own wording is in [`scope-plan.md`](scope-plan.md) §7 and opens the front page; P2 quotes it. The join is not the thesis. | P1, P2 — both released |
+| 2 | **Is there a second reader, actual or intended, within six months?** Almost everything deferred — multi-root, per-document note files, authorship, threads, the plugin channel — turned on this, and the measured answer was no. | **Yes, and multi-person use is a goal** — 2026-08-24. Readable by agents; several people able to use it without effort or blockers; seeing who did what is wanted. Standing rule 3 is withdrawn and replaced, and M6 carries relative keys, one file per document, `by` and `at`. It revives nothing: X20, X9 and X17 stay dead, and it is not X22 — several people reading one repository is not one person reading several. *git blame for annotations* was the owner's own idea, floated with a question mark: cheap once `by` and `at` exist, no evidence behind it, no item, and nothing planned on it. | O2, O5, P7 — all released; O2's scope is unchanged, because the answer is about readers, not roots |
+| 3 | **Will `md --sessions` run on a machine with client work on it?** If yes, N moves ahead of M and probably ahead of L. Nothing in phase N's content changes either way — only its place in the queue. | **Yes, already** — 2026-08-24. Phase N runs second, after K, and ahead of L as well; the population changed, not a measurement, and no figure in [`retention-plan.md`](retention-plan.md) moved. The build order is in the phases preamble above. | N1–N4's position |
+| 4 | **Is macOS-only a decision or a "not yet"?** O4's matrix cannot be written honestly without an answer, and the answer decides whether N1 moves the cache or excludes it in place. | **A decision, not a *not yet*** — 2026-08-24. O4 writes the matrix as a closed question and promises no port, and the refusal to extract `share/platform.py` now has a reason rather than a deferral behind it. N1 keeps its *assert the property, not the mechanism* rule; neither mechanism is ruled out by a port that is not coming. | O4, N1's mechanism |
+| 5 | **Does Approve actually skip Claude Code's approval menu?** Two vendor pages disagree, and the disagreement is exactly about the interactive case rubricator runs in. It cannot be settled by an agent — it needs one human pressing Approve once and watching. | **Still open, and the only one.** Not an answer but a measurement, and the owner will take it: one plan, one keypress. The procedure is under this table. | P1, in part — one sentence of it, and K5 shares the hook fire |
+| 6 | **Is the diff lane off the table permanently, or a 2027 bet?** This register cedes it (X8). If the owner disagrees, P4 says something different about the incumbent and phase Q's value changes. | **Ceded permanently** — 2026-08-24, not deferred to a 2027 bet. X8 stands, [`scope-plan.md`](scope-plan.md) §12 records it as settled rather than hedged, and P4 names the lane as the incumbent's and says why rubricator will not follow. | P4 — released |
+
+> **The measurement open question 5 is waiting on.** In an interactive Claude Code
+> session — not `-p` — in a repository with the hook installed, ask for something
+> large enough that Claude proposes a plan, and let it call ExitPlanMode. Note
+> `claude --version` first. When the rubricator window opens, press Approve and
+> send. Then watch the terminal. Either the session starts executing the plan with
+> no further prompt, in which case `permissionDecision: "allow"`
+> (`hook.py:164-166`) is sufficient in the interactive case, **X5** stays dead and
+> P1 may say the hook approves; or Claude Code's own approval menu appears anyway,
+> in which case Approve is a suggestion, P1 must say so, and this register gains an
+> item. Write down which happened and the version. Thirty seconds, once.
+
+A rider, and not part of the thirty seconds: the same hook fire also answers
+standing rule 12's gate on **K5**, if one temporary line is added after
+`payload = json.loads(...)` (`hook.py:193`) to print the payload's keys. That is
+a code edit, so it is a separate decision from pressing Approve once — but it is
+the same fire, and taking both at one sitting saves the second one.
 
 ---
 
@@ -1233,5 +1358,6 @@ What is deliberately still missing, and why:
   bridge, and `shasum` where Linux has `sha256sum`. The first four degrade
   gracefully; the fifth is the whole of PDF and Word, and the sixth is silent.
   O4 writes the matrix, with the honest Linux answer beside each — and
-  deliberately does not extract a `platform.py` for a port that does not exist
-  yet.
+  deliberately does not extract a `platform.py` for a port that is not coming.
+  Since 2026-08-24 that is a decision rather than an admission: macOS-only is the
+  answer, not a *not yet*.

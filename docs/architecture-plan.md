@@ -380,6 +380,24 @@ flowchart LR
 3. **Notes went to disk**, at `.rubricator/notes.json`, kept out of git through
    `.git/info/exclude` rather than `.gitignore` — nothing tracked is touched and
    committing them stays a choice.
+
+> **Since then.** Decision 3 is reversed, and so is the sentence about
+> *gitignored by default* under **Caching** above. Both were written on the
+> assumption that rubricator is a one-person tool, which was true of its
+> measured usage and is no longer true of its purpose: on 2026-08-24 the owner
+> named multi-person use as a goal, and standing rule 3 in
+> [`scope-plan.md`](scope-plan.md) §5 was rewritten around it — *more than one
+> reader, and git is the transport.* So committing the notes stops being a
+> tolerated choice and becomes the supported path. **M6** makes the keys
+> relative to the enclosing repository (a single absolute key resolves in
+> exactly one clone, which is why the file does not travel today), splits the
+> one blob into a file per document so that two people's marks merge instead of
+> colliding, gives each mark a `by` and an `at`, and removes the
+> `.git/info/exclude` line this decision added — including from the two
+> repositories that already carry it. What does not change: no server, no
+> account, no sync, no locking. Two people who mark the same document get a git
+> conflict in a few kilobytes of JSON, and that is the whole of the merge
+> story.
 4. **All five phases shipped in sequence**, one commit each, rather than as two
    releases. The tiering in C is what made D and E small.
 

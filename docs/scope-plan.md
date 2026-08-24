@@ -1,7 +1,7 @@
 ---
 title: What this is for, and what it will never be
 subtitle: The register corrections, the front page, and the twelve rules that keep both honest
-status: plan — 2026-08-23
+status: plan — 2026-08-24
 ---
 
 # What this is for, and what it will never be
@@ -203,11 +203,18 @@ Everything else is portable: `workspace.py`, `serve.py`, `transcript.py`, `works
 zero platform markers, and `workspace.py:25` shells out only to `git`.
 
 That matrix goes into `docs/` as a decision record, with each row's honest Linux answer next
-to it. What does **not** happen is extracting `share/platform.py`. A seam built before the
-port it is meant to accommodate is the wrong seam, and it would touch four of the files most
-likely to change this month. The matrix answers the first question a Linux visitor asks; it
-promises nothing. Whether that answer is *no* or *not yet* is not this document's to give —
-see §13.
+to it. The answer it records is **no**, decided 2026-08-24: this is macOS software. The
+matrix is not an apology for that, it is the reason — six capabilities bind the tool to this
+platform, each row says what the Linux answer would be, and the document promises nothing
+further. A Linux visitor gets the first question answered on arrival instead of a *not yet*
+that never resolves.
+
+What does **not** happen is extracting `share/platform.py`. That refusal was already right
+when the port was merely unscheduled; with the port ruled out it is not a close call. A seam
+built for a port that is not going to happen is not a seam — it is four files of indirection
+through the files most likely to change this month, maintained for a caller that will never
+arrive. The Chrome-path half of O4 is untouched by the decision: it is a live bug for today's
+users on today's platform, and it is still **all four sites or none**.
 
 ---
 
@@ -247,12 +254,15 @@ not be renumbered.
    because the human started the session there and the write lands in the same
    `.rubricator/` a note taken in that repo would land in. So N6's approved-plan-text half is
    permitted.
-   `anchoring-plan.md` §10 asks the mirror question and gets the same answer: M6 makes
-   `write_notes` walk up for a `.git` directory, so `md docs/deep/nested/` appends
-   `.rubricator/` to the `.git/info/exclude` of a repository the human named only the inside
-   of. That is permitted — the enclosing repository of a root the human typed reads as that
-   root — but only for that one untracked file and that one appended line. It is not a
-   general licence to walk up, and no other write may use it.
+   `anchoring-plan.md` §10 asks the mirror question and gets the same answer, which has since
+   narrowed to one thing. M6 makes `write_notes` walk up for a `.git` directory, so
+   `md docs/deep/nested/` writes into the `.rubricator/` of a repository the human named only
+   the inside of. That is permitted — the enclosing repository of a root the human typed reads
+   as that root — and after M6 it is permitted for `.rubricator/` itself, which is where the
+   notes go, and for nothing else. The appended `.git/info/exclude` line this clause was
+   originally written for is **withdrawn by M6**, which stops writing it and removes the one it
+   wrote. The walk-up keeps its second job, locating the notes root, and loses its first. It is
+   not a general licence to walk up, and no other write may use it.
 
 2. **Nothing that must survive a restart may live in `localStorage`.** Per-root state goes in
    `.rubricator/`, per-user state in `config.json` behind the whitelist; `localStorage` is
@@ -262,11 +272,30 @@ not be renumbered.
    keyed by origin including port. Everything the page keeps there starts empty every time.
    This is not a first-run problem; it is an every-run problem.
 
-3. **Single reader.** Committing `notes.json` is permitted (`git add -f`) and unsupported.
-   Two people editing one JSON blob will conflict and rubricator will not help.
-   *Justification:* the measured number of second readers is zero. Everything deferred on
-   this basis — per-document note files, authorship, threads — is cheap to build the day the
-   answer changes and expensive to carry until then.
+3. **More than one reader, and git is the transport.** Committing the notes is the
+   supported path: one file per document, so two people's marks merge rather than
+   collide, and each mark carries a `by` and an `at`. No server, no account, no sync, no
+   locking — two people who mark the same document get a git conflict in a small JSON
+   file, and rubricator's only help is that the file is small enough to resolve by hand
+   in a minute.
+   *Justification:* this rule is a decision, and it reverses the one it replaces. The
+   measured second-reader count was zero and the old rule was written on that number; a
+   count of today's readers cannot settle what the tool is for, and the owner has named
+   multi-person use as a goal. What the decision buys is bounded by what it refuses.
+   Relative keys make a mark written in one clone resolve in another, one file per
+   document is the whole of the merge story, and `by` and `at` are one line each and
+   irrecoverable if they are not written now — all of it **M6**. What it does not buy is
+   a discussion system, and it revives nothing from the killed list: not threads,
+   contradiction marks, a Suggest verb or promote-to-document (**X20**), whose machinery
+   was refused for a corpus of three marks that is still three marks; not an MCP server
+   (**X9**, and rule 5 stands — the machine-readable door is `md --json` and a JSON file
+   an agent can `cat`); not agent-proposed marks (**X17**). It is also not **X22**:
+   several people reading one repository is not one person reading several, and the
+   multi-root measurement — four recents, all single paths — is untouched by this answer.
+   The limit is stated in the rule because it is the whole of the design. Two people who
+   never mark the same document never interact; two who do get a merge conflict in a file
+   of a few kilobytes, which is a problem a developer already knows how to solve and
+   which no server, lock or merge UI is going to be built to avoid.
 
 4. **Persist the selection, never the assembly.** Rebuild on every open.
    *Justification:* GitHub's own replacement for Copilot knowledge bases is human-*selected*
@@ -341,11 +370,20 @@ not be renumbered.
     on 2.1.241 (§2). It is also the hook event the incumbent registers (§10), which is exactly
     the situation where borrowing a design without re-measuring is most tempting.
 
-One honest amendment goes with them. The README says *nothing is written into your files*.
-That is not quite true: `workspace.py:540-546` appends `.rubricator/` to
-`.git/info/exclude` when the first note is saved. The intent is good — nothing git tracks is
-touched and committing the notes file stays a choice — but the sentence as written is
-absolute and the behaviour is not. Amend the sentence; keep the behaviour.
+One honest amendment goes with them, and M6 changes what it has to say. The README says
+*nothing is written into your files*. Until M6 that is not quite true: `workspace.py:540-546`
+appends `.rubricator/` to `.git/info/exclude` when the first note is saved, and the sentence
+as written is absolute where the behaviour is not. M6 withdraws the append and removes the
+line the tool wrote, which retires that correction rather than satisfying it — the original
+sentence does not become true, it becomes beside the point.
+
+What O5 must write instead is the state after M6, and it is a stronger sentence than the one
+it replaces: the notes file is **not hidden from you**. It appears in `git status` by design,
+one file per document, and committing it is the supported path rather than a tolerated one —
+rule 3. Nothing git already tracks is still touched, which was the good half of the old
+intent and survives intact. O5 lands in phase O, which now runs after M in the build order,
+so this describes behaviour that will already have shipped rather than promising behaviour
+that is about to change.
 
 ---
 
@@ -395,8 +433,10 @@ workspace is there when you open the file on its own"*. The static tier is `file
 live tier is `http://127.0.0.1:PORT`. The same-origin policy makes that sharing impossible,
 and rule 2's every-run-new-port measurement makes it doubly so. The honest sentence is not an
 apology, it is the design: the sidecar is a **decision**. The reviewed artefact stays
-byte-identical, review stays out of `git diff`, and an agent told to rewrite the plan cannot
-drop or duplicate your marks. Say that, and delete the sharing claim.
+byte-identical, review stays out of the document's own diff, and an agent told to rewrite the
+plan cannot drop or duplicate your marks. Say that, and delete the sharing claim. Under rule
+3 the sidecar is itself committed, so the claim is about the document's diff and not about
+the repository's — that is one word, and it is the word a careful reader will check.
 
 Two further sentences on the front page are checkably false and P1's register line does not
 cover either. `README.md:185` says *17 MB parses in 0.05 s*; the largest transcript on this
@@ -477,15 +517,30 @@ first occurrence, and a miss sets a state the tray reports as an accomplishment.
 `docs/review-design.md:141-142` specifies a per-item quote-hash that was never built. Phase M is
 the whole prerequisite, and it is small. Nothing in §8 gets written until it lands.
 
-**This section proposes; it does not decide.** The one-sentence answer to *what is `md` for*
-is the owner's to write, and it is open question 1 in the register. What this document can
-say is that five of the six candidates fail a test that was applied to all six, and that the
-sixth is the one whose mechanism already ships.
+**Answered 2026-08-24: living documents.** This section proposed and the owner decided.
+Everything above it stays as the record of how the answer was reached — five of the six
+candidates fail a test that was applied to all six, and the sixth is the one whose mechanism
+already ships. What was open was never the argument; it was the sentence, and the sentence is
+the owner's:
 
-One hazard worth naming before the owner writes it: Moat's own tagline is *"The review layer
-for agent-written docs"* (`citations.md` G13, and §10). The proposal above is that sentence
-with one noun changed. The distinguishing word has to be the one about rewriting, not the one
-about review layers.
+> Mark up a document an agent is going to rewrite, and still have your marks afterwards.
+> Read it, mark the parts that matter, send the marks to your agent. When it rewrites the
+> file, your notes follow their text to the new lines — and the ones whose text is gone say
+> so.
+
+That is the plainest statement of the thesis this project has produced, and it is what goes
+on the front page (§8). It names the mechanism rather than the category, and it states the
+failure case in its last clause — which is the half every version of this sentence written
+inside the project had dropped.
+
+One hazard was worth naming before the owner wrote it, and it stays named because the next
+rewrite of the front page will be tempted straight back into it. Moat's own tagline is *"The
+review layer for agent-written docs"* (`citations.md` G13, and §10). The proposal above is
+that sentence with one noun changed, and the distinguishing word has to be the one about
+rewriting, not the one about review layers. The chosen wording clears it: rewriting is in the
+first sentence, ahead of everything the two would otherwise share, and *review layer* does not
+appear at all. That is the test a later rewrite has to pass — not *the review layer for X*,
+whatever X is that quarter.
 
 ---
 
@@ -507,7 +562,10 @@ they are interleaved.
 
 Three things backfill the space, in this order.
 
-**(a) The review layer over documents that keep changing.** §7's argument, in two paragraphs.
+**(a) The review layer over documents that keep changing.** The page opens with the owner's
+wording, quoted in full in §7, and §7's argument follows it in two paragraphs. That order
+matters: the wording is the whole claim, and the argument exists for the reader who doubts it
+— which is not the first thing a stranger needs.
 
 **(b) PDF and Word.** Already shipped, carrying the whole review layer, with a heading per
 page and the page number surviving into the export — a marked-up PDF that can be handed to an
@@ -588,7 +646,8 @@ false), 590 forks, **1,072 commits**, created **2025-12-28**, Apache-2.0, TypeSc
 months*, not *seven*. It has
 shipped **147 releases** in eight months, one every 1.6 days. Nine agents, of which three
 (Amp, Droid, Kiro CLI) are manual invocation rather than an integration. Full PR and MR diff
-review, plus local diffs, Git, Jujutsu and Perforce. Its Claude Code integration registers a
+review, plus local diffs, Git, Jujutsu and Perforce — that lane is the incumbent's, and
+rubricator has ceded it permanently (2026-08-24); see §12 and **X8**. Its Claude Code integration registers a
 **`PermissionRequest`** hook on `ExitPlanMode` (`citations.md` G12), where rubricator
 registers `PreToolUse` on the same tool — a real distinction, and the reason rule 12 names
 that event. And a **Version Browser** that *"saves each plan submission before opening the
@@ -692,9 +751,10 @@ by that sentence, not reassured, and the commit dates say it anyway. **Do not tu
 Discussions** until someone files an issue; an empty discussion board is a louder signal than
 no discussion board.
 
-**P7 — the plugin manifest, in the repo.** P7 is drafted, not started: open question 2 blocks
-it, because a distribution channel is only worth building for a second reader and today the
-measured count is zero. What it buys when it unblocks: ship
+**P7 — the plugin manifest, in the repo.** P7 was drafted and not started, because a
+distribution channel is only worth building for a second reader and the measured count was
+zero. Open question 2 answered that on 2026-08-24 — more than one reader is a goal, rule 3 —
+so P7 is buildable and this is what it buys: ship
 `.claude-plugin/marketplace.json`, `plugin.json` and `hooks/hooks.json`, so a Claude Code user
 can run `/plugin marketplace add TheRealVale/rubricator` and get the hook without
 `install-hook.sh` performing surgery on `settings.json`. A few dozen lines of JSON that reduce
@@ -717,7 +777,9 @@ submission.
 Recording the refusals is the point of the document. Each of these was argued for, measured,
 and killed; each will be proposed again.
 
-**No diff or pull-request review (X8).** The entire case for it was addressable market, and
+**No diff or pull-request review (X8).** Ceded permanently on 2026-08-24 — the owner's
+decision, not a deferral to a 2027 bet, and it is recorded here so that it is not re-argued
+each quarter. The entire case for it was addressable market, and
 the market numbers did not survive: LinearB never defines what an *AI pull request* or an
 *acceptance rate* is (`citations.md` B2), Faros AI measures a within-organisation comparison
 of lowest- against highest-adoption periods rather than a time trend (`citations.md` B1), and
@@ -773,34 +835,74 @@ second, at moments something else created.
 
 ---
 
-## 13. The questions this document cannot answer
+## 13. The questions, answered
 
-Five of the register's six open questions bear on scope. They are the owner's, not this
-document's, and nothing here decides them.
+The owner answered all six of the register's open questions on **2026-08-24**. Five are
+decisions and this section is now their record rather than a list of things this document
+cannot say. The remaining one — whether Approve skips the approval menu — is not awaiting an
+answer either: it is awaiting a measurement, which is a different kind of open and is marked
+as such below.
 
-1. **What is `md` for, in one sentence?** §7 proposes *the review layer for documents that
-   keep being rewritten*, and shows the test that selected it from six candidates. The
-   sentence itself is the owner's to write, and it blocks P1 and P2. If the answer is the
-   document↔session join instead, §7's table is the argument against, and §8 changes
-   completely.
-2. **Is there a second reader, actual or intended, within six months?** Today the measured
-   answer is no, and rule 3 is written on that basis. The register blocks O2, O5 and P7 on
-   it, which is why §11 states P7 and does not start it. Accepting rule 3 permanently
-   unblocks all three and is much the cheaper answer.
-3. **Is macOS-only a decision or a *not yet*?** §4's matrix can be written either way, but it
-   cannot be written honestly without the answer, and the answer determines whether the
-   platform seam is ever worth extracting. One line in the README settles it.
-4. **Is the diff lane off the table permanently, or a 2027 bet?** §12 cedes it. If the owner
-   disagrees, §10 says something different about the incumbent and phase Q's value changes.
-   Record the decision here either way — an unrecorded cession is re-argued every quarter.
-5. **Does Approve actually skip Claude Code's approval menu?** The register blocks P1 on it,
-   and rightly: §6 cannot say what the hook does until someone has pressed Approve once and
-   watched. It cannot be settled by reading documentation — two of the vendor's own pages
+The numbering here is this section's own, ordered by how much each question bears on scope.
+The register numbers the same six differently, and every other document cites the register's
+numbers, so a question is safest quoted by its words.
+
+1. **What is `md` for, in one sentence?** **Living documents**, answered 2026-08-24. §7
+   applied one test to six candidates; the owner chose the candidate that passed it and wrote
+   the sentence, which §7 quotes in full and §8 puts at the top of the page. P1 and P2
+   unblock. The two narrowings hold: *living documents, not living plans*, and the mechanism
+   has to be true before it is printed, which still gates §8 on phase M.
+2. **Is there a second reader, actual or intended, within six months?** **Yes, and several
+   people using it without effort is a goal**, answered 2026-08-24 — alongside being readable
+   by agents, and with authorship wanted rather than tolerated. That reverses **standing rule
+   3**, which was written on a measured second-reader count of zero: a count of today's
+   readers cannot settle what a tool is for. The replacement rule is in §5 with its
+   justification, and **M6** is what implements it — relative keys, one file per document,
+   `by` and `at`, and committing the notes as the supported path. **O2**, **O5** and **P7**
+   unblock; §11 no longer holds P7 at the drafted stage. O2's scope does not widen: the answer
+   is about readers, not roots.
+   The owner floated one further idea with a question mark, and it is recorded here as exactly
+   that. *Git blame for annotations* becomes cheap the day `by` and `at` exist, because the
+   two fields are the whole of its input. There is no evidence behind it, no item, and nothing
+   is planned on it. It is written down so it is not lost and not so it is scheduled.
+   What the answer did **not** authorise has to be stated in the same place, because a
+   reversal this size reads as a licence. It revives nothing from the killed list. Not
+   threads, contradiction marks, a Suggest verb or promote-to-document (**X20**) — the owner
+   asked to see who did what, not for a discussion system, and the machinery was refused for a
+   corpus of three open marks machine-wide that is still three. Not an MCP server (**X9**, and
+   rule 5 stands): *readable by agents* is answered by Q5's `md --json` and by a notes file an
+   agent can already `cat`. Not agent-proposed marks (**X17**). No real-time collaboration, no
+   presence, no locking, no merge UI — the rule says so itself. And not **X22**; see §14,
+   where the reason is spelled out at length because that is the revival this answer will
+   otherwise be used for.
+3. **Is macOS-only a decision or a *not yet*?** **A decision**, answered 2026-08-24: this is
+   macOS software. §4 records it. The matrix names the six capabilities that bind the tool
+   here and the honest Linux answer to each, and promises nothing further; the platform seam
+   stays unextracted, now for a stronger reason than *not yet*.
+4. **Is the diff lane off the table permanently, or a 2027 bet?** **Ceded permanently**,
+   answered 2026-08-24. §12 records it as settled with no hedging clause, and §10 names the
+   lane as the incumbent's where the incumbent's capabilities are listed. The absence of a
+   hedge is the point: an unrecorded cession is re-argued every quarter, and so is a hedged
+   one.
+5. **Does Approve actually skip Claude Code's approval menu?** **Still open, and the only
+   one.** It is not waiting on a decision but on a measurement the owner will take: one plan,
+   one keypress. It cannot be settled by reading documentation — two of the vendor's own pages
    disagree, and they disagree precisely about the interactive case rubricator runs in
-   (**X5**). One plan, one keypress.
+   (**X5**). §6 cannot describe what the hook does until then, so P1 proceeds except for the
+   one sentence that describes it; nobody should stall the rest of P1 on a keypress.
+   The procedure is written out once, under the open-questions table in
+   [`tasks.md`](tasks.md), with the rider that the same hook fire also settles standing
+   rule 12's gate on **K5** — thirty seconds, and it lives where the question does. It is
+   not repeated here, because a procedure kept in two places is a procedure that will be
+   taken from the stale copy.
 
-The remaining one — whether `md --sessions` will ever run on a machine with client work on
-it — moves phase N's position rather than this document's argument.
+The one question not in that list — whether `md --sessions` will ever run on a machine with
+client work on it — was answered too, and it moves phase N's position rather than this
+document's argument.
+It already does. **Phase N now runs second, after K.** Not one word of phase N's content
+changes; what changed is whose material its cache holds, which is a change in the population
+rather than in any measurement. `retention-plan.md` §9 carries the reasoning and the register
+carries the order.
 
 ---
 
@@ -821,6 +923,19 @@ the whole of it is a trust claim that fails on the first `wc -l`.
 What is given up, and should be recoverable later: the multi-root design that is correct and
 costed (**X22**), on the shelf; and the join as a headline, which Q1 builds anyway and which
 becomes honest the day N5's retention warning stops the transcripts expiring.
+
+P7 was on that list and has come off it. The answer that blocked it arrived on 2026-08-24,
+and a plugin manifest for a second reader is worth building the moment a second reader is
+what the tool is for (§11, §13).
+
+**X22 has not come off it, and the reason belongs in the same breath, because the
+second-reader answer is precisely what an enthusiastic reader will use to revive it.** Several
+people reading one repository is not one person reading several. Rule 3 buys a notes file that
+merges; it buys nothing whatever about roots, and the measurement that killed X22 is untouched
+by the answer — four recents, all single paths, all three cached workspace pages single-root,
+and a costed day's careful work on the live tier for a user count of zero. The design stays on
+the shelf, correct and reachable, and the day it comes off the shelf will be the day someone
+measures a multi-repo user, not the day someone re-reads rule 3.
 
 The graph is not on that list. §9's argument is structural — the stub half and the hairball
 half are two ends of one corpus-size range, not two tuning targets — and the extractor work

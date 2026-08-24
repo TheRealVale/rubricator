@@ -1,7 +1,7 @@
 ---
 title: What the tool keeps, and what it must not
 subtitle: The prompt cache, the retention clock, and the archive that is not being built
-status: plan — 2026-08-23
+status: plan — 2026-08-24
 ---
 
 # What the tool keeps, and what it must not
@@ -234,13 +234,21 @@ behind a `RUBRICATOR_CACHE` override, so moving it is a three-site change and
 (`scope-plan.md` §4): every site or none. A partial move leaves two cache roots
 and no error.
 
-Two ways to fix it, and the choice is a platform question. Moving to
-`~/Library/Caches/rubricator` inherits the exclusion for free and orphans whatever
-is in `~/.cache` today; `tmutil addexclusion` keeps the XDG-shaped path that a
-Linux port would want and has to be re-asserted rather than assumed. **Assert the
-property, not the mechanism** — the done-when is `tmutil isexcluded` returning
-`Excluded`, whichever route gets there. Which route depends on open question 4
-(is macOS-only a decision or a "not yet"), which is O4's to settle.
+Two ways to fix it, and the choice was a platform question until 2026-08-24.
+Moving to `~/Library/Caches/rubricator` inherits the exclusion for free and
+orphans whatever is in `~/.cache` today; `tmutil addexclusion` keeps the
+XDG-shaped path that a Linux port would want and has to be re-asserted rather
+than assumed. **Assert the property, not the mechanism** — the done-when is
+`tmutil isexcluded` returning `Excluded`, whichever route gets there. Open
+question 4 is answered: macOS-only is a **decision**, not a "not yet", and O4
+now writes that down rather than settling it. What the answer removes is the
+tiebreak, not the choice. *Keeps the path a Linux port would want* was the one
+argument for `tmutil addexclusion` that did not have to be weighed on this
+platform's terms, and there is no port for it to be an argument about. The two
+routes are left to be judged on the merits N1's own commit can see — a three-site
+change against a property that has to be re-asserted — and that judgement belongs
+to the commit that makes it, not to this document and not to O4. The done-when
+does not move either way, which is the point of stating it as a property.
 
 **Expiry.** `bin/md:413` prunes rendered HTML after a week:
 
@@ -425,10 +433,19 @@ One honesty note on the denominator. The register's done-when says the strip
 should read `452 sessions · 68 readable`. The tool's own index says **419** and
 **78**, because `workspace.py:233` drops every record whose text begins with `/`,
 so a session in which you only ever typed slash commands never enters `meta` at
-all. Either number can be defended; they must not be mixed. If the strip is to say
-452 it has to count `history.jsonl`'s session ids directly rather than reuse the
-post-filter index — and **L6**, which replaces the blanket `startswith("/")` with a
-skiplist, moves 419 toward 452 anyway. Pick one source and label it.
+all. Either number can be defended; they must not be mixed. **Count
+`history.jsonl`'s session ids directly — 452 and 68 — and label the source in the
+strip.**
+
+The reorder decides it. Under the old order **L6**, which replaces the blanket
+`startswith("/")` with a skiplist, landed first and moved 419 toward 452; under
+the new one N5 ships first, so an index-derived pair would be one number in the
+strip this month and a different number after an unrelated phase, with nothing
+between them to explain the change. The directly counted pair does not move when
+L6 lands, because L6 changes what enters `meta` and not what is in
+`history.jsonl`. The label is not decoration: both pairs will keep appearing —
+here, in the register, and in whatever Q1 renders — and the source is the only
+thing that tells a later reader which one is on the screen.
 
 ### Print the line, do not write the file
 
@@ -451,8 +468,9 @@ which is the right direction of travel.
 
 Print the sentence. Let the human paste it.
 
-*Done when:* the strip shows the ratio, the sentence appears once per install, and
-nothing under `~/.claude` is written.
+*Done when:* the strip shows the ratio — **452/68, the session ids counted from
+`history.jsonl` directly**, with the source labelled — the sentence appears once
+per install, and nothing under `~/.claude` is written.
 
 ---
 
@@ -587,9 +605,18 @@ git by an exclude line `write_notes` only writes when the **first note is saved*
 (`workspace.py:540-546`), and **L5** unions
 `git ls-files --others --exclude-standard` into `find_docs`. So after L5, in a repo
 where the hook has approved a plan but no note has ever been taken, the approved
-plan appears in the tree as an untracked document. Either the hook writes the
-exclude line itself, or the plan-text half lands after **M6**, which puts
-`.rubricator/` in `.gitignore`.
+plan appears in the tree as an untracked document.
+
+The escape hatch this paragraph used to offer — the hook writes the exclude line
+itself — is retired. **M6** stops writing that line and removes the one already
+written, so a hook that wrote it in phase N would be undoing M6 a phase before M6
+lands: work done twice, in opposite directions. So the item splits at its own
+seam. The `reviews.jsonl` half ships here; the approved-plan-text half lands with
+M6 in phase M. What M6 does not do is keep the plan text out of `find_docs` —
+after M6 there is no exclude line to lean on — so whether an approved plan under
+`.rubricator/` should be listed as a document or filtered out of the walk is a
+question for the commit that writes it, and it is named here so that commit does
+not meet it as a surprise.
 
 ### One standing rule needs an amendment
 
@@ -618,32 +645,42 @@ write is not permitted at all — O5 must say which, alongside the state directo
 carries `~/.local/state/rubricator/`, and it reads a hook's working directory as
 a root the human pointed at, because the human started the session there and the
 write lands in the same `.rubricator/` a note taken in that repo would. So the
-plan-text half is permitted. That document carries one more honest correction
-while it is open: *nothing is written into your files* is not quite true, because
-`workspace.py:540-546` appends `.rubricator/` to `.git/info/exclude`.
+plan-text half is permitted. The correction that document used to carry alongside
+it — *nothing is written into your files* is not quite true, because
+`workspace.py:540-546` appends `.rubricator/` to `.git/info/exclude` — is
+withdrawn by **M6**, which stops appending that line and deletes the one it
+already wrote. What **O5** records instead is the state after M6: the notes file
+is not hidden, it stands in `git status` by design, and committing it is the
+supported path under standing rule 3.
 
-*Done when:* three hook fires leave three lines, an approval leaves the plan
-text, and `md` never reads either file.
+*Done when:* three hook fires leave three lines and `md` never reads the file —
+that is the half this phase owns. The approved plan text follows with **M6** in
+phase M, and `md` never reads that file either.
 
 ---
 
 ## 9. What this rests on, and the order
 
-### The open question this phase cannot answer
+### The question this phase turned on, answered
 
-Phase N sits fourth. Nothing here is hard and nothing here is expensive; it is
-fourth because **the measured victim count today is one**, and that one person is
-the maintainer, who owns every prompt in the index.
+Phase N sat fourth. Nothing here is hard and nothing here is expensive; it was
+fourth because **the measured victim count was one**, and that one person was the
+maintainer, who owns every prompt in the index.
 
-That position depends entirely on **open question 3: will `md --sessions` ever run
-on a machine with client work on it?**
+That position depended entirely on **open question 3: will `md --sessions` ever
+run on a machine with client work on it?** The owner answered it on
+**2026-08-24: it already does.** Phase N runs **second, after K**.
 
-If the answer is no — one machine, one person, personal repositories — the
-register's ordering is right. K, L and M are what a stranger meets; N is hygiene on a
-single-tenant box.
+The position changed because the population changed, not because a measurement
+did. Not one figure in this document moved. The index still holds 3,998 prompts
+across 419 sessions and 20 directories; 33 of 33 files under the cache root are
+still world-readable; the static page is still 7,984,399 bytes with 7,792
+references to session ids. What changed is whose prompts those are. The victim
+count was never a measurement of the cache directory — it was a measurement of
+the machine, and the machine had been described wrongly.
 
-If the answer is **yes**, this phase moves ahead of M and probably ahead of L, and
-the reasoning changes shape:
+So the four readings below are the operative ones, not the branch that was
+waiting on an answer:
 
 - the index stops being a personal file and becomes a cross-client one — twenty
   directories today, at 0644, in a directory the OS does not exclude from the
@@ -652,12 +689,30 @@ the reasoning changes shape:
   of client A returns prompts from client B;
 - N3 stops being a false comment and becomes a false assurance about somebody
   else's credentials;
-- and the honest answer to *"should a stranger run `md --sessions`?"* stays
-  **not on a machine with client work on it** until §3, §4 and §5 are done.
+- and the honest answer to *"should a stranger run `md --sessions`?"* is **not on
+  a machine with client work on it** until §3, §4 and §5 are done — which is now
+  a statement about this machine, and is the reason the phase moved.
+
+It moves ahead of L as well, which the register hedged as *probably*. The
+distinction that resolves it is one the register did not draw: L's defects are
+the tool lying to its own user, which the maintainer can decide to tolerate for a
+week, and N's are other people's material at mode 0644 in the one cache directory
+the backup does not skip, which he cannot decide on their behalf. N is the
+cheaper phase to front-load as well — six items, every one an evening, and only
+N6 adds a file rather than removing an exposure — so L is delayed by about a week
+and nothing in L is made harder by the wait.
 
 Nothing in this document's *content* changes either way. Only its place in the
-queue. The question is settled by the owner naming which repositories are on the
-machine; until then, phase N is planned as written and scheduled as fourth.
+queue.
+
+One correction to that last sentence, and it is not question 3's doing. §3 left
+the choice between moving the cache root and excluding it where it is hanging on
+**open question 4**, which was answered the same day: macOS-only is a decision.
+That removes the portability argument the choice rested on, and it removes the
+deferral to O4 with it — O4 writes a matrix, not a cache path. The choice itself
+is still open and now belongs to N1's own commit. That is the only content in
+this document the answers changed, and it changed by one argument, not one
+decision.
 
 ### Order and cost
 
@@ -668,7 +723,13 @@ machine; until then, phase N is planned as written and scheduled as fourth.
 | **N2** | no prompt corpus in a static file | S |
 | **N4** | `⌘K` scoped to this repo | S |
 | **N3** | the comment and the code agree | S |
-| **N6** | one line per hook fire | S — the plan-text half after M6, or the hook writes the exclude line |
+| **N6** | one line per hook fire | S — the `reviews.jsonl` half here; the approved-plan-text half lands with M6 in phase M |
+
+N6's row is the one thing the reorder actually breaks, and it breaks cleanly: the
+item splits and both halves keep the number. M6 is now two phases later instead
+of one earlier, and the alternative that would have let the plan-text half ship
+on time — the hook writes the exclude line itself — is retired by M6, which stops
+writing that line at all (§8).
 
 N5 goes first because it is small, because it unblocks Q1, and because every day
 it ships earlier is a day of history that does not have to be argued about later.
@@ -685,5 +746,5 @@ discipline this document leans on.
 `scope-plan.md` — O3 (the `continue-plan.md` correction that produced §1.3), O5
 (the standing rules, including the amendment in §8), P7 (deleting
 `install-hook.sh`). `documents-plan.md` — the extraction cache in §3.
-Register: **N1–N6**, **X10**, **X25**, **X28**, standing rules 1, 8, 9 and 12,
-open question 3.
+Register: **N1–N6**, **X10**, **X25**, **X28**, standing rules 1, 3, 8, 9 and 12,
+open questions 3 and 4, both answered 2026-08-24.

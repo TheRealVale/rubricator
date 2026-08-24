@@ -1,16 +1,16 @@
 ---
 title: A mark survives the rewrite
 subtitle: Re-anchoring, and the library port that was measured and refused
-status: plan — 2026-08-23
+status: plan — 2026-08-24
 ---
 
 # A mark survives the rewrite
 
-The register's candidate answer to *what is `md` for* is *the review layer for
-documents that keep being rewritten* — chosen in `scope-plan.md` §7 because it is
-the only candidate whose mechanism already ships, and still open question 1 until
-the owner writes the sentence. This document plans the mechanism that answer
-stands on: you can mark up a document an agent will rewrite, and your marks will
+The answer to *what is `md` for* is *living documents* — the review layer for
+documents that keep being rewritten. `scope-plan.md` §7 proposed it, because it
+is the only candidate whose mechanism already ships; the owner chose it on
+2026-08-24, and open question 1 is closed. This document plans the mechanism that
+answer stands on: you can mark up a document an agent will rewrite, and your marks will
 still be there afterwards. `README.md:122` says notes are *"re-anchored by
 content, not line number"*. `docs/review-design.md:141-142` specifies a per-item
 *quote-hash*. `docs/documents-plan.md:72` says *"anchors are content hashes
@@ -460,28 +460,87 @@ notes sync between machines *"if you commit it"*. That holds only if both
 checkouts sit at the identical absolute path, which two machines rarely do. This
 is the field that makes it true generally.
 
-Three changes, one commit.
+Four changes, one commit — and it is four rather than three because standing rule
+3 was withdrawn on 2026-08-24. The old rule said rubricator was a single-reader
+tool, that committing `notes.json` was permitted and unsupported, and that two
+people editing one JSON blob would conflict with no help from the tool. This
+document argued from that rule. The register deferred sharing because the story
+was not agreed; the owner has now agreed it — multi-person use is a goal,
+authorship is wanted, and git is the transport, with no server, no account, no
+sync and no locking. The replacement rule's own words are in `scope-plan.md` §5,
+which is the one place it is stated; nothing here restates it. So committing the
+notes is the supported path, and the shape on disk has to be the shape that
+supports it. That reverses one instruction below and adds one change to this
+item. Everything measured about the file is unaffected.
 
-**Relative keys.** Key by the path relative to the workspace root, and migrate
-absolute keys on read. Both sides move: `write_notes`/`read_notes` in
-`workspace.py`, and the client's `DISK[path]` lookup in `workspace.js`, which
-currently keys off `d.abs`.
+**Relative keys.** Key by the path relative to the **enclosing git repository**,
+not to the directory the human typed, and migrate absolute keys on read.
+Relative to the typed directory, `md .` and `md docs/` in one repository keep two
+disjoint stores — which is a nuisance for one reader and a blocker for exactly
+the several-people case rule 3 now requires, since two people who invoke the tool
+differently never see each other's marks. Both sides move:
+`write_notes`/`read_notes` in `workspace.py`, and the client's `DISK[path]`
+lookup in `workspace.js`, which currently keys off `d.abs`. The walk-up for
+`.git` that the correction below asks for survives with this as its job: it
+locates the notes root, falling back to the directory itself outside a
+repository.
 
-**A per-item `at`.** Eleven fields are stored per item — `id, verb, quote,
-anchor, note, lineStart, lineEnd, partial, section, heading, state` — and none of
-them is a timestamp. The only clock in the file is one `store.saved` epoch per
-document, written by `save()`. That makes even retrospective analysis impossible,
-and unlike everything else here it is *irrecoverable later*: a stamp not written
-in 2026 cannot be reconstructed in 2027. One field, one line, do it now. Do not
-add `by` from `git config user.name` — it writes a human name into a file the
-same change is encouraging you to commit, for zero benefit while the author set
-is size one (standing rule 3: committing `notes.json` is permitted and
-unsupported; two people editing one JSON blob will conflict and rubricator will
-not help).
+**One file per document.** `.rubricator/notes/<relative path>.json`, so that a
+mark on `docs/tasks.md` lives at `.rubricator/notes/docs/tasks.md.json`. This is
+the whole of the merge story and the only reason it is one commit and not a
+second project: `git status` names the document whose marks changed, `git log` on
+that path is that document's mark history, two people marking different documents
+never touch the same file, and a conflict, when it comes, is in the one document
+they both marked — a few kilobytes of JSON, which is a problem a developer
+already knows how to solve. The file name mirrors the path rather than hashing
+it, because the point of the split is that `git status` says *which document* and
+a hash does not; the accepted cost is that on a case-insensitive filesystem two
+documents differing only in case collide, which is the same limit git itself has
+there. **The wire format does not move.** `data["notes"]`
+(`workspace.py:576`) stays one object and `/notes` still takes `{path, store}`;
+only the disk layout and the `DISK` key (`workspace.js:74`) change. That key is
+the line **L3** has just touched — L3 teaches `annosFor` to read `DISK[doc.abs]`,
+and M6 changes what it is keyed by — which is one more reason L3 lands first
+rather than that line being written twice. Nothing else in this phase reads the
+layout: M1–M5 work on items, not on files. The one place they name the file is
+M4's instruction to read a legacy `state: "stale"` as `{anchor: 'orphaned'}` so
+that *an old `notes.json` loads with no migration step*; that is a per-item read
+and it survives untouched, but after M6 the phrase names the store rather than a
+file name.
+
+**A per-item `at` and `by`.** Eleven fields are stored per item — `id, verb,
+quote, anchor, note, lineStart, lineEnd, partial, section, heading, state` — and
+none of them is a timestamp. The only clock in the file is one `store.saved`
+epoch per document, written by `save()`. That makes even retrospective analysis
+impossible, and unlike everything else here it is *irrecoverable later*: a stamp
+not written in 2026 cannot be reconstructed in 2027. One field, one line, do it
+now — `at` in epoch milliseconds, like the `store.saved` already written.
+
+`by` is the instruction this document previously gave the other way round, and
+the reversal should be read rather than skated over. It said: do not write `git
+config user.name` into a file the same change is encouraging you to commit, for
+zero benefit while the author set is size one. The measured author set is still
+size one. What changed is that a count of today's readers no longer settles the
+question — the owner has named multi-person use as a goal, and a mark with no
+author is exactly the thing two people cannot use. So `by` is written, for three
+reasons: rule 3 makes committing the notes the supported path, `by` is what makes
+one-file-per-document worth having rather than merely tidy, and the name is
+already in every commit of the repository the file is committed to, so the notes
+file adds no exposure the history does not already carry. It is `git config
+user.name`, omitted when git does not know one and never invented — no OS account
+name, no email, no hostname; a mark with no `by` renders as a mark with no `by`.
+Both fields are written at creation and never rewritten, for M3's reason.
 
 **`"v": 1`, and the right to break it.** This is a private file, not an
 interface. Say so in the docstring so that the next shape change is a one-line
 migration rather than a compatibility argument.
+
+That is four changes, and three of them are still one field or one line. One file
+per document is not: it is a schema change with a migration, on both sides of the
+Python/JavaScript boundary, which is why M6 is the phase's only **M** (§12). What
+keeps it **M** and not **L** is the wire format staying where it is. Anyone who
+widens this into a per-document fetch protocol has turned a day into a week for
+nothing.
 
 ### One correction to the register, from re-running it
 
@@ -510,28 +569,68 @@ $ git status --porcelain
 ?? docs/.rubricator/
 ```
 
-So M6's chore stands, with a corrected justification and a corrected *done when*:
-`write_notes` should find the enclosing repository by walking up for a `.git`
-directory rather than assuming `root/.git`, and rubricator's own `.gitignore`
-should carry the line too — because in rubricator's own repository that one line
-*is* the fix for the subdirectory case above. Re-run in the clone: with
-`.rubricator/` in `.gitignore`, `git status` after `md docs/` is clean; without
-it, `?? docs/.rubricator/`. The `.gitignore` line does not help any other
-repository. The walk-up does.
+Both transcripts stand as measurements. What has changed is the conclusion they
+support, because under rule 3 a clean `git status` is no longer the goal.
+
+**The `.gitignore` half of the fix is retired.** It would put a line in
+rubricator's own repository that hides the file rubricator's own maintainers are
+now meant to commit — the tool's characteristic defect, in one line of
+configuration. `?? docs/.rubricator/` after `md docs/` is not noise to be
+suppressed; it is the notes file appearing where it should, and the second
+transcript is now a demonstration of correct behaviour rather than a hole.
+
+**The exclusion the first transcript proves also goes.** `write_notes:540-546`
+stops appending `.rubricator/` to `.git/info/exclude`, and removes the line it
+wrote there on the first run after the upgrade, saying so once. The tool wrote
+that line, so the tool takes it back; nothing else in that file is touched.
+
+**The walk-up survives**, with the job the relative keys gave it above: find the
+enclosing repository by walking up for a `.git` directory rather than assuming
+`root/.git`, and use it as the notes root. It is no longer looking for a file to
+write an exclusion into.
 
 *Done when:* a notes file written in one clone loads in a second clone of the
-same repository at a different path; every new item carries `at`; and
-`git status` is clean after a live run whose root is a subdirectory of a git
-repository.
+same repository at a different path; `md .` and `md docs/` read and write the
+same marks; every new item carries `at`, and `by` wherever git knows a name; two
+people marking different documents in one repository can both commit without a
+conflict; `.git/info/exclude` gains no `.rubricator/` line and loses the one this
+tool wrote; and `git status` after a live run shows `.rubricator/` — the last
+clause is inverted from the one it replaces, and that inversion is the point.
 
-### A boundary this phase should name and not cross
+### What the migration has to move
+
+Re-run 2026-08-24, repeating §1's count of the notes files on this machine:
+
+- three `.rubricator/notes.json` files exist under the repositories directory.
+  One carries data — **1,412 bytes, one key, an absolute path, two items**, which
+  is §1's row exactly. The other two are `{}`, two bytes each.
+- **none of them is tracked.** `git ls-files` in rubricator's own repository
+  returns no `notes.json` at all.
+- two of the three sit inside git repositories, and both carry the `.rubricator/`
+  line `write_notes` appended — line 7 of the exclude file here, line 18 in the
+  other.
+
+So the migration reads one 1,412-byte untracked file on one machine, writes two
+files, deletes one, and removes two lines from two exclude files. That is the
+whole of it. The third of the three marks this machine holds is not in any notes
+file at all — it is the localStorage casualty named at the end of this section,
+which **L3** recovers.
+
+It is cheap **now** for the reason this item itself creates. Once the notes are
+in somebody's history, a format change is a commit in their history, two people
+can run the migration concurrently and conflict on the migration itself, and a
+clone still on the old build writes the old shape back on the next save. Today
+there is nothing to coordinate with and nobody to coordinate with. That window
+closes the first time rule 3 is honoured, and this item is what honours it.
+
+### A boundary this phase moves, and still does not cross
 
 Standing rule 1 permits rubricator to write inside `.rubricator/` in a root it
 was pointed at, inside `~/.config/rubricator/`, `~/.cache/rubricator/` and
 `~/.local/state/rubricator/` (the last added for N6's review log, and enumerated
 in `scope-plan.md` §5), and to a path the human typed. `.git/info/exclude` is
 none of those. It is untracked, so nothing in rule 1's second sentence is
-violated, and the behaviour is deliberate:
+violated, and the behaviour was deliberate:
 `write_notes`' own docstring says the file is *"kept out of git's way via
 .git/info/exclude rather than .gitignore, so nothing tracked is touched and
 committing it stays your choice"*, and `README.md:285` says the same. A proposal
@@ -539,15 +638,23 @@ to stop force-excluding `.rubricator/` was made during the investigation and
 killed on exactly that reasoning; it carries no X number because it never reached
 the register.
 
-But the rule as written does not cover it, and the fix above widens the write
-from the root the tool was pointed at to the enclosing repository — however many
-levels up that is, since walking for a `.git` directory is unbounded, and `md
-docs/deep/nested/` walks three. It writes into a repository the human never
-named. That is the rule-1 wording question, and it is answered in
-`scope-plan.md` §5, rule 1: the enclosing repository of a root the human named
-reads as that root, for this one untracked file and this one appended line, and
-for nothing else. The answer is the same shape rule 1 gives the hook's working
-directory, and for the same reason. It is not a licence to widen anything else.
+**The owner's answer to open question 2, on 2026-08-24, reverses that kill.** The
+reasoning it was killed on assumed committing the notes was one reader's private
+choice. It is now the supported path, and a file the tool hides from `git status`
+is a file the tool hides from the person who is meant to commit it. So the append
+goes, and the line already written comes back out — above, and in M6's *done
+when*. Nothing widens: this is the tool writing less than it did.
+
+What does widen is the walk-up, and the rule-1 question it raises does not
+disappear with the exclude line. The notes root is the enclosing repository —
+however many levels up that is, since walking for a `.git` directory is
+unbounded, and `md docs/deep/nested/` walks three — so `.rubricator/` can land in
+a repository the human never named. That is answered in `scope-plan.md` §5, rule
+1: the enclosing repository of a root the human typed reads as that root, for
+`.rubricator/` itself, which is where the notes go; the appended exclude line the
+clause was first written for is withdrawn by M6. The answer is the same shape
+rule 1 gives the hook's working directory, and for the same reason. It is not a
+licence to widen anything else.
 
 The other thing rule 2 settles: none of this matters if the marks are in
 `localStorage`. There is a real casualty already — one genuine note on a
@@ -634,19 +741,25 @@ rewritten, it is gone.
 
 ## 12. Order, effort, and what would reopen this
 
-Every item is **S** — an evening or less. Build in this order, because each one
-makes the next one's failure visible:
+Seven of the eight are **S** — an evening or less. M6 is **M**, since one file per
+document became part of it (§10). Build in this order, because each one makes the
+next one's failure visible:
 
 | | | why here |
 |---|---|---|
 | **M1** | nearest occurrence | the position hint everything later leans on |
 | **M3** | never overwrite `quote` | one line, and it must land before M2 starts moving items |
 | **M2** | longest surviving line | the recovery; needs M1 to be safe and M3 to be non-destructive |
+| **M6** | relative keys, one file per document, `at` and `by`, `v` | independent of the other seven, the phase's only **M**, and the only item another phase waits on — N6's plan-text half; `at` is still the only irrecoverable one here |
 | **M4** | three states, stop saying *resolved* | what M1–M3 are for |
 | **M5** | say what moved | M4's states, printed once |
-| **M6** | relative keys, `at`, `v` | independent; `at` is the only irrecoverable one |
 | **M7** | the pane invariant | independent correctness fix |
 | **M8** | `3 of 41 blocks marked` | one line, last |
+
+M6 moved from sixth to fourth for one reason: it is the only item in this phase
+with a dependent outside it, and leaving it behind five evenings' work delays
+that dependent for no gain. It stays behind L3, which touches the same client
+line.
 
 Two things would justify reopening X23 and vendoring the port. First, a real user
 who has used M2 reporting a miss the ladder could not catch — at which point
