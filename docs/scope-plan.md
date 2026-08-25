@@ -837,11 +837,9 @@ second, at moments something else created.
 
 ## 13. The questions, answered
 
-The owner answered all six of the register's open questions on **2026-08-24**. Five are
-decisions and this section is now their record rather than a list of things this document
-cannot say. The remaining one — whether Approve skips the approval menu — is not awaiting an
-answer either: it is awaiting a measurement, which is a different kind of open and is marked
-as such below.
+The owner answered five of the register's six open questions on **2026-08-24**, and the
+sixth was measured rather than decided on **2026-08-25**. This section is their record
+rather than a list of things this document cannot say. All six are closed.
 
 The numbering here is this section's own, ordered by how much each question bears on scope.
 The register numbers the same six differently, and every other document cites the register's
@@ -884,17 +882,26 @@ numbers, so a question is safest quoted by its words.
    lane as the incumbent's where the incumbent's capabilities are listed. The absence of a
    hedge is the point: an unrecorded cession is re-argued every quarter, and so is a hedged
    one.
-5. **Does Approve actually skip Claude Code's approval menu?** **Still open, and the only
-   one.** It is not waiting on a decision but on a measurement the owner will take: one plan,
-   one keypress. It cannot be settled by reading documentation — two of the vendor's own pages
-   disagree, and they disagree precisely about the interactive case rubricator runs in
-   (**X5**). §6 cannot describe what the hook does until then, so P1 proceeds except for the
-   one sentence that describes it; nobody should stall the rest of P1 on a keypress.
-   The procedure is written out once, under the open-questions table in
-   [`tasks.md`](tasks.md), with the rider that the same hook fire also settles standing
-   rule 12's gate on **K5** — thirty seconds, and it lives where the question does. It is
-   not repeated here, because a procedure kept in two places is a procedure that will be
-   taken from the stale copy.
+5. **Does Approve actually skip Claude Code's approval menu?** **Answered 2026-08-25: no.**
+   Measured rather than decided, because it could not be settled by reading — two of the
+   vendor's own pages disagree, and precisely about the interactive case rubricator runs in
+   (**X5**). One plan, one keypress, `claude` 2.1.241: the window opened, Approve was pressed
+   with nothing marked, the window closed, and Claude Code's approval menu appeared anyway.
+   So `allow` alone is not sufficient for `ExitPlanMode` — it needs `updatedInput` paired
+   with it (`citations.md` **G1**) — and `hook.py:160-167` sends an `additionalContext` and
+   no `updatedInput`.
+
+   Three consequences here. **§6 can now describe the hook**, and what it must say is that
+   Approve does not currently skip the prompt, while *Send feedback* works as documented
+   because `deny` needs no pairing. **P1 gains its most urgent line**: `README.md:245` says
+   *the plan proceeds, no terminal prompt*, which is the front page's one measured-false
+   sentence, and a warning sits under that table until P1 rewrites it. And **X5's first half
+   is un-killed** as **K5b**, recorded on X5's own row rather than by editing the ruling; the
+   edited-plan half stays dead for the reasons given there.
+
+   The prediction this section made — *the likelier reading is that there is no bug* — was
+   wrong, and `install-plan.md` §7 says so in the paragraph that made it rather than
+   quietly correcting itself.
 
 The one question not in that list — whether `md --sessions` will ever run on a machine with
 client work on it — was answered too, and it moves phase N's position rather than this

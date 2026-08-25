@@ -317,12 +317,12 @@ Design canvas: the shell, the session reader, and the direction exploration.
 > **Where this stands.** K1–K4 shipped with the commit that added these plans:
 > the install copies every file in `share/` rather than eight of eighteen, the
 > installer renders a test page and exits non-zero if it cannot, `tests/smoke.sh`
-> holds eight assertions and CI runs them. K5 is deliberately not done — it turns
-> on a measurement only a human at a keyboard can take: standing rule 12 wants the
-> hook fired once against the installed build before the code is written. That
-> same fire answers open question 5, which is now the only one of the six still
-> open — and it is waiting on a measurement rather than on an answer. So the
-> defect this programme opens with is closed; the rest of it is not.
+> holds eight assertions and CI runs them. K5 is deliberately not done — standing
+> rule 12 wants the hook fired once against the installed build before the code is
+> written. **All six open questions are now closed**: five answered on 2026-08-24
+> and the sixth measured on 2026-08-25, which turned up a defect and added
+> **K5b**. So the defect this programme opens with is closed; the rest of it is
+> not.
 >
 > **The order changed on 2026-08-24: K, then N, then L, M, O, P, Q.** Phase N sat
 > fourth on one measurement — that the only person whose prompts are in the cache
@@ -398,8 +398,10 @@ dogfooded, measured or recommended until this works. Build order is K1, K3, K2,
 K4, K5 — K3 before K2 because the installer's self-check and CI's assertion are
 the same assertion, and getting it wrong in one place is getting it wrong in
 both. K5 waits on one hook fire against the installed build, which standing rule
-12 wants before the code is written; that same fire settles open question 5, so
-take the two together. See [`install-plan.md`](install-plan.md).
+12 wants before the code is written. K5b comes after it: the hook fire on
+2026-08-25 showed that Approve does not skip Claude Code's approval menu, and
+taking the plan from the payload first is what makes the text reliable enough to
+hand back as `updatedInput`. See [`install-plan.md`](install-plan.md).
 
 - [x] **K1 · Install by glob, not by list.** `install.sh:59` names seven files
       plus `hook.py`; `share/` holds eighteen. `render.js` is not among them, so
@@ -470,6 +472,22 @@ take the two together. See [`install-plan.md`](install-plan.md).
       *Done when:* `find_plan` is gone, the hook takes the plan from the
       payload, and a hook run under a custom `plansDirectory` opens the right
       plan. **S**
+
+- [ ] **K5b · Approve has to actually approve.** Measured 2026-08-25 on 2.1.241:
+      `hook.py:160-167` returns `permissionDecision: "allow"` with an
+      `additionalContext` and no `updatedInput`, and Claude Code shows its
+      approval menu anyway — so pressing Approve costs a window and changes
+      nothing. The hooks page says `allow` *"skips the permission prompt, except
+      for … `AskUserQuestion` and `ExitPlanMode`, which need `updatedInput`
+      paired with it"* (`citations.md` G1). Pair it: return the plan unchanged
+      as `updatedInput`, which needs the plan text the hook already read from
+      disk, and is one dict either way. This is the smaller half of what X5
+      killed; the edited-plan half stays killed. Do it after K5, which is what
+      makes the plan text reliable to hand back.
+      *Done when:* one interactive hook fire ends with the session executing the
+      plan and no approval menu, on a named `claude` version — and if the menu
+      still appears with `updatedInput` paired, the item records that instead
+      and `README.md` says Approve does not skip the prompt. **S**
 
 ---
 
@@ -981,15 +999,17 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       the same-origin policy makes impossible — the sidecar is a **decision**,
       not a compromise; `README.md:185` says *17 MB parses in 0.05 s* when the
       largest transcript here is 105.0 MB and parses in 0.28 s; and
-      `README.md:124` calls a lost anchor *resolved*. **One sentence in here
-      waits, and only that one:** whether the page may say the hook's Approve
-      approves turns on open question 5, which is awaiting a measurement rather
-      than an answer. Write the rest and leave that sentence out until the
-      keypress has been taken; do not stall the item on it.
+      `README.md:124` calls a lost anchor *resolved*. And
+      `README.md:245` says Approve means *the plan proceeds, no terminal prompt*,
+      which was measured false on 2026-08-25 — the sentence that was waiting on
+      open question 5 is now the most urgent line in this item. A warning sits
+      under that table meanwhile; P1 replaces it with prose, and says the honest
+      thing until **K5b** lands.
       *Done when:* line 26 states the real surface, the trust material is above
       the fold, no sentence promises cross-origin note sharing, `README.md:185`
-      carries the measured 105 MB / 0.28 s, and `README.md:124` no longer calls
-      a lost anchor resolved. **M**
+      carries the measured 105 MB / 0.28 s, `README.md:124` no longer calls a
+      lost anchor resolved, and `README.md:245` matches what K5b has or has not
+      shipped. **M**
 
 - [ ] **P2 · Cut four sections; backfill with what ships.** Themes, *Extending
       it*, the graph paragraph and the power-flag block come out of a
@@ -1204,7 +1224,7 @@ list above; the rationale behind the larger entries is in
 | **X2** | The performance case for deleting the graph | Ported verbatim to V8: **19.5 ms** at 299 nodes, 234 ms at a thousand; `graphEdges`' 919,500 comparisons cost 3.0 ms. There is no freeze. The graph still goes (P3), for a reason that was measured. |
 | **X3** | `md --standing` — inferring standing rules from the annotation corpus | Its own text concedes it says nothing useful under ~50 annotations; three exist. It also writes into `CLAUDE.md`, which is normally tracked — forbidden by rule 1. |
 | **X4** | "Index all slash commands" as a 15.9% recovery | 82% of the 756 dropped prompts are `/model`, `/compact` and `/clear`; the real loss is 71 prompts, 1.5%. The finding also named two commands that occur zero times on this machine — confabulated inside a finding marked verified. A skiplist rides along in L6. |
-| **X5** | `SPEC-3` — that Approve does not actually approve, and `updatedInput` as a third outcome | The quoted sentence is scoped to non-interactive `-p`, and the two vendor pages disagree exactly about the interactive case rubricator runs in. Unresolved, not broken — open question 5, one plan and one keypress. The edited-plan half duplicates `Ctrl+G`, which ships natively. |
+| **X5** | `SPEC-3` — that Approve does not actually approve, and `updatedInput` as a third outcome | The quoted sentence is scoped to non-interactive `-p`, and the two vendor pages disagree exactly about the interactive case rubricator runs in. Killed as *unresolved, not broken*; **the first half was resolved on 2026-08-25 and it is broken** — the approval menu does appear, so that half is un-killed as **K5b** and this ruling stands only for the second. The edited-plan third outcome duplicates `Ctrl+G`, which ships natively, and rebuilding a plan from cut and change spans crosses the write rule. |
 | **X6** | A `defer` button in the hook | The docs say Claude Code honours `defer` **only** under `-p`; an interactive session logs a warning and ignores the hook result. A defer button would silently discard the deny/ask fallback — a regression shaped like a feature. |
 | **X7** | The `docs.claude.com` → `code.claude.com` URL sweep | `grep -rn "claude\.com"` across the repo excluding vendor returns **zero hits**. A chore invented for a problem the repo does not have. |
 
@@ -1305,19 +1325,29 @@ not an answer but a measurement the owner will take, so it stays open.
 | 2 | **Is there a second reader, actual or intended, within six months?** Almost everything deferred — multi-root, per-document note files, authorship, threads, the plugin channel — turned on this, and the measured answer was no. | **Yes, and multi-person use is a goal** — 2026-08-24. Readable by agents; several people able to use it without effort or blockers; seeing who did what is wanted. Standing rule 3 is withdrawn and replaced, and M6 carries relative keys, one file per document, `by` and `at`. It revives nothing: X20, X9 and X17 stay dead, and it is not X22 — several people reading one repository is not one person reading several. *git blame for annotations* was the owner's own idea, floated with a question mark: cheap once `by` and `at` exist, no evidence behind it, no item, and nothing planned on it. | O2, O5, P7 — all released; O2's scope is unchanged, because the answer is about readers, not roots |
 | 3 | **Will `md --sessions` run on a machine with client work on it?** If yes, N moves ahead of M and probably ahead of L. Nothing in phase N's content changes either way — only its place in the queue. | **Yes, already** — 2026-08-24. Phase N runs second, after K, and ahead of L as well; the population changed, not a measurement, and no figure in [`retention-plan.md`](retention-plan.md) moved. The build order is in the phases preamble above. | N1–N4's position |
 | 4 | **Is macOS-only a decision or a "not yet"?** O4's matrix cannot be written honestly without an answer, and the answer decides whether N1 moves the cache or excludes it in place. | **A decision, not a *not yet*** — 2026-08-24. O4 writes the matrix as a closed question and promises no port, and the refusal to extract `share/platform.py` now has a reason rather than a deferral behind it. N1 keeps its *assert the property, not the mechanism* rule; neither mechanism is ruled out by a port that is not coming. | O4, N1's mechanism |
-| 5 | **Does Approve actually skip Claude Code's approval menu?** Two vendor pages disagree, and the disagreement is exactly about the interactive case rubricator runs in. It cannot be settled by an agent — it needs one human pressing Approve once and watching. | **Still open, and the only one.** Not an answer but a measurement, and the owner will take it: one plan, one keypress. The procedure is under this table. | P1, in part — one sentence of it, and K5 shares the hook fire |
+| 5 | **Does Approve actually skip Claude Code's approval menu?** Two vendor pages disagreed, exactly about the interactive case rubricator runs in. | **Answered 2026-08-25 — no.** One plan, one keypress, `claude` 2.1.241: the window opened, Approve was pressed, the window closed, and Claude Code's approval menu appeared anyway. `allow` alone is not sufficient for ExitPlanMode. | Answered. Un-killed X5's first half as **K5b**; **P1** must correct `README.md:245`, which claims the opposite |
 | 6 | **Is the diff lane off the table permanently, or a 2027 bet?** This register cedes it (X8). If the owner disagrees, P4 says something different about the incumbent and phase Q's value changes. | **Ceded permanently** — 2026-08-24, not deferred to a 2027 bet. X8 stands, [`scope-plan.md`](scope-plan.md) §12 records it as settled rather than hedged, and P4 names the lane as the incumbent's and says why rubricator will not follow. | P4 — released |
 
-> **The measurement open question 5 is waiting on.** In an interactive Claude Code
-> session — not `-p` — in a repository with the hook installed, ask for something
-> large enough that Claude proposes a plan, and let it call ExitPlanMode. Note
-> `claude --version` first. When the rubricator window opens, press Approve and
-> send. Then watch the terminal. Either the session starts executing the plan with
-> no further prompt, in which case `permissionDecision: "allow"`
-> (`hook.py:164-166`) is sufficient in the interactive case, **X5** stays dead and
-> P1 may say the hook approves; or Claude Code's own approval menu appears anyway,
-> in which case Approve is a suggestion, P1 must say so, and this register gains an
-> item. Write down which happened and the version. Thirty seconds, once.
+> **Open question 5, answered — 2026-08-25.** `claude` 2.1.241, interactive, in a
+> throwaway git repository, started with `--permission-mode plan`. Claude wrote
+> the plan to `~/.claude/plans/` at 20:58:01, loaded `ExitPlanMode` at 20:58:03,
+> the hook fired, the review window opened, Approve (`⌘⇧⏎`) was pressed with
+> nothing marked, and the window closed. **Claude Code's own approval menu then
+> appeared** — the *auto-accept edits · manually approve · say something else*
+> prompt. So `permissionDecision: "allow"` on its own is **not** sufficient for
+> ExitPlanMode in the interactive case, the hooks page's decision table is right
+> and `permission-modes.md`'s omission is the misleading one, and **Approve is
+> currently a suggestion**: it costs a window and changes nothing the terminal
+> would not have asked anyway. The session transcript corroborates it — the file
+> ends at the `ExitPlanMode` schema load, because the session was still sitting
+> at the menu.
+>
+> Two consequences. **X5's first half is un-killed** and becomes **K5b**; its
+> second half — `updatedInput` as an edited-plan third outcome — stays dead for
+> the reasons given there. And `README.md:245` states the opposite of what was
+> measured, which is this programme's own defect in the one table a new user
+> reads; **P1** carries the correction, and it is the highest-priority line in
+> that item rather than one of many.
 
 A rider, and not part of the thirty seconds: the same hook fire also answers
 standing rule 12's gate on **K5**, if one temporary line is added after

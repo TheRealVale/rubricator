@@ -1865,13 +1865,32 @@ of anything else.
 opens; what is measured is the work behind the fetch (`M-SIG-15`: 0.23–0.25 s to
 rebuild repo B, a 6.6 MB payload), not the round trip a user would feel.
 
-### M-GAP-5 · Whether Approve skips the approval menu is unsettled
+### M-GAP-5 · Whether Approve skips the approval menu — settled 2026-08-25
+
+*Closed. Kept here because a gap that is filled is worth more as a record of how
+than as a deletion.*
 
 `M-INS-24` records that two vendor pages disagree and that the disagreement is
-about the interactive case. It cannot be settled by reading more documentation and
-it was not settled by an experiment: `M-POS-24`'s harness is non-interactive by
-construction. It needs one human, one plan and one keypress. It is open question 5
-and it blocks what the front page may claim.
+about the interactive case. It could not be settled by reading more documentation
+and it could not be settled by the harness — `M-POS-24`'s is non-interactive by
+construction. It took one human, one plan and one keypress.
+
+Taken 2026-08-25 against `claude` 2.1.241, interactive, in a throwaway git
+repository started with `--permission-mode plan`. The plan was written to
+`~/.claude/plans/` at 20:58:01 and `ExitPlanMode` loaded at 20:58:03; the hook
+fired, the window opened, Approve (`⌘⇧⏎`) was pressed with nothing marked, and
+the window closed. **Claude Code's approval menu then appeared.** The session
+transcript corroborates it by ending at the `ExitPlanMode` schema load, the
+session still sitting at the menu when it was read.
+
+So `permissionDecision: "allow"` alone is not sufficient for `ExitPlanMode`;
+`citations.md` **G1** is right and `permission-modes.md`'s omission is the
+misleading page. `hook.py:160-167` sends `additionalContext` and no
+`updatedInput`. Recorded as **K5b**; `README.md:245` claimed the opposite and now
+carries a warning until **P1**.
+
+Not reproducible by script, and that is the point: any re-measurement is another
+human, another plan, another keypress, against a named `claude` version.
 
 ### M-GAP-6 · The session-id derivation was tested by shape, not by identity
 

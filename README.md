@@ -242,10 +242,19 @@ Claude finishes a plan → the review window opens by itself → Claude waits wh
 
 | You do | Claude gets |
 |---|---|
-| **Approve** (`⌘⇧⏎`) | `allow` — the plan proceeds, no terminal prompt |
+| **Approve** (`⌘⇧⏎`) | `allow` — and then Claude Code's own approval menu anyway (see below) |
 | **Send feedback** (`⌘⏎`) | `deny` + your annotated notes, and it revises the plan |
 | close the window | `ask` — falls back to the normal prompt |
 | walk away | `ask` after nine minutes |
+
+> [!WARNING]
+> **Approve does not currently skip the prompt.** Measured 2026-08-25 on `claude`
+> 2.1.241: the hook returns `permissionDecision: "allow"`, the window closes, and
+> Claude Code shows its approval menu regardless. `allow` needs `updatedInput`
+> paired with it for `ExitPlanMode`, and the hook does not send one — so today
+> Approve costs you a window and changes nothing the terminal would not have asked.
+> Send feedback, which returns `deny`, does work as described. The fix is
+> [K5b](docs/tasks.md); the reasoning is in [`install-plan.md`](docs/install-plan.md).
 
 `ExitPlanMode` doesn't carry the plan text — the plan is a file the agent wrote — so the
 hook reads the session transcript to find it. Feedback then anchors into that real file,

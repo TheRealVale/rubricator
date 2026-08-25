@@ -470,15 +470,39 @@ a hook run under a custom `plansDirectory` opens the right plan.
 ### What stays unresolved, and what it costs to resolve
 
 Whether `permissionDecision: "allow"` alone actually skips Claude Code's own
-approval menu for ExitPlanMode is **not settled**, and this document will not
-pretend otherwise. Two pages of the vendor's documentation disagree, and the
-disagreement is precisely about the interactive case rubricator's hook runs in:
-the sentence that says allow alone is insufficient sits inside a paragraph
-scoped to non-interactive `-p`. The likelier reading is that there is no bug.
-It cannot be settled by reading more documentation and it cannot be settled by
-an agent — it needs one human, one plan, one keypress, and one look at whether
-the menu appears. That is **open question 5** in the register, and it blocks what
-the front page is allowed to claim the hook does.
+approval menu for ExitPlanMode is **settled, and the guess in this
+paragraph was wrong.** It was written saying two pages of the vendor's
+documentation disagreed, that the disagreement was precisely about the
+interactive case rubricator's hook runs in, and that *the likelier reading is
+that there is no bug*. The measurement was taken on **2026-08-25**, against
+`claude` 2.1.241, and the likelier reading lost.
+
+One plan, one keypress, in a throwaway repository started with
+`--permission-mode plan`. Claude wrote the plan to `~/.claude/plans/` at
+20:58:01 and loaded `ExitPlanMode` at 20:58:03; the hook fired, the review
+window opened, Approve was pressed with nothing marked, and the window closed.
+**Claude Code's approval menu then appeared** — *auto-accept edits · manually
+approve · say something else.* The session transcript corroborates it by ending
+at the `ExitPlanMode` schema load, because the session was still sitting at the
+menu when it was read.
+
+So the hooks page's decision table is right and `permission-modes.md`'s omission
+is the misleading one: `allow` needs `updatedInput` paired with it for
+`ExitPlanMode`, `hook.py:160-167` sends an `additionalContext` and no
+`updatedInput`, and **Approve currently costs a window and changes nothing.**
+*Send feedback* is unaffected — it returns `deny`, which needs no pairing and
+works as documented.
+
+That is **K5b**, and it is the smaller half of what **X5** killed as *unresolved,
+not broken*; the un-killing is recorded on X5's own row rather than by editing
+the ruling. The edited-plan half stays dead. It also makes `README.md:245` — *the
+plan proceeds, no terminal prompt* — the front page's one measured-false claim,
+which is now carried as a warning under that table until **P1** rewrites it.
+
+Two notes for whoever builds K5b. The plan text `updatedInput` needs is already
+in hand: the hook read the file to render it. And K5 lands first, because taking
+the plan from the payload rather than from `find_plan`'s regex is what makes the
+text reliable enough to hand back.
 
 The second half of that proposal — returning an *edited* plan through
 `updatedInput`, approve-with-cuts-applied as a third outcome — is dead (**X5**).
