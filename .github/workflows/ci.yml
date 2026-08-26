@@ -31,7 +31,7 @@ jobs:
     name: install, and prove it renders
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         # install.sh reads the file list from `git ls-files share/`, so this
         # needs to stay a real checkout rather than an archive.
 
@@ -69,7 +69,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: install
         run: PREFIX="$RUNNER_TEMP/pfx" ./install.sh --no-shell
       - name: smoke tests, with the browser
