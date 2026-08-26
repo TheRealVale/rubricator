@@ -22,6 +22,21 @@ var SILENT = { approve:1, cut:1 };   // verbs that don't need a note
    rather than as a numbered instruction, and it never turns an approval into a
    rejection. */
 function isAsk(it){ return it.verb !== 'note' && it.verb !== 'approve'; }
+
+/* ── M4 · three anchor states, where there used to be one bit ──────────────
+   `attached` — the anchor text is still there, verbatim.
+   `moved`    — the exact text is gone; its longest surviving line was found.
+   `orphaned` — nothing of it survives.
+   One bit did two jobs before: a deleted section and a corrected typo were both
+   `state:'stale'`, both filtered out of seven aggregate views, and both counted
+   in the tray as *resolved* — an accomplishment. A legacy store is read here and
+   never written back in the old shape. */
+function anchorOf(it){
+  if (it.anchorState) return it.anchorState;
+  return it.state === 'stale' ? 'orphaned' : 'attached';   // legacy stores
+}
+function isOrphan(it){ return anchorOf(it) === 'orphaned'; }
+function isLive(it){ return !isOrphan(it); }
 function askItems(){ return exportItems().filter(isAsk); }
 function noteItems(){ return exportItems().filter(function(i){ return i.verb === 'note'; }); }
 
@@ -44,17 +59,39 @@ function loadStore(){
   KEY = 'md-review:' + hash(META.path || (META.dir + '/' + META.name));
   store = { seq:1, preamble:DEFAULT_PRE, template:'apply', items:[] };
   var saved = null;
-  try { saved = Storage.get(KEY, META.path); } catch(e){}
+  try { saved = Storage.get(KEY, META.path, META.nkey); } catch(e){}
   if (saved && typeof saved === 'object'){ for (var k in saved) store[k] = saved[k]; }
   if (store.template === 'notes') store.template = 'raw';   // renamed, freeing the word for the verb
 }
 function save(){
   store.saved = Date.now();          // lets two stores be merged by recency
-  try { Storage.set(KEY, store, META.path); } catch(e){}
+  try { Storage.set(KEY, store, META.path, META.nkey); } catch(e){}
 }
 
 /* ── source helpers ──────────────────────────────────── */
 function srcSlice(a, b){ return rawLines.slice(a-1, b).join('\n').replace(/\s+$/,''); }
+/* current text vs recorded text. `it.quote` is what the mark was made against
+   and is never rewritten (M3); this is what the document says now. */
+function currentText(it){ return srcSlice(it.lineStart, it.lineEnd); }
+/* every occurrence, not just the first (M1) */
+function allIndexes(hay, needle){
+  var out = [], i = hay.indexOf(needle);
+  while (i >= 0 && out.length < 4096){ out.push(i); i = hay.indexOf(needle, i + 1); }
+  return out;
+}
+/* offset → 1-based line, in O(log n) after one pass, because M1 asks this
+   question once per candidate occurrence and `---` occurs 1,851 times in one
+   corpus. Rebuilt by reanchor(), which is the only caller. */
+var lineAtOffset = function(){ return 1; };
+function indexLines(){
+  var nl = [0], i;
+  for (i = 0; i < raw.length; i++) if (raw.charCodeAt(i) === 10) nl.push(i + 1);
+  lineAtOffset = function(off){
+    var lo = 0, hi = nl.length - 1;
+    while (lo < hi){ var mid = (lo + hi + 1) >> 1; if (nl[mid] <= off) lo = mid; else hi = mid - 1; }
+    return lo + 1;
+  };
+}
 function lineOfOffset(off){ return fmLines + body.slice(0, off).split('\n').length; }
 
 /* ── 1. map rendered blocks to source lines ──────────── */
@@ -113,27 +150,97 @@ function blockOf(node){
   return el ? el.closest('[data-line-start]') : null;
 }
 
-/* ── 2. re-anchor stored items against the current source ── */
+/* ── 2. re-anchor stored items against the current source ──
+   The tool's central promise. It used to be `raw.indexOf(anchor)` — exact,
+   first occurrence — and a miss was permanent.
+
+   M1 · nearest, not first. First-occurrence ambiguity is a rounding error
+   corpus-wide (8 bad anchors in 25,094), but it is not evenly spread: 1,636 of
+   1,851 `hr` anchors resolved to the wrong offset and 127 to byte 0, because
+   the file opens with front matter. Five lines, and the fuzzy step below needs
+   the position hint anyway.
+   M2 · on a miss, the anchor's own lines, longest first. Measured over 2,985
+   commit pairs: 6.6% of substantive anchors vanish per revision, and this
+   recovers 62.6%/40.2% of them at 98.6%/96.5% precision — better on both counts
+   than a 525-line quote-matching port. Whitespace normalisation adds 0.2% and
+   is not written. MIN_FUZZY is this implementation's own guard, not a measured
+   threshold: without it the longest survivor of a vanished block can be `---`.
+   M3 · `it.quote` is never written here. It is what you marked. */
+var MIN_FUZZY = 12;
+function nearestTo(hits, wantLine){
+  var best = hits[0], bestD = Infinity;
+  for (var k = 0; k < hits.length; k++){
+    var d = Math.abs(lineAtOffset(hits[k]) - wantLine);
+    if (d < bestD){ bestD = d; best = hits[k]; }
+  }
+  return best;
+}
+function fuzzyFind(it){
+  var lines = String(it.anchor || '').split('\n')
+    .map(function(l){ return l.replace(/\s+$/, ''); })
+    .filter(function(l){ return l.trim().length >= MIN_FUZZY; })
+    .sort(function(a, b){ return b.length - a.length; });
+  for (var k = 0; k < lines.length; k++){
+    var hits = allIndexes(raw, lines[k]);
+    if (hits.length) return { at: nearestTo(hits, it.lineStart || 1), text: lines[k] };
+  }
+  return null;
+}
 function reanchor(){
+  indexLines();
+  var moved = 0, lost = 0;
   store.items.forEach(function(it){
-    var i = it.anchor ? raw.indexOf(it.anchor) : -1;
-    if (i >= 0){
-      it.state = 'open';
-      it.lineStart = raw.slice(0, i).split('\n').length;
-      it.lineEnd = it.section ? sectionEnd(it.lineStart)
-                 : it.lineStart + it.anchor.replace(/\n+$/,'').split('\n').length - 1;
-      if (!it.partial) it.quote = srcSlice(it.lineStart, it.lineEnd);
+    var was = anchorOf(it);
+    var hits = it.anchor ? allIndexes(raw, it.anchor) : [];
+    var at = -1, how = 'orphaned';
+    if (hits.length){
+      at = nearestTo(hits, it.lineStart || 1);
+      how = 'attached';
     } else {
-      it.state = 'stale';
+      var f = fuzzyFind(it);
+      if (f){ at = f.at; how = 'moved'; it.movedTo = f.text; }
     }
+    if (at >= 0){
+      it.lineStart = lineAtOffset(at);
+      var span = (how === 'attached' ? it.anchor : it.movedTo);
+      it.lineEnd = it.section ? sectionEnd(it.lineStart)
+                 : it.lineStart + span.replace(/\n+$/,'').split('\n').length - 1;
+    }
+    it.anchorState = how;
+    delete it.state;                     // the one bit that did two jobs
+    if (how === 'moved' && was !== 'moved') moved++;
+    if (how === 'orphaned' && was !== 'orphaned') lost++;
   });
   store.items.sort(function(x, y){ return x.lineStart - y.lineStart || x.id - y.id; });
   save();
+  sayWhatMoved(moved, lost);
+}
+/* M5 · say what moved, on open, before you scroll. reanchor() already knew
+   this and threw it away. */
+function sayWhatMoved(moved, lost){
+  if (!moved && !lost) return;
+  var bits = [];
+  if (moved) bits.push(moved + ' of your marks moved');
+  if (lost) bits.push(lost + (lost > 1 ? ' lost their text' : ' lost its text'));
+  var msg = bits.join(', ');
+  if (window.Shell && window.Shell.status)
+    window.Shell.status(esc(msg), 'Since this document was last opened. Moved marks kept the text you marked; the tray shows both.');
+  else toast(msg);
 }
 
 /* the workspace keeps this chrome on a page that also shows lists; the layer
    must not react to keys or selections while its document is hidden */
 function live(){ return !!doc && doc.isConnected && doc.offsetParent !== null; }
+/* M7 · and it must not write into a pane you are not in. One chrome serves
+   every pane, so `blocks` can belong to a document sitting beside the one you
+   are looking at. The single-file reader has no shell and one pane: true. */
+function inFocusedPane(el){
+  if (!el) return true;
+  var S = window.Shell;
+  if (!S || !S.panes || !S.focusIndex) return true;
+  var ps = S.panes(), p = ps && ps[S.focusIndex()];
+  return !p || !p.el ? true : p.el.contains(el);
+}
 
 /* ── highlights ──────────────────────────────────────── */
 var HL = null;
@@ -163,7 +270,7 @@ function paint(){
   blocks.forEach(function(el){ el.classList.remove('has-anno'); el.style.removeProperty('--anno-color'); });
   if (HL) HL.clear();
   store.items.forEach(function(it){
-    if (it.state !== 'open') return;
+    if (isOrphan(it)) return;
     blocks.forEach(function(el){
       if (+el.dataset.lineEnd < it.lineStart || +el.dataset.lineStart > it.lineEnd) return;
       if (!el.classList.contains('has-anno')){
@@ -251,7 +358,12 @@ function addItem(verb, quote, a, b, partial, el, section){
     id: store.seq++, verb: verb, quote: quote,
     anchor: section ? rawLines[a - 1] : srcSlice(a, b),
     note: '', lineStart: a, lineEnd: b, partial: !!partial, section: !!section,
-    heading: headingFor(el || blockAtLine(a) || doc), state: 'open'
+    heading: headingFor(el || blockAtLine(a) || doc), anchorState: 'attached',
+    /* M6 · eleven fields were stored and none of them was a clock. Written at
+       creation and never rewritten, for M3's reason. `by` is git's idea of your
+       name where it has one, and is omitted rather than guessed from the OS
+       account: an unattributed mark beats a wrongly attributed one. */
+    at: Date.now(), by: (window.MDReview && MDReview.identity && MDReview.identity.by) || undefined
   };
   store.items.push(it);
   store.items.sort(function(x, y){ return x.lineStart - y.lineStart || x.id - y.id; });
@@ -341,10 +453,29 @@ function removeItem(id){
 }
 
 /* ── tray ────────────────────────────────────────────── */
-function openCount(){ return store.items.filter(function(i){ return i.state === 'open'; }).length; }
+function openCount(){ return store.items.filter(isLive).length; }
+function countBy(state){
+  return store.items.filter(function(i){ return anchorOf(i) === state; }).length;
+}
+/* M4 · an approve that no longer sits on the text it approved is the one case
+   that must be surfaced. Filing it under *resolved* was the old behaviour and
+   it read as an accomplishment. */
+function alteredApprovals(){
+  var appr = store.items.filter(function(i){ return i.verb === 'approve'; });
+  var bad = appr.filter(function(i){ return anchorOf(i) !== 'attached'; });
+  return bad.length ? bad.length + ' of your ' + appr.length + ' approval' +
+    (appr.length > 1 ? 's were' : ' was') + ' altered' : '';
+}
+/* M8 · one quiet coverage line. Deterministic, and it lives nowhere else. */
+function coverageLine(){
+  if (!blocks.length) return '';
+  var marked = blocks.filter(function(el){ return el.classList.contains('has-anno'); }).length;
+  return marked + ' of ' + blocks.length + ' blocks marked';
+}
 function renderTray(){
-  var open = openCount(), stale = store.items.length - open;
-  trayCount.textContent = open + (stale ? ' · ' + stale + ' resolved' : '');
+  var open = openCount(), moved = countBy('moved'), gone = countBy('orphaned');
+  trayCount.textContent = open + (moved ? ' · ' + moved + ' moved' : '') +
+                                 (gone ? ' · ' + gone + ' gone' : '');
   revCnt.textContent = open;
   revCnt.style.display = open ? '' : 'none';
   goBtn.disabled = !exportItems().length;
@@ -358,23 +489,45 @@ function renderTray(){
   }
   if (window.__mdHookSync) window.__mdHookSync();
   trayList.innerHTML = '';
+  var altered = alteredApprovals();
+  if (altered){
+    var w = document.createElement('div');
+    w.className = 'anno-altered';
+    w.textContent = altered;
+    trayList.appendChild(w);
+  }
   store.items.forEach(function(it){
     var d = document.createElement('div');
-    d.className = 'anno' + (it.state === 'stale' ? ' stale' : '');
+    var st = anchorOf(it);
+    d.className = 'anno' + (st === 'orphaned' ? ' stale' : '') + (st === 'moved' ? ' moved' : '');
     d.style.setProperty('--anno-color', VERBS[it.verb].color);
-    d.style.borderLeftColor = it.state === 'stale' ? 'transparent' : VERBS[it.verb].color;
+    d.style.borderLeftColor = st === 'orphaned' ? 'transparent' : VERBS[it.verb].color;
     var loc = SHORT + ':' + it.lineStart + (it.lineEnd > it.lineStart ? '-' + it.lineEnd : '');
+    var tag = st === 'orphaned' ? '<span class="tag">text gone</span>'
+            : st === 'moved'    ? '<span class="tag moved">moved</span>' : '';
+    /* M3 · the quote is what you marked. For a moved mark the document now says
+       something else, and both are worth seeing. */
+    var now = st === 'moved' ? currentText(it) : '';
     d.innerHTML =
       '<div class="top"><span class="verb">' + VERBS[it.verb].label + '</span>' +
-      '<span class="loc">' + esc(loc) + '</span>' +
-      (it.state === 'stale' ? '<span class="tag">gone</span>' : '') +
+      '<span class="loc">' + esc(loc) + '</span>' + tag +
       '<button class="x" title="Delete">&times;</button></div>' +
       '<div class="q">' + esc(clip(it.quote, 220)) + '</div>' +
+      (now && now !== it.quote
+        ? '<div class="q now" title="What the document says at this anchor now">' +
+          esc(clip(now, 220)) + '</div>' : '') +
       '<div class="note">' + esc(it.note) + '</div>';
     d.querySelector('.x').addEventListener('click', function(e){ e.stopPropagation(); removeItem(it.id); });
     d.addEventListener('click', function(){ jumpTo(it); });
     trayList.appendChild(d);
   });
+  var cov = coverageLine();
+  if (cov){
+    var c = document.createElement('div');
+    c.className = 'anno-coverage';
+    c.textContent = cov;
+    trayList.appendChild(c);
+  }
 }
 function jumpTo(it){
   var el = blockAtLine(it.lineStart);
@@ -411,7 +564,7 @@ function syncTpl(){
 
 /* ── export ──────────────────────────────────────────── */
 function exportItems(){
-  var open = store.items.filter(function(i){ return i.state === 'open'; });
+  var open = store.items.filter(isLive);
   if (store.template === 'questions') open = open.filter(function(i){ return i.verb === 'question'; });
   return open;
 }
@@ -424,7 +577,8 @@ function exportQuote(it){
   return lines.slice(0, 2).concat('… (' + n + ' lines)');
 }
 function locOf(it){
-  return SHORT + ':' + it.lineStart + (it.lineEnd > it.lineStart ? '-' + it.lineEnd : '');
+  return SHORT + ':' + it.lineStart + (it.lineEnd > it.lineStart ? '-' + it.lineEnd : '') +
+         (anchorOf(it) === 'moved' ? ' (moved — quoted text is what I marked)' : '');
 }
 function appendNotes(out, notes){
   if (!notes.length) return;
@@ -528,6 +682,13 @@ document.addEventListener('keydown', function(e){
     if (e.key === VERBS[v].key){
       e.preventDefault();
       if (selInfo()) addFromSelection(v);
+      else if (!inFocusedPane(blocks[focusIdx]))
+        /* M7 · the hovered block is in another pane. `x` and `a` write with no
+           composer, so this used to be silent — a mark on a document you were
+           not looking at. Do not rebind on hover instead: that routes through
+           openDoc(), which closes the composer, so mouse drift would eat
+           whatever you were typing. */
+        toast('That block is in another pane — click it first');
       else addFromBlock(v, blocks[focusIdx]);
       return;
     }

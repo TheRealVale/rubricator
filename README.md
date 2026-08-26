@@ -305,13 +305,22 @@ share/transcript.py one conversation, parsed on demand
 share/hook.py       blocking review server for --review and --hook
 ```
 
-In the live tier, annotations are written to `.rubricator/notes.json` in the repo, so they
-survive a cleared browser and can be grepped, diffed or committed. Rubricator adds that path
-to `.git/info/exclude` rather than your `.gitignore`: nothing tracked is touched, the file
-never shows up as untracked noise, and committing it stays your choice. In the static tier
-they live in the browser's local storage, keyed by the document's absolute path —
-the same key from either page, so a note written in the workspace is there when you open
-the file on its own. Nothing is written into your files and nothing leaves the machine.
+In the live tier, annotations are written to `.rubricator/notes/<path>.json` in the repo —
+one file per document, keyed by the document's path **relative to the enclosing git
+repository**. That is what makes them portable: a store written in one clone loads in
+another at a different path, `md .` and `md docs/` read the same marks, and `git status`
+names the document whose marks changed rather than one shared blob. Each mark carries an
+`at` and, where git knows one, a `by`.
+
+They are meant to be committed, so nothing hides them. Earlier versions added `.rubricator/`
+to `.git/info/exclude`; this one removes that line the first time it sees it, and says so.
+Two people marking different documents never touch the same file, and a conflict, when it
+comes, is a small JSON file you can resolve by hand.
+
+In the static tier marks live in the browser's local storage, keyed by the document's
+absolute path — so a note written in the workspace is there when you open that same file on
+its own. Rubricator writes nothing into the documents themselves and nothing leaves the
+machine.
 
 Everything is written down. [`docs/tasks.md`](docs/tasks.md) is the register — one line
 per task, and a table at the top saying where each plan stands. The plans themselves keep
@@ -479,9 +488,10 @@ CSS block at the top of `share/template.html`.
 ## Limitations
 
 - macOS only in practice (uses `open`; the Chrome app window is a nicety, any browser works)
-- notes from the workspace live in the repo, at `.rubricator/notes.json`; a static page
+- notes from the workspace live in the repo, under `.rubricator/notes/`; a static page
   keeps them in that browser profile instead. Neither syncs between machines on its own —
-  the repo file does if you commit it
+  the repo files do if you commit them, which is the supported path and the only transport
+  there is: no server, no account, no locking
 - a conversation can be read but not yet annotated: the review layer binds to a document,
   and a chat bubble is not one. See §7b of `docs/conversations-plan.md`
 - continuing a session from the window is designed but unbuilt — `docs/continue-plan.md`

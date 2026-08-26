@@ -20,6 +20,20 @@ There is no hash. `share/review.js:119` is `raw.indexOf(it.anchor)` — exact
 substring, first occurrence, no normalisation, no offset hint, no fallback — and
 a miss sets `state = 'stale'`, which the tray reports to you as **resolved**.
 
+> **Shipped 2026-08-26.** All eight, and two corrections to what is below.
+>
+> The fuzzy step (§ M2) **recovers nothing for a single-line anchor** — its own
+> only line is the anchor, which has already failed. The measured 62.6%/40.2%
+> is therefore a recovery rate for multi-line anchors, and this document reads
+> throughout as though it applied to every mark.
+>
+> `MIN_FUZZY = 12` was added during the build and **rests on no measurement**.
+> Without a floor, the longest surviving line of a deleted block can be `---`,
+> and the fallback then re-anchors the mark onto an unrelated rule at full
+> confidence. It can only have raised the precision figures quoted here, since
+> they were taken before it existed — but it is a number this document did not
+> choose and does not justify.
+
 This document plans register items **M1–M8**. The register's brief said M1–M6;
 M7 is here because it is a bug in the single-document invariant everything above
 depends on (§11), and M8 because it falls out of M4's counting and belongs

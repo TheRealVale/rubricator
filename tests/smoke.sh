@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Six smoke tests on the seams that were already in the code.
+# Smoke tests on the seams that were already in the code, plus the ones later
+# phases had to build.
 #
 # There was no test harness to write: hook.py:108 is RUBRICATOR_NO_WINDOW —
 # "tests drive the page themselves", in a comment written by someone who
@@ -12,8 +13,14 @@
 # renderer that is present and silent, and it must therefore assert on
 # content.
 #
-#   ./tests/smoke.sh              the five that need no browser
-#   ./tests/smoke.sh --browser    all six (test 2 needs headless Chrome)
+# Two of these were mutation-tested on 2026-08-26: the suite was run against a
+# clone with one regression introduced at a time, and only a test that went red
+# is a test. That exercise is why 14-17 exist — a syntax error appended to
+# workspace.js, shell.js or review.js left the whole suite green, the anchoring
+# ladder had no coverage at all, and test 10 was passing on an empty corpus.
+#
+#   ./tests/smoke.sh              everything that needs no browser
+#   ./tests/smoke.sh --browser    and the two that render a page
 set -uo pipefail
 
 REPO="$(cd -P "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
@@ -29,7 +36,17 @@ skip() { printf '  skip  %s (%s)\n' "$1" "$2"; }
 echo "rubricator smoke tests"
 
 # ── install into an isolated prefix, the way a stranger would ────────────────
-export HOME="$WORK/home"; mkdir -p "$HOME"
+export HOME="$WORK/home"; mkdir -p "$HOME/.claude"
+# Tests 10 and 14 assert that prompt text does not reach a static page. Under a
+# fresh HOME there is no history at all, so both used to pass on an empty
+# corpus: deleting the withholding code outright left the suite green. Three
+# records is enough to make the assertion bite, and one of them carries a
+# credential so the scrubber is exercised on the way past.
+cat > "$HOME/.claude/history.jsonl" <<'HIST'
+{"display":"how does the auth flow work","project":"/tmp/p","timestamp":1756000000000,"sessionId":"s-aaa"}
+{"display":"set STRIPE_SECRET_KEY=sk_live_00smoketest00 and retry","project":"/tmp/p","timestamp":1756000001000,"sessionId":"s-aaa"}
+{"display":"/compact","project":"/tmp/p","timestamp":1756000002000,"sessionId":"s-aaa"}
+HIST
 PREFIX="$WORK/pfx"
 if ! (cd "$REPO" && PREFIX="$PREFIX" ./install.sh --no-shell) >"$WORK/install.log" 2>&1; then
   echo "  FAIL  install.sh did not complete — see below"; sed 's/^/    /' "$WORK/install.log"; exit 1
@@ -96,6 +113,27 @@ if [ "$WITH_BROWSER" = 1 ]; then
       ok "2b · the rendered DOM contains the fixture's heading"
     else
       no "2b · the fixture never reached the DOM" "the code is installed and does not run"
+    fi
+
+    # 2c · and the workspace page, which is the product. Nothing rendered it
+    # until 2026-08-26: workspace.js is the largest file in the repo, and a
+    # syntax error in it left every other test green. Test 14 now catches that
+    # statically; this catches the runtime half — code that parses and then
+    # throws on the way to the first paint.
+    (cd "$REPO" && "$MD" -w -o "$WORK/ws.html" . >/dev/null 2>&1) || true
+    if [ -s "$WORK/ws.html" ]; then
+      "$CHROME" --headless --disable-gpu --virtual-time-budget=12000 \
+        --use-mock-keychain --password-store=basic --disable-background-networking \
+        --dump-dom "file://$WORK/ws.html" >"$WORK/wsdom.html" 2>/dev/null
+      # a document row for this repo's own README, drawn by workspace.js from
+      # the payload — present only if the page got as far as its first paint
+      if grep -q 'README.md' "$WORK/wsdom.html" && grep -qi 'class="row\|class="doc' "$WORK/wsdom.html"; then
+        ok "2c · the workspace page paints its first document row"
+      else
+        no "2c · the workspace page never painted" "$(wc -c < "$WORK/wsdom.html" | tr -d ' ') bytes of DOM, no rows"
+      fi
+    else
+      skip "2c · workspace page" "the page was not built"
     fi
   else
     skip "2b · rendered DOM" "no Chrome"
@@ -290,15 +328,41 @@ fi
 # N2. bin/md refuses --out with --sessions because your history stays on this
 # machine; the static build wrote the same corpus to a world-readable page with
 # no flag at all. Asserts on the shape the corpus leaves behind, not on a count.
+# `md -o` cannot reach this: bin/md:165 refuses --out with --sessions. The path
+# that *did* write the corpus is the cache fallback, which calls workspace.py
+# directly when the local server does not come up — so drive that, or the test
+# proves only that a refusal the shell already makes is still made.
 static="$WORK/static.html"
-(cd "$REPO" && "$MD" -w -o "$static" . >/dev/null 2>&1) || true
-if [ -s "$static" ]; then
-  sids=$(grep -o '"sid"' "$static" | wc -l | tr -d ' ')
-  [ "$sids" = 0 ] && ok "10 · no prompt text in a static workspace" \
-                  || no "10 · a static page carries the prompt corpus" "\"sid\" appears $sids times"
-else
+live=$(python3 -c 'import sys, os; sys.path.insert(0, os.environ["RUBRICATOR_HOME"])
+import workspace as W; print(len(W.load_sessions()[0]))' 2>/dev/null || echo 0)
+(cd "$REPO" && RUBRICATOR_OUT="$static" python3 "$RUBRICATOR_HOME/workspace.py" \
+   . --sessions >/dev/null 2>&1) || true
+if [ ! -s "$static" ]; then
   skip "10 · static workspace" "the page was not built"
+elif [ "${live:-0}" -lt 1 ]; then
+  no "10 · the test has no corpus to withhold" "load_sessions() returned ${live:-0} prompts — the assertion below is vacuous"
+else
+  sids=$(grep -o '"sid"' "$static" | wc -l | tr -d ' ')
+  held=$(grep -c 'promptsWithheld' "$static" || true)
+  if [ "$sids" = 0 ] && [ "$held" -ge 1 ]; then
+    ok "10 · no prompt text in a static workspace ($live indexed, 0 written, and it says so)"
+  else
+    no "10 · a static page carries the prompt corpus" "\"sid\" x$sids, promptsWithheld x$held"
+  fi
 fi
+
+# ── 10b · the scrubber runs before anything is written ──────────────────────
+# N3. Nothing leaves the machine, but a dossier can — so credentials are
+# scrubbed at index time. Neutering scrub() left the whole suite green.
+sec=$(python3 -c 'import sys, os; sys.path.insert(0, os.environ["RUBRICATOR_HOME"])
+import workspace as W
+p = W.load_sessions()[0]
+print(sum(1 for x in p if "sk_live_00smoketest00" in x["text"]))' 2>/dev/null || echo -1)
+case "$sec" in
+  0) ok "10b · a credential in a prompt is scrubbed at index time" ;;
+  -1) skip "10b · scrubber" "load_sessions did not run" ;;
+  *) no "10b · a credential survived the scrubber" "$sec prompt(s) still carry it" ;;
+esac
 
 # ── 11 · a plan review leaves a record ──────────────────────────────────────
 # N6. The hook produced a decision and nothing on disk, and each fire is a fresh
@@ -320,10 +384,10 @@ fi
 unset RUBRICATOR_CACHE RUBRICATOR_STATE
 
 # ── 12 · the index payload tells the truth ─────────────────────────────────
-# L3, L4, L5 at once, through the RUBRICATOR_JSON seam: an unstaged document is
-# indexed and flagged, ignored files stay ignored, notes travel with the page
-# keyed to match doc.abs, and repoChurn — 26% of the git pass, read by nothing —
-# is gone.
+# L3, L4, L5 and M6 at once, through the RUBRICATOR_JSON seam: an unstaged
+# document is indexed and flagged, ignored files stay ignored, notes travel with
+# the page under the key the page will look them up by, and repoChurn — 26% of
+# the git pass, read by nothing — is gone.
 scratch="$WORK/idx"; mkdir -p "$scratch/node_modules"
 (cd "$scratch" && git init -q . \
   && printf '# tracked\n' > tracked.md && git add tracked.md \
@@ -347,7 +411,12 @@ checks = {
   "tracked one not flagged":        not rels.get("tracked.md", {}).get("untracked"),
   "gitignored file stays out":      not any("node_modules" in r for r in rels),
   "notes travel with the payload":  bool(d.get("notes")),
-  "notes key matches doc.abs":      any(k == rels.get("tracked.md", {}).get("abs") for k in (d.get("notes") or {})),
+  # M6: relative to the enclosing repository, and the page looks it up by
+  # `nkey`. An absolute key cannot survive a second checkout.
+  "notes key is the relative path": list(d.get("notes") or {}) == ["tracked.md"],
+  "and it is the key the page uses": rels.get("tracked.md", {}).get("nkey") == "tracked.md",
+  "the legacy file was migrated":   os.path.isfile(os.path.join(scratch, ".rubricator", "notes", "tracked.md.json")),
+  "and kept":                       os.path.isfile(os.path.join(scratch, ".rubricator", "notes.json.pre-v1")),
   "repoChurn is gone":              not any("repoChurn" in v for v in (d.get("stale") or {}).values()),
 }
 for k, v in checks.items(): print(("ok " if v else "XX ") + k)
@@ -384,6 +453,162 @@ JSEOF
                  *)   no "13 · the query parser is wrong" "$res" ;; esac
 else
   skip "13 · query parser" "no node"
+fi
+
+# ── 14 · every shipped file parses ──────────────────────────────────────────
+# The cheapest test here and the one that closes the widest gap. Mutation-tested
+# 2026-08-26: appending `function ((broken{` to workspace.js, shell.js or
+# review.js left all fourteen other tests green, with --browser as well —
+# nothing in the suite opens the workspace page, and it is the largest file in
+# the repo. 60 ms.
+if command -v node >/dev/null; then
+  bad=""
+  for f in "$REPO"/share/*.js; do
+    node --check "$f" >"$WORK/chk.log" 2>&1 || bad="$bad $(basename "$f"): $(head -3 "$WORK/chk.log" | tail -1)"
+  done
+  for f in "$REPO"/share/*.py; do
+    python3 -m py_compile "$f" 2>"$WORK/chk.log" || bad="$bad $(basename "$f"): $(tail -1 "$WORK/chk.log")"
+  done
+  bash -n "$REPO/bin/md" 2>"$WORK/chk.log" || bad="$bad bin/md: $(tail -1 "$WORK/chk.log")"
+  bash -n "$REPO/install.sh" 2>"$WORK/chk.log" || bad="$bad install.sh: $(tail -1 "$WORK/chk.log")"
+  [ -z "$bad" ] && ok "14 · every file in share/ and bin/ parses" \
+                || no "14 · a shipped file does not parse" "$bad"
+else
+  skip "14 · syntax gate" "no node"
+fi
+
+# ── 15 · a mark survives the rewrite ────────────────────────────────────────
+# Phase M's whole point, and it had no coverage: the re-anchoring ladder runs in
+# the browser and nothing here opened the workspace. The functions are lifted
+# out of review.js the way test 13 lifts the query parser, so this asserts on
+# the shipped source rather than on a copy of it.
+if command -v node >/dev/null; then
+  python3 - "$REPO/share/review.js" "$WORK/anchor.js" <<'PYEOF'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w", encoding="utf-8").write("\n".join([
+    sl("function anchorOf(it){", "\n/* ── storage"),
+    sl("function srcSlice(a, b)", "\n/* ── 1. map rendered blocks"),
+    sl("function headingLevel(line)", "\nfunction blockOf(node)"),
+    sl("var MIN_FUZZY = 12;", "\n/* ── highlights"),
+]))
+PYEOF
+  { printf 'var raw="",rawLines=[],store={items:[]},said=null,window={};\n'
+    printf 'function save(){}function toast(m){said=m}function esc(s){return s}\n'
+    cat "$WORK/anchor.js"
+    cat <<'JSEOF'
+function load(t, items){ raw=t; rawLines=t.split('\n'); store={items:items}; said=null; reanchor(); return store.items; }
+var f = [];
+function eq(w, got, want){ if (got !== want) f.push(w + ': ' + JSON.stringify(got) + ' != ' + JSON.stringify(want)); }
+
+/* M1 · three rules in one document, each mark keeps its own */
+var r = load('---\ntitle: x\n---\n\nalpha\n\n---\n\nbeta\n\n---\n\ngamma\n',
+  [{id:1,verb:'note',anchor:'---',lineStart:1},
+   {id:2,verb:'note',anchor:'---',lineStart:7},
+   {id:3,verb:'note',anchor:'---',lineStart:11}]);
+eq('M1 first rule', r[0].lineStart, 1);
+eq('M1 second rule', r[1].lineStart, 7);
+eq('M1 third rule', r[2].lineStart, 11);
+
+/* M1 · a repeated heading anchors to the section it was made in */
+var h = load('# A\n\none\n\n## Notes\n\nfirst\n\n# B\n\ntwo\n\n## Notes\n\nsecond\n',
+  [{id:1,verb:'change',anchor:'## Notes',lineStart:13,section:1}]);
+eq('M1 repeated heading', h[0].lineStart, 13);
+
+/* M2 · first sentence rewritten, longest line survives */
+var was = 'Intro sentence here.\nThe longest surviving line in this paragraph is right here.';
+var m = load('# t\n\nCompletely different opening.\nThe longest surviving line in this paragraph is right here.\n',
+  [{id:1,verb:'change',anchor:was,quote:was,lineStart:1}]);
+eq('M2 moved', m[0].anchorState, 'moved');
+eq('M2 kept both texts', m[0].quote, was);
+eq('M2 landed on the survivor', m[0].lineStart, 4);
+eq('M5 said so', said, '1 of your marks moved');
+
+/* M2 · and does not re-anchor a vanished block onto its leftover rule */
+var g = load('---\n\nnothing else at all\n', [{id:1,verb:'cut',anchor:'---\nvanished body\n---',lineStart:1}]);
+eq('M2 short-line guard', g[0].anchorState, 'orphaned');
+
+/* M3 · a section mark still shows the text it was made against */
+var sec = '## S\n\nold body\n';
+var s2 = load('# top\n\n## S\n\nrewritten body, quite different\n',
+  [{id:1,verb:'approve',anchor:'## S',quote:sec,section:1,lineStart:1}]);
+eq('M3 quote never overwritten', s2[0].quote, sec);
+eq('M3 current text differs', currentText(s2[0]) !== s2[0].quote, true);
+
+/* M4 · three states, and a legacy store loads without migration */
+var L = load('kept\n', [{id:1,verb:'note',anchor:'kept',state:'open',lineStart:1},
+                        {id:2,verb:'approve',anchor:'deleted entirely from the file',state:'open',lineStart:2}]);
+eq('M4 attached', L[0].anchorState, 'attached');
+eq('M4 orphaned', L[1].anchorState, 'orphaned');
+eq('M4 old bit dropped', 'state' in L[0], false);
+eq('M4 legacy stale reads orphaned', anchorOf({state:'stale'}), 'orphaned');
+eq('M4 legacy open reads attached', anchorOf({state:'open'}), 'attached');
+eq('M4 an orphan is not live', isLive({state:'stale'}), false);
+
+/* M5 · both counts, in one sentence */
+load('a paragraph line that is definitely still here\n',
+  [{id:1,verb:'note',anchor:'gone one entirely from this file',lineStart:1},
+   {id:2,verb:'note',anchor:'gone two entirely from this file',lineStart:2},
+   {id:3,verb:'note',anchor:'an opening that changed\na paragraph line that is definitely still here',lineStart:3}]);
+eq('M5 both counts', said, '1 of your marks moved, 2 lost their text');
+console.log(f.length ? 'XX ' + f.join(' | ') : 'ok');
+JSEOF
+  } > "$WORK/anchor_test.js"
+  res=$(node "$WORK/anchor_test.js" 2>&1)
+  case "$res" in ok*) ok "15 · marks re-anchor, move, or say their text is gone" ;;
+                 *)   no "15 · the anchoring ladder is wrong" "$res" ;; esac
+else
+  skip "15 · anchoring ladder" "no node"
+fi
+
+# ── 16 · notes survive a second checkout ────────────────────────────────────
+# M6. The old layout was one file per repo keyed by absolute path, so the store
+# could not survive a clone at a different path — while the README promised it
+# would sync if you committed it.
+nrepo="$WORK/nrepo"; mkdir -p "$nrepo/docs"
+(cd "$nrepo" && git init -q . && printf '# a\n' > README.md && printf '# p\n' > docs/plan.md \
+  && git add -A && git -c user.email=t@t -c user.name='Smoke Person' commit -qm init) >/dev/null 2>&1
+printf '# comment\n.rubricator/\n' > "$nrepo/.git/info/exclude"
+mkdir -p "$nrepo/.rubricator"
+python3 -c 'import json,os,sys
+p = sys.argv[1]
+json.dump({os.path.realpath(os.path.join(p,"README.md")): {"saved":1,"items":[{"id":1,"verb":"note"}]}},
+          open(os.path.join(p,".rubricator","notes.json"),"w"))' "$nrepo"
+python3 - "$nrepo" <<'PYEOF' > "$WORK/n.txt" 2>&1
+import sys, os, json, shutil, subprocess
+sys.path.insert(0, os.environ["RUBRICATOR_HOME"])
+import workspace as W
+repo = sys.argv[1]
+n = W.read_notes(repo)                                    # migrates
+W.write_notes(repo + "/docs", "docs/plan.md",
+              {"saved": 2, "items": [{"id": 1, "verb": "note", "at": 1, "by": "Smoke Person"}]})
+d = json.load(open(repo + "/.rubricator/notes/docs/plan.md.json"))
+ex = open(repo + "/.git/info/exclude").read()
+clone = repo + "-two"
+subprocess.run(["git", "clone", "-q", repo, clone], check=True)
+shutil.copytree(repo + "/.rubricator", clone + "/.rubricator")
+checks = {
+  "absolute key migrated to relative": list(n) == ["README.md"],
+  "one file per document":             os.path.isfile(repo + "/.rubricator/notes/README.md.json"),
+  "the old file is kept, not deleted": os.path.isfile(repo + "/.rubricator/notes.json.pre-v1"),
+  "md . and md docs/ agree":           W.notes_key(repo, repo + "/docs/plan.md") ==
+                                       W.notes_key(repo + "/docs", repo + "/docs/plan.md") == "docs/plan.md",
+  "version stamped":                   d.get("v") == 1,
+  "at and by survive the round trip":  d["items"][0].get("at") == 1 and d["items"][0].get("by") == "Smoke Person",
+  "the exclude line is withdrawn":     ".rubricator/" not in ex,
+  "and nothing else in it is touched": "# comment" in ex,
+  "traversal refused":                 W.notes_path(repo, "../../etc/x") is None and W.notes_key(repo, "/etc/x") is None,
+  "loads in a clone at another path":  sorted(W.read_notes(clone)) == ["README.md", "docs/plan.md"],
+}
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "16 · marks are relative, per-document, and no longer hidden from git"
+else
+  no "16 · the notes layout is wrong" "$(grep '^XX' "$WORK/n.txt" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"

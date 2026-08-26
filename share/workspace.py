@@ -550,6 +550,7 @@ def build(roots, with_sessions, deep=False, extract_now=False):
             d = read_doc(path, rel, r, allow_extract=extract_now)
             if d:
                 d["root"] = str(r)
+                d["nkey"] = notes_key(r, d["abs"])       # M6 · where its marks live
                 if untracked:
                     d["untracked"] = 1
                 if len(roots) > 1:
@@ -563,6 +564,8 @@ def build(roots, with_sessions, deep=False, extract_now=False):
 
     data = {
         "root": str(root), "roots": [str(r) for r in roots], "name": root.name,
+        "notesRoot": str(notes_root(root)),
+        "by": git_user_name(root),                        # M6 · stamped on new marks
         "generated": int(time.time()),
         "docs": docs, "stale": stale, "hasGit": has_git,
         "sessions": {}, "prompts": [], "touches": {}, "withSessions": with_sessions,
@@ -672,41 +675,181 @@ def user_views():
 
 
 # ── notes on disk ────────────────────────────────────────────────────────────
-def notes_file(root):
-    return root / ".rubricator" / "notes.json"
+# M6. This was one file per repo, keyed by absolute document path, hidden from
+# git via .git/info/exclude. Every one of those three is now the other way
+# round, and each for its own reason.
+#
+#   absolute → relative   an absolute key cannot survive a second checkout. The
+#                         only key on the author's machine was an absolute
+#                         README path, while the README promised the notes sync
+#                         "if you commit it".
+#   one file → a directory  `git status` names the document whose marks changed,
+#                         `git log` on that path is that document's mark
+#                         history, and two people marking different documents in
+#                         one repository never touch the same file. A conflict,
+#                         when it comes, is in the one document they both marked.
+#   hidden → visible      standing rule 3 makes committing the notes the
+#                         supported path, so hiding them was working against the
+#                         only transport there is.
+#
+# Relative to the enclosing git repository, not to the directory the human
+# typed: otherwise `md .` and `md docs/` keep two disjoint stores in one
+# repository, and two people who invoke the tool differently never see each
+# other's marks.
+NOTES_V = 1
+
+
+def notes_root(root):
+    """Where `.rubricator/` belongs: the enclosing git repository, or the
+    directory itself outside one. Standing rule 1 permits `.rubricator/` in the
+    enclosing repository of a root it was pointed at, and nothing else there."""
+    r = Path(os.path.realpath(str(root)))
+    for cand in [r] + list(r.parents):
+        if (cand / ".git").exists():
+            return cand
+    return r
+
+
+def notes_dir(root):
+    return notes_root(root) / ".rubricator" / "notes"
+
+
+def notes_key(root, abspath):
+    """A document's key: its path relative to the notes root, POSIX separators.
+    None when the document is outside that root, which is the traversal guard
+    for the /notes endpoint as well as an honest answer."""
+    try:
+        rel = Path(os.path.realpath(str(abspath))).relative_to(notes_root(root))
+    except Exception:
+        return None
+    return rel.as_posix()
+
+
+def notes_path(root, key):
+    """key → file. Refuses anything that would leave the notes directory."""
+    if not key or key.startswith("/") or ".." in Path(key).parts:
+        return None
+    d = notes_dir(root)
+    f = d / (key + ".json")
+    # belt as well as braces: the parts check above already refuses `..`, but a
+    # symlinked directory inside .rubricator/ could still point outward.
+    try:
+        Path(os.path.normpath(str(f))).relative_to(os.path.normpath(str(d)))
+    except Exception:
+        return None
+    return f
+
+
+def _legacy_split(root):
+    """The old `.rubricator/notes.json`, once: every absolute key rewritten
+    relative and written to its own file. The original is kept beside them
+    rather than deleted — this tool does not remove a file a human might want
+    back, and the rename is what stops it running twice."""
+    old = notes_root(root) / ".rubricator" / "notes.json"
+    if not old.is_file():
+        return
+    try:
+        d = json.loads(old.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(d, dict):
+        return
+    moved = 0
+    for abspath, store in d.items():
+        key = notes_key(root, abspath)
+        if not key or not isinstance(store, dict):
+            continue
+        if _write_one(root, key, store) is not None:
+            moved += 1
+    try:
+        old.replace(old.with_name("notes.json.pre-v1"))
+    except Exception:
+        return
+    if moved:
+        sys.stderr.write(
+            f"rubricator: moved {moved} document's notes into "
+            f"{notes_dir(root)}/ (keys are now relative, one file per document).\n"
+            f"  the previous file is kept as .rubricator/notes.json.pre-v1\n")
+
+
+def _write_one(root, key, store):
+    f = notes_path(root, key)
+    if f is None:
+        return None
+    if not (store and store.get("items")):
+        try:
+            f.unlink()
+        except Exception:
+            pass
+        return f
+    out = dict(store)
+    out["v"] = NOTES_V
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f.name + ".part")
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(f)
+    return f
 
 
 def read_notes(root):
-    try:
-        d = json.loads(notes_file(root).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+    """{key: store} for every document with marks. The wire format did not move
+    — one object, as before — only the keys and the disk layout."""
+    _legacy_split(root)
+    d = notes_dir(root)
+    out = {}
+    if not d.is_dir():
+        return out
+    for f in sorted(d.rglob("*.json")):
+        try:
+            key = f.relative_to(d).as_posix()[: -len(".json")]
+            store = json.loads(f.read_text(encoding="utf-8"))
+            if isinstance(store, dict) and store.get("items"):
+                out[key] = store
+        except Exception:
+            continue
+    return out
 
 
-def write_notes(root, path, store):
-    """One file per repo, keyed by absolute document path. Kept out of git's way
-    via .git/info/exclude rather than .gitignore, so nothing tracked is touched
-    and committing it stays your choice."""
-    f = notes_file(root)
-    all_notes = read_notes(root)
-    if store and store.get("items"):
-        all_notes[path] = store
-    else:
-        all_notes.pop(path, None)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".part")
-    tmp.write_text(json.dumps(all_notes, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(f)
-    ex = root / ".git" / "info" / "exclude"
+def unexclude(root):
+    """The tool wrote `.rubricator/` into .git/info/exclude, so the tool takes
+    it back — once, saying so, touching nothing else in the file. Committing the
+    notes is the supported path now (rule 3), and a hidden file cannot be
+    committed by someone who does not know it is there."""
+    ex = notes_root(root) / ".git" / "info" / "exclude"
     try:
-        if ex.parent.is_dir():
-            body = ex.read_text(encoding="utf-8") if ex.is_file() else ""
-            if ".rubricator/" not in body:
-                ex.write_text(body.rstrip("\n") + "\n.rubricator/\n", encoding="utf-8")
+        if not ex.is_file():
+            return
+        lines = ex.read_text(encoding="utf-8").split("\n")
+        keep = [l for l in lines if l.strip() != ".rubricator/"]
+        if len(keep) == len(lines):
+            return
+        ex.write_text("\n".join(keep), encoding="utf-8")
+        sys.stderr.write(
+            "rubricator: removed the '.rubricator/' line this tool added to "
+            f"{ex} —\n  your marks are meant to be committed now. "
+            "Add it back yourself if you would rather they were not.\n")
     except Exception:
         pass
-    return len(all_notes)
+
+
+def git_user_name(root):
+    """`by` on a mark, so two people committing to one repository can tell their
+    marks apart. Never guessed from the OS account: an unattributed mark is
+    better than a wrong attribution, and the name is already in every commit in
+    the same repository, so this adds no exposure the history does not carry."""
+    try:
+        n = git(notes_root(root), "config", "user.name", timeout=3).strip()
+        return n.split("\n")[0] if n else ""
+    except Exception:
+        return ""
+
+
+def write_notes(root, key, store):
+    """One file per document, at .rubricator/notes/<relative path>.json."""
+    if _write_one(root, key, store) is None:
+        return None
+    unexclude(root)
+    return len(read_notes(root))
 
 
 # ── the live tier ────────────────────────────────────────────────────────────
@@ -815,7 +958,19 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         path, store = b.get("path") or "", b.get("store")
         if not path or not isinstance(store, dict):
             return S.J({"error": "bad note"}, 400)
+        # O2 · a multi-root workspace has one notes root, the first one, and a
+        # mark taken on the second repository used to be written into the first.
+        # Refuse it here rather than in the page: the page is not the guard.
+        if len(roots) > 1:
+            hit = next((d for d in state["data"]["docs"] if d.get("nkey") == path), None)
+            if hit and hit.get("root") and Path(hit["root"]) != root:
+                return S.J({"error": "read-only",
+                            "reason": "Marks are stored in the first repository of a "
+                                      "multi-root workspace. Open " + Path(hit["root"]).name +
+                                      " on its own to mark it."}, 409)
         n = write_notes(root, path, store)
+        if n is None:
+            return S.J({"error": "bad note", "reason": "that path is outside the workspace"}, 400)
         return S.J({"ok": True, "documents": n})
 
     def act(method, query, body):

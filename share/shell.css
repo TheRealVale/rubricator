@@ -99,6 +99,11 @@ body.tray-open{padding-right:0}
 .tab .x:hover{background:var(--bg-elev);color:var(--fg)}
 .tab.on{background:var(--bg);color:var(--fg);box-shadow:inset 0 -2px 0 var(--border)}
 .pane.focus .tab.on{box-shadow:inset 0 -2px 0 var(--accent)}
+/* M7 · a verb lands in the focused pane, so the focused pane has to be
+   identifiable without reading the tab strip. Only shown once a second pane
+   exists — see paint() in shell.js. */
+#panes.multi .pane.focus .pbody{box-shadow:inset 2px 0 0 var(--accent)}
+#panes.multi .pane:not(.focus) .tstrip{opacity:.62}
 .tacts{display:flex;align-items:center;gap:3px;padding:0 6px;flex:none;
   border-left:1px solid var(--border-soft)}
 .tacts:empty{display:none}

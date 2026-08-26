@@ -134,6 +134,27 @@ html[data-mode="light"] .composer .chip.on{color:#fff}
 .anno .tag{font-size:9.5px;color:var(--fg-dim);border:1px solid var(--border-soft);
   padding:1px 5px;border-radius:4px}
 
+/* M4 · a moved mark is not a faded one: its text is still in the document,
+   somewhere else. Only an orphan dims. */
+.anno.moved{opacity:1}
+.anno .tag.moved{color:var(--fg-muted);border-color:var(--anno-color)}
+.anno .q.now{
+  border-left-style:dashed;color:var(--fg-dim);font-style:italic;
+}
+.anno .q.now::before{content:'now: ';font-style:normal;opacity:.7}
+
+/* M4 · the one string that must not be filed under "resolved" */
+.anno-altered{
+  padding:9px 14px;font-size:11.5px;color:var(--fg);
+  background:var(--bg-soft);border-bottom:1px solid var(--border-soft);
+}
+
+/* M8 · one quiet coverage line. No bar, no colour, no gate, and nowhere else. */
+.anno-coverage{
+  padding:9px 14px;font-size:10.5px;font-family:var(--mono);
+  color:var(--fg-dim);border-top:1px solid var(--border-soft);
+}
+
 /* bar button */
 .bar .rev{position:relative}
 .bar .rev .cnt{

@@ -700,7 +700,30 @@ independent of all of them, is the phase's only **M**, and is the only item here
 another phase waits on — N6's plan-text half. See
 [`anchoring-plan.md`](anchoring-plan.md).
 
-- [ ] **M1 · Re-anchor to the nearest occurrence, not the first.** Collect all
+> **Shipped 2026-08-26.** All eight. Two things the plan did not say, found by
+> building it:
+>
+> **M2 recovers nothing for a single-line anchor.** The step is *the anchor's own
+> lines, longest first* — and a one-line anchor's only line is the anchor, which
+> has already failed. So the measured 62.6%/40.2% recovery is a recovery of
+> *multi-line* anchors; a mark on one sentence that is rewritten is orphaned, as
+> before. That is the step as measured, not a shortfall against it, but the
+> register read as though it covered every mark and it does not.
+>
+> **`MIN_FUZZY = 12` is this implementation's own guard and rests on no
+> measurement.** Without a floor, the longest surviving line of a deleted block
+> can be `---`, and the fallback re-anchors the mark onto an unrelated rule with
+> full confidence. Twelve characters was chosen, not measured; the precision
+> figures above were taken before it existed, so it can only have raised them.
+> Test 15 pins the behaviour either way.
+>
+> M6 also carries a migration the plan did not ask for: the old
+> `.rubricator/notes.json` is split into per-document files on first read and
+> kept beside them as `notes.json.pre-v1`. Rewriting keys in place and deleting
+> the original would have been the smaller change and would have left nothing to
+> go back to.
+
+- [x] **M1 · Re-anchor to the nearest occurrence, not the first.** Collect all
       `indexOf` occurrences and pick the one nearest the stored `lineStart`.
       Corpus-wide, first-occurrence ambiguity is a rounding error — **8 bad
       anchors in 25,094 realistic ones (0.03%)** across five repos — so this is
@@ -712,7 +735,7 @@ another phase waits on — N6's plan-text half. See
       its own rule, and a repeated heading anchors to the section it was made
       in. **S**
 
-- [ ] **M2 · Fall back to the longest surviving line.** On a miss, try the
+- [x] **M2 · Fall back to the longest surviving line.** On a miss, try the
       anchor's own lines, longest first, by plain `indexOf`; on a hit set the
       anchor status to `moved` and keep both texts. Measured over 2,985 commit
       pairs in five repos, 6.6% of substantive anchors vanish per revision, and
@@ -724,7 +747,7 @@ another phase waits on — N6's plan-text half. See
       whose longest line survived comes back as `moved`, with the original text
       still readable in the tray. **S**
 
-- [ ] **M3 · Never overwrite the recorded quote.** `review.js:125` does
+- [x] **M3 · Never overwrite the recorded quote.** `review.js:125` does
       `if (!it.partial) it.quote = srcSlice(...)` on every successful re-anchor,
       and `reanchor()` calls `save()`, so it persists. A no-op for whole-block
       and partial marks — but for a **section** mark, where `anchor` is the
@@ -736,7 +759,7 @@ another phase waits on — N6's plan-text half. See
       text it was made against, and `notes.json` never loses a `quote` it once
       held. **S**
 
-- [ ] **M4 · Three anchor states, and stop calling deleted text resolved.**
+- [x] **M4 · Three anchor states, and stop calling deleted text resolved.**
       One bit does two jobs: `review.js:347` prints `N · M resolved`, `:370`
       tags the item `gone`, `:414` drops it from the export, and seven
       `workspace.js` sites filter it out — so a deleted section and a
@@ -752,7 +775,7 @@ another phase waits on — N6's plan-text half. See
       counted in a header line rather than filed under *resolved*, and an old
       `notes.json` loads without migration. **S**
 
-- [ ] **M5 · Say what moved.** `reanchor()` already knows which items moved and
+- [x] **M5 · Say what moved.** `reanchor()` already knows which items moved and
       which lost their text. Print it in the status strip on open — *7 of your
       marks moved, 2 lost their text*. No LCS, no gutter, no stored snapshots
       (X16: wholesale rewrites are 0.0–3.2% of 2,982 markdown revisions and the
@@ -760,7 +783,7 @@ another phase waits on — N6's plan-text half. See
       *Done when:* reopening a document an agent rewrote states the two counts
       before you scroll. **S**
 
-- [ ] **M6 · `notes.json` becomes a directory, with relative keys, `at`, `by` and
+- [x] **M6 · `notes.json` becomes a directory, with relative keys, `at`, `by` and
       a version.** `write_notes` (`workspace.py:526`) documents itself as *"one
       file per repo, keyed by absolute document path"* and does exactly that; the
       one key on this machine is an absolute README path, so the file cannot
@@ -805,7 +828,7 @@ another phase waits on — N6's plan-text half. See
       line and loses the one this tool wrote; and `git status` after a live run
       shows `.rubricator/`. **M**
 
-- [ ] **M7 · A verb cannot land on a document you are not looking at.**
+- [x] **M7 · A verb cannot land on a document you are not looking at.**
       `shell.js:390-397` focuses a pane on mousedown, so select-and-mark is
       safe — but click in pane A, hover a block there, move to pane B without
       clicking and press a verb, and the mark is written to the wrong document.
@@ -820,7 +843,7 @@ another phase waits on — N6's plan-text half. See
       and says why, and the focused pane is identifiable without reading the tab
       strip. **S**
 
-- [ ] **M8 · One quiet coverage line in the tray.** `review.js` already builds
+- [x] **M8 · One quiet coverage line in the tray.** `review.js` already builds
       `blocks` on every `openDoc` and `paint()` already marks the ones carrying
       a mark. Print `3 of 41 blocks marked`. No percentage bar, no colour, no
       gate, no nag, no persistence, nowhere else in the interface — this is the

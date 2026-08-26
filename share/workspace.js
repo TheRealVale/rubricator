@@ -17,11 +17,18 @@ function api(path, body, cb, fail){
   var o = { method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type':'application/json'} };
   if (body !== undefined) o.body = JSON.stringify(body);
   fetch(BASE + '/' + path, o)
-    .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+    /* the body of a refusal is the reason for it — a server that answers 409
+       with an explanation is no use if the page throws the explanation away */
+    .then(function(r){
+      if (r.ok) return r.json();
+      return r.json().then(
+        function(j){ return Promise.reject({ status: r.status, body: j }); },
+        function(){ return Promise.reject({ status: r.status }); });
+    })
     /* two-argument then, not .catch: a bug thrown inside cb must not be
        reported back as "the server failed" and run the failure path too */
     .then(function(j){ try { cb && cb(j); } catch(e){ console.error('rubricator:', e); } },
-          function(){ try { fail && fail(); } catch(e){} });
+          function(e){ try { fail && fail(e || {}); } catch(err){} });
 }
 
 /* document bodies are left on disk in the live tier and pulled in when a
@@ -72,8 +79,17 @@ function act(verb, id, text, ok){
 /* notes: the server owns them when there is one, and the browser's copy is
    kept in step so the same notes show up if you open the file on its own */
 var DISK = D.notes || {};
+/* M6 · marks are filed under a path relative to the enclosing git repository,
+   so a store written in one clone loads in a second clone at a different path,
+   and `md .` and `md docs/` in one repository read the same marks. The server
+   computes the key — the page does not reimplement the git walk-up — and hands
+   it over as `nkey`. Falling back to `abs` keeps a page built by an older
+   build readable. review.js's own localStorage key is untouched. */
+function nkeyOf(d){ return (d && (d.nkey || d.abs)) || ''; }
 if (can('notes') && window.MDReview){
-  window.MDReview.storage.get = function(key, path){
+  window.MDReview.identity = { by: D.by || '' };
+  window.MDReview.storage.get = function(key, path, nkey){
+    path = nkey || path;
     var mine = null, theirs = DISK[path] || null;
     try { mine = JSON.parse(localStorage.getItem(key) || 'null'); } catch(e){}
     if (!theirs) { if (mine) pushUp(path, mine); return mine; }
@@ -88,7 +104,8 @@ if (can('notes') && window.MDReview){
     DISK[path] = store;
     api('notes', { path: path, store: store });
   }
-  window.MDReview.storage.set = function(key, val, path){
+  window.MDReview.storage.set = function(key, val, path, nkey){
+    path = nkey || path;
     try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){}
     DISK[path] = val;
     clearTimeout(window.__noteT);
@@ -98,7 +115,14 @@ if (can('notes') && window.MDReview){
           /* This was a toast, cleared after 1,900 ms and logged nowhere — the
              sole report that the tool had failed to keep the one thing it
              exists to keep. It now stays in the strip until a save succeeds. */
-          function(){ noteTrouble(path.split('/').pop()); });
+          function(e){
+            var b = e && e.body;
+            /* O2 · a second root is read-only, and the refusal says why. The
+               alternative — what shipped — was writing the mark into the first
+               repository and reporting success. */
+            if (b && b.error === 'read-only') noteTrouble(path.split('/').pop(), b.reason);
+            else noteTrouble(path.split('/').pop());
+          });
     }, 400);
   };
 }
@@ -107,8 +131,8 @@ if (can('notes') && window.MDReview){
    written on, and the navigator. Whoever stores it, the window is told. */
 if (window.MDReview){
   var _set = window.MDReview.storage.set;
-  window.MDReview.storage.set = function(key, val, path){
-    _set.call(this, key, val, path);
+  window.MDReview.storage.set = function(key, val, path, nkey){
+    _set.call(this, key, val, path, nkey);
     clearTimeout(window.__markT);
     window.__markT = setTimeout(function(){
       if (window.Shell){ Shell.paint(); Shell.nav(); }
@@ -131,7 +155,7 @@ function hash(s){ var h=5381,i=s.length; while(i) h=(h*33^s.charCodeAt(--i))>>>0
    Disk first, because disk is the durable one. `localStorage` remains the
    static tier's only store, so it stays as the fallback rather than going. */
 function annosFor(doc){
-  var st = DISK[doc.abs] || null;
+  var st = DISK[nkeyOf(doc)] || null;
   if (!st){
     try {
       var raw = localStorage.getItem('md-review:' + hash(doc.abs));
@@ -144,6 +168,14 @@ function annosFor(doc){
 function allAnnos(){
   return D.docs.reduce(function(acc, d){ return acc.concat(annosFor(d)); }, []);
 }
+/* M4 · the aggregate views filtered on one bit that meant two things. A mark
+   whose text moved is still a mark; only one whose text is gone is not. Legacy
+   stores carry `state:'stale'` and are read, never rewritten, here too. */
+function anchorOf(i){
+  if (i.anchorState) return i.anchorState;
+  return i.state === 'stale' ? 'orphaned' : 'attached';
+}
+function isLive(i){ return anchorOf(i) !== 'orphaned'; }
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
@@ -336,7 +368,7 @@ function viewSearch(){
   if (docs.length){
     out.push('<div class="grp">Documents <span class="c">' + docs.length + '</span></div>');
     docs.slice(0, 25).forEach(function(x){
-      var an = annosFor(x.d).filter(function(i){ return i.state !== 'stale'; }).length;
+      var an = annosFor(x.d).filter(isLive).length;
       out.push('<div class="row" data-doc="' + esc(x.d.rel) + '" data-q="' + esc(q) + '">' +
         '<div class="t">' + esc(x.d.title) + '<span class="p">' + esc(x.d.rel) + '</span></div>' +
         '<div class="snip">' + snippet(x.d.text, q) + '</div>' +
@@ -376,7 +408,7 @@ function viewSearch(){
 }
 
 function noteCount(d){
-  return annosFor(d).filter(function(i){ return i.state !== 'stale'; }).length;
+  return annosFor(d).filter(isLive).length;
 }
 /* There were two predicates for one idea. The navigator's ⚠ fired on
    `targetChurn > 0` and the Stale surface additionally required the document to
@@ -509,7 +541,7 @@ function viewNotes(){
   if (!items.length) return '<div class="empty">No annotations yet.<br><br>' +
     'Open a document with <span class="f">md &lt;file&gt;</span>, mark it up, and your notes show up here — ' +
     'across every document in the repo.</div>';
-  var open = items.filter(function(i){ return i.state !== 'stale'; });
+  var open = items.filter(isLive);
   var out = ['<div class="qnote">' + open.length + ' open · ' + (items.length - open.length) + ' resolved</div>'];
   var byVerb = {};
   open.forEach(function(i){ (byVerb[i.verb] = byVerb[i.verb] || []).push(i); });
@@ -893,7 +925,7 @@ function buildDossier(){
     L.push('');
   }
   var an = [];
-  docs.forEach(function(x){ annosFor(x.d).filter(function(i){ return i.state!=='stale'; })
+  docs.forEach(function(x){ annosFor(x.d).filter(isLive)
     .forEach(function(i){ an.push('  ' + x.d.rel + ':' + i.lineStart + ' [' + i.verb + '] ' + (i.note||'')); }); });
   if (an.length){ L.push('My open notes on those documents:'); L.push.apply(L, an); L.push(''); }
   if (prompts.length){
@@ -1144,7 +1176,7 @@ function mountReview(S){
     raw:  S.premapped ? S.out.raw : d.text,
     body: S.premapped ? S.out.raw : S.out.body,
     fmLines: S.out.fmLines,
-    META: { path: d.abs, rel: d.rel, name: d.rel.split('/').pop(),
+    META: { path: d.abs, rel: d.rel, name: d.rel.split('/').pop(), nkey: nkeyOf(d),
             dir: d.abs.replace(/[^/]*$/, ''), base: 'file://' + d.abs }
   });
   var th = document.querySelector('#tray .th .t');
@@ -1366,7 +1398,7 @@ function navSessions(){
 
 function navNotes(){
   marks();
-  var items = allAnnos().filter(function(i){ return i.state !== 'stale'; });
+  var items = allAnnos().filter(isLive);
   if (!items.length) return { html:'<div class="empty">Nothing marked up yet.<br><br>' +
     'Open a document, select a line and press <b>c</b>, <b>?</b>, <b>x</b>, <b>e</b> or <b>a</b>.</div>',
     foot:'' };
@@ -1437,7 +1469,7 @@ function navAll(){
   }
 
   var notes = allAnnos().filter(function(i){
-    return i.state !== 'stale' && (!q || hit(i.note) || hit(i.quote) || hit(i.heading));
+    return isLive(i) && (!q || hit(i.note) || hit(i.quote) || hit(i.heading));
   }).sort(function(a, b){ return b._doc.mtime - a._doc.mtime || a.lineStart - b.lineStart; });
   if (notes.length){
     counts.push(notes.length + ' note' + (notes.length > 1 ? 's' : ''));
@@ -1535,7 +1567,7 @@ function palSearch(q, kind){
 
   if (want('note') && q){
     var notes = allAnnos().filter(function(i){
-      return i.state !== 'stale' && (hit(i.note) || hit(i.quote) || hit(i.heading));
+      return isLive(i) && (hit(i.note) || hit(i.quote) || hit(i.heading));
     });
     total += notes.length;
     groups.push({ label:'Notes', rows: notes.slice(0, 5).map(function(i){
@@ -1660,11 +1692,12 @@ function withheldNote(){
 }
 
 /* the last note that failed to reach disk, if any — held until one succeeds */
-var noteFail = '';
-function noteTrouble(name){
-  if (noteFail === name) return;
-  noteFail = name;
-  if (name) console.error('rubricator: could not write notes for ' + name + ' to .rubricator/notes.json');
+var noteFail = '', noteWhy = '';
+function noteTrouble(name, why){
+  if (noteFail === name && noteWhy === why) return;
+  noteFail = name; noteWhy = why || '';
+  if (name) console.error('rubricator: could not write notes for ' + name +
+                          (why ? ' — ' + why : ' to .rubricator/notes/'));
   stat();
 }
 
@@ -1677,7 +1710,9 @@ function stat(){
      counted from history.jsonl, which outlives the transcripts. */
   var R = D.retention;
   if (R && R.lost) bits.push(R.readable + '/' + R.known + ' readable');
-  if (noteFail) bits.push('<b class="warn">notes for ' + esc(noteFail) + ' are not on disk</b>');
+  if (noteFail) bits.push('<b class="warn" title="' + esc(noteWhy ||
+      'The server refused the write. Your marks are in this browser only until it succeeds.') +
+      '">notes for ' + esc(noteFail) + ' are not on disk</b>');
   Shell.status(bits.join(' · '),
     R && R.lost
       ? R.lost + ' of ' + R.known + ' sessions can be found but not read — Claude Code '

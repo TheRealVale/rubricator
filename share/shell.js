@@ -91,6 +91,9 @@ function show(p){
 }
 
 function paint(){
+  /* M7 · with one pane there is nothing to distinguish, and a permanent accent
+     rail would be noise. The marker appears when a second pane does. */
+  $('panes').classList.toggle('multi', panes.length > 1);
   panes.forEach(function(p, i){
     p.el.classList.toggle('focus', i === focus);
     show(p);
