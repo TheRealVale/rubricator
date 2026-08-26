@@ -687,5 +687,42 @@ else
   skip "18 · static notes bridge" "no node"
 fi
 
+# ── 19 · md --json is facts, and only facts ─────────────────────────────────
+# Q5. The machine-readable door: a flag, not a protocol. Two things must never
+# come through it — the staleness verdict, which L4 stopped the surface claiming
+# and which a field called `stale` would put straight back, and prompt text,
+# which is N2's rule applied to a second write path.
+"$MD" --json "$REPO" > "$WORK/m.json" 2>"$WORK/m.err"; jrc=$?
+"$MD" --json --sessions "$REPO" > "$WORK/ms.json" 2>>"$WORK/m.err"; src=$?
+python3 - "$WORK/m.json" "$WORK/ms.json" "$jrc" "$src" <<'PYEOF' > "$WORK/m.txt" 2>&1
+import json, sys
+try:
+    d = json.load(open(sys.argv[1])); ds = json.load(open(sys.argv[2]))
+except Exception as e:
+    print("XX not parseable: %s" % e); sys.exit(1)
+blob = json.dumps(ds)
+checks = {
+  "exits 0":                          sys.argv[3] == "0" and sys.argv[4] == "0",
+  "parseable JSON":                   True,
+  "documents, with headings":         bool(d["documents"]) and "headings" in d["documents"][0],
+  "carries a version":                d.get("v") == 1,
+  "no staleness verdict field":       "stale" not in d,
+  "activity is counts, not a verdict": all(
+      set(v) <= {"commits", "lastCommit", "namedFiles", "commitsInNamedFiles"}
+      for v in d["activity"].values()),
+  "no document bodies":               all("text" not in x for x in d["documents"]),
+  "no prompt array":                  "prompts" not in ds,
+  "and it says how many it withheld": isinstance(ds.get("promptsWithheld"), int),
+  "sessions are there":               bool(ds.get("sessions")),
+}
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "19 · md --json prints facts, no verdict, no prompt text"
+else
+  no "19 · the machine-readable door is wrong" "$(grep '^XX' "$WORK/m.txt" | tr '\n' ' ')$(head -2 "$WORK/m.err")"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

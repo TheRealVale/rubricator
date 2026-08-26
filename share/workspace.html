@@ -92,6 +92,31 @@ html[data-mode="light"] .act button{color:#fff}
 /* O2 · which repository a row is from, in a multi-root workspace, and whether
    its marks can be written. Only the first root has a notes store. */
 .tfile .kind.repo{border-color:var(--border);color:var(--fg-muted)}
+/* Q2 · what a document says about itself, in its own words */
+.tfile .kind.st{border-color:var(--accent-soft);color:var(--fg-muted)}
+
+/* ── Q1 · which conversations touched this document ────────────────────── */
+.dsess{margin:14px 0 0;font-size:12px;line-height:1.6}
+.dsess b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg-dim);font-weight:600;margin-bottom:6px}
+.dsess.empty{color:var(--fg-dim);border-left:2px solid var(--border-soft);padding-left:11px}
+.dsess.empty code{font-family:var(--mono);font-size:11px}
+.dsess a.s{display:flex;gap:10px;align-items:baseline;cursor:pointer;
+  padding:3px 0;color:var(--fg-muted);text-decoration:none}
+.dsess a.s:hover{color:var(--fg)}
+.dsess a.s .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsess a.s .w{font-size:10.5px;color:var(--fg-dim);font-family:var(--mono);flex:none}
+
+/* ── Q3 · the dossier, read rather than only copied ────────────────────── */
+pre.dossier{
+  font-family:var(--mono);font-size:11.5px;line-height:1.62;color:var(--fg-muted);
+  background:var(--bg-elev);border:1px solid var(--border-soft);border-radius:10px;
+  padding:16px 18px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;margin:4px 0 0;
+}
+.saved{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 2px}
+.saved .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-dim)}
+.nvctl .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--fg-dim);align-self:center;margin-right:2px}
 .docnote{font-size:12px;color:var(--yellow);border:1px solid color-mix(in srgb,var(--yellow) 35%,transparent);
   padding:9px 13px;margin-bottom:22px}
 

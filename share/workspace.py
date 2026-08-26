@@ -74,6 +74,35 @@ MERMAID_FENCE = re.compile(r"^[ \t]*(?:```|~~~)[ \t]*mermaid\b", re.M)
 WORD = re.compile(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9_-]{2,}")
 
 
+FM_STATUS = re.compile(r"^status\s*:\s*(.+?)\s*$", re.I | re.M)
+
+
+def front_status(text):
+    """Q2. `status:` out of YAML front matter, and out of nowhere else.
+
+    A document that still says *planned* while the code shipped is a falsifiable
+    claim about itself — unlike a churn count, which is a number you have to
+    interpret. So it is worth a facet: filter to everything that still says
+    planned, sort by age, and the lies are in front of you, with rubricator
+    having asserted nothing it has to defend.
+
+    Front matter only. Measured before writing this: one repository had ~20
+    distinct freeform status shapes across 80 files, of which exactly one
+    repeated — so a prose parser is a week of whack-a-mole for a signal that
+    would then be a guess. A document with no front matter has no status here,
+    and is absent from the facet rather than assigned one."""
+    if not text.startswith("---"):
+        return ""
+    end = text.find("\n---", 3)
+    if end < 0:
+        return ""
+    m = FM_STATUS.search(text[3:end])
+    if not m:
+        return ""
+    v = m.group(1).strip().strip("\"'")
+    return v[:40] if v else ""
+
+
 def read_doc(path, rel, root, allow_extract=False):
     """Markdown is read straight off disk. A PDF or a Word file has to be put
     through an extractor, which is slow enough that the index will not wait for
@@ -100,9 +129,13 @@ def read_doc(path, rel, root, allow_extract=False):
         except Exception:
             pass
     st = path.stat()
-    return {"rel": rel, "abs": str(path), "kind": "md", "title": title, "headings": heads,
-            "links": links, "words": len(text.split()), "bytes": st.st_size,
-            "mtime": int(st.st_mtime), "text": text}
+    d = {"rel": rel, "abs": str(path), "kind": "md", "title": title, "headings": heads,
+         "links": links, "words": len(text.split()), "bytes": st.st_size,
+         "mtime": int(st.st_mtime), "text": text}
+    status = front_status(text)
+    if status:
+        d["status"] = status
+    return d
 
 
 _X = None
@@ -826,6 +859,12 @@ def read_notes(root):
     """{key: store} for every document with marks. The wire format did not move
     — one object, as before — only the keys and the disk layout."""
     _legacy_split(root)
+    # Withdraw the hidden-ness at index time rather than at first mark: someone
+    # whose repository carries that line already marked something once, and the
+    # point of removing it is that they can see the file and commit it. Waiting
+    # for the next mark means the run that shows them the marks is not the run
+    # that reveals where they live. No-op when the line is not there.
+    unexclude(root)
     d = notes_dir(root)
     out = {}
     if not d.is_dir():
@@ -881,6 +920,85 @@ def write_notes(root, key, store):
         return None
     unexclude(root)
     return len(read_notes(root))
+
+
+# ── the machine-readable door ────────────────────────────────────────────────
+MACHINE_V = 1
+
+
+def machine_readable(data):
+    """Q5. `md --json` — the door for a script, a cron job, or an agent that has
+    never heard of MCP. A flag, not a protocol: no process, no lifetime, no spec
+    dependency, and standing rule 5 is the reason it is not an MCP server.
+
+    Two rules about what is in here, and both are subtractions.
+
+    **Facts, not judgements.** The page's `stale` map is the same numbers under
+    a word that decides for you. L4 already stopped the surface calling it a
+    quality score; a machine-readable field called `stale` would put the verdict
+    straight back, through a door where nobody reads the caveat under the table.
+    It is `activity` here, and it carries the counts it always carried: how many
+    commits landed in the files this document names, and when the last one was.
+    What that means is the reader's call.
+
+    **No prompt text.** N2's rule, applied to a second write path — `--out`
+    already refuses it, and a door built for automation is exactly where a
+    corpus of everything you have ever typed would leak quietly. The count is
+    here so a caller knows what it is not getting.
+
+    Document bodies are out too, for size rather than principle: this is an
+    index, and the `abs` path is right there if you want the file."""
+    docs = []
+    for d in data["docs"]:
+        out = {k: d[k] for k in ("rel", "abs", "kind", "title", "mtime", "bytes", "words")
+               if k in d}
+        out["headings"] = d.get("headings") or []
+        out["links"] = d.get("links") or []
+        if d.get("nkey"):
+            out["notesKey"] = d["nkey"]
+        if d.get("untracked"):
+            out["untracked"] = True
+        if d.get("status"):
+            out["status"] = d["status"]
+        if d.get("pages"):
+            out["pages"] = d["pages"]
+        store = (data.get("notes") or {}).get(d.get("nkey") or "")
+        items = (store or {}).get("items") or []
+        if items:
+            out["marks"] = [
+                {k: it[k] for k in ("verb", "note", "quote", "lineStart", "lineEnd",
+                                    "anchorState", "at", "by", "heading") if it.get(k) not in (None, "")}
+                for it in items
+            ]
+        docs.append(out)
+
+    activity = {}
+    for rel, st in (data.get("stale") or {}).items():
+        activity[rel] = {"commits": st.get("commits", 0),
+                         "lastCommit": st.get("last"),
+                         "namedFiles": st.get("targets") or [],
+                         "commitsInNamedFiles": st.get("targetChurn", 0)}
+
+    out = {
+        "v": MACHINE_V,
+        "generated": data["generated"],
+        "root": data["root"],
+        "roots": data["roots"],
+        "notesRoot": data.get("notesRoot"),
+        "hasGit": data["hasGit"],
+        "documents": docs,
+        "activity": activity,
+    }
+    if data.get("withSessions"):
+        out["sessions"] = {
+            sid: {k: m[k] for k in ("p", "t", "n", "a", "b", "live", "files") if k in m}
+            for sid, m in (data.get("sessions") or {}).items()
+        }
+        out["touches"] = data.get("touches") or {}
+        out["retention"] = data.get("retention")
+        # the corpus itself never comes through this door — see the docstring
+        out["promptsWithheld"] = len(data.get("prompts") or []) or data.get("promptsWithheld", 0)
+    return out
 
 
 # ── the live tier ────────────────────────────────────────────────────────────
@@ -1121,7 +1239,15 @@ def main():
     args = sys.argv[1:]
     with_sessions = "--sessions" in args
     live = "--serve" in args
-    deep = "--deep" in args
+    # Q1 · deep is the default now. Work you delegated to a subagent is recorded
+    # in its own transcript, so without it a session that did most of its editing
+    # through subagents looks like it touched nothing — and that is the session
+    # you are most likely to be looking for. Measured on this machine
+    # 2026-08-26: 0.86 s shallow against 1.07 s deep, for 1,831 files with a
+    # session instead of 1,526 (+20%) and 2,674 touch entries instead of 2,104
+    # (+27%). A fifth of a second for a fifth more of the answer.
+    # `--deep` is still accepted, and is now a no-op; `--shallow` opts out.
+    deep = "--shallow" not in args
     stay = "--stay" in args
     port = 0
     for a in args:
@@ -1142,7 +1268,9 @@ def main():
         try:
             import actions as _A
             cfg = _A.config()
-            deep = deep or bool(cfg.get("deep"))
+            # the stored setting can only turn it off now; it is on by default
+            if cfg.get("deep") is False:
+                deep = False
             idle = int(cfg.get("idle") or 0) or None
         except Exception:
             idle = None
@@ -1182,6 +1310,10 @@ def main():
 
     if os.environ.get("RUBRICATOR_JSON"):
         json.dump(data, sys.stdout)
+        return 0
+    if os.environ.get("RUBRICATOR_MACHINE"):
+        json.dump(machine_readable(data), sys.stdout, ensure_ascii=False, indent=1)
+        sys.stdout.write("\n")
         return 0
     share = Path(os.environ.get("RUBRICATOR_HOME", Path(__file__).resolve().parent))
     out = os.environ.get("RUBRICATOR_OUT")

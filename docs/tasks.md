@@ -1293,7 +1293,35 @@ on a corpus that now tells the truth. Each reads from a subsystem K–O corrects
 built earlier, every one would present a confident answer computed from a signal
 this register does not trust. Q has no plan document of its own.
 
-- [ ] **Q1 · Document → sessions, designed for the empty case.** `D.touches`
+> **Shipped 2026-08-26.** All five, with three deviations worth the record.
+>
+> **Q2's facet keys off the leading word, not the whole value.** The item assumed
+> `status:` values repeat and they do not: this repository has 13 distinct shapes
+> across 16 documents that carry one, of which `plan — <date>` is the only one
+> appearing more than twice, so a facet on the whole string would be one chip per
+> document. The key is the first word; the row shows the value verbatim and the
+> tooltip shows all of it. Nothing is mapped or merged. Two documents whose
+> `status:` is a sentence (`G1 shipped · G2–G3 partly`) get **no key and no
+> chip** rather than a chip called `g` — the field is there, it just is not a
+> status, and saying so is better than inventing one.
+>
+> **Q4 groups the copy by verb, not by document.** The item asked for both
+> *grouped by document* and *byte-comparable to what is rendered*, and the
+> surface groups by verb. The second requirement is the stronger one, so the
+> screen won. One function walks the data and both the render and the clipboard
+> read it, so they cannot drift apart later.
+>
+> **Q1's `--deep` measurement moved and the conclusion held.** Re-measured
+> 2026-08-26: 0.86 s shallow against 1.07 s deep, not 1.02 vs 1.01 — the gap is
+> five times wider than the register recorded, and still a fifth of a second for
+> 1,831 files with a session instead of 1,526 (+20%). `--shallow` is the new opt
+> out; `--deep` is accepted and does nothing, so nobody's script breaks.
+>
+> Q3 also cost a settings key: saved searches are `{name, query}` in
+> `config.json` behind the whitelist, because rule 2 forbids `localStorage` for
+> anything that must survive a restart and every run is a new origin.
+
+- [x] **Q1 · Document → sessions, designed for the empty case.** `D.touches`
       maps 1,312 files back to session ids at the 2026-08-23 count, and has
       exactly two consumers: a search-ranking denominator and 9×9 px dots. `G4` has been `[ ]` since it
       was written. Build it — but design the empty state first, because it *is*
@@ -1308,7 +1336,7 @@ this register does not trust. Q has no plan document of its own.
       names the setting, commit dots have hover titles, and `--deep` is no
       longer a flag. **M** — depends on N5.
 
-- [ ] **Q2 · `status:` from front matter, as a facet.** A document that still
+- [x] **Q2 · `status:` from front matter, as a facet.** A document that still
       says *planned* while the code shipped is a falsifiable claim, unlike a
       churn count. Parse `status:` from **YAML front matter only** — no
       first-line prose matching, no state machine, no classifier: ~20 distinct
@@ -1323,7 +1351,7 @@ this register does not trust. Q has no plan document of its own.
       front matter carries it, and documents without front matter are absent
       rather than guessed at. **S**
 
-- [ ] **Q3 · The dossier is rendered, and what persists is the query.**
+- [x] **Q3 · The dossier is rendered, and what persists is the query.**
       `buildDossier()` (`workspace.js:757-794`) is assembled on every keystroke
       and thrown away — it is only ever copied to the clipboard, and it drops
       the excerpts `exportQuote` already knows how to produce. Render it on
@@ -1334,7 +1362,7 @@ this register does not trust. Q has no plan document of its own.
       today, and no assembled dossier is ever written to disk. **M** — depends
       on L3.
 
-- [ ] **Q4 · The Notes surface copies what it renders.** Give it a Copy that
+- [x] **Q4 · The Notes surface copies what it renders.** Give it a Copy that
       emits exactly what is on screen — `rel:line [verb] note`, grouped by
       document — with a header saying *line numbers as of when each document was
       last opened*. That header is not decoration: `reanchor()` has exactly one
@@ -1348,7 +1376,7 @@ this register does not trust. Q has no plan document of its own.
       to what is rendered, and the cross-document path carries the header. **S**
       — depends on L3, M1.
 
-- [ ] **Q5 · `md --json` — facts, not judgements.** The machine-readable door
+- [x] **Q5 · `md --json` — facts, not judgements.** The machine-readable door
       for a local CLI is a flag, not a protocol: `workspace.py:751` already
       returns documents, stale, sessions, prompts and touches as one JSON
       structure. Emit it to stdout. It works from Bash, from a script, from cron

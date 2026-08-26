@@ -728,7 +728,10 @@ function openDoc(m){
   if (!booted){ booted = true; hookMode(); }
 }
 
+/* Q3 · the dossier drops the excerpts this already knows how to produce, so it
+   is exported rather than reimplemented beside it. */
 window.MDReview = { open: openDoc, count: openCount, storage: Storage,
+                    quote: exportQuote,
                     reload: function(){ if (doc) openDoc({ doc: doc, META: META, raw: raw,
                                                            body: body, fmLines: fmLines }); } };
 if (window.__md) openDoc(window.__md);

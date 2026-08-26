@@ -61,10 +61,33 @@ SETTABLE = {
     "deep":         lambda v: isinstance(v, bool),
     "idle":         lambda v: isinstance(v, int) and 30 <= v <= 86400,
     "theme":        lambda v: v in THEMES,
+    # Q3 · a saved search is {name, query} and nothing else. Standing rule 4:
+    # persist the selection, never the assembly — what is stored is the question,
+    # and the answer is rebuilt from today's index every time it is opened. A
+    # saved dossier would be a snapshot that quietly goes stale; this cannot.
+    # Rule 2 puts it here rather than in localStorage, because it has to survive
+    # a restart and every run is a new origin.
+    "searches":     lambda v: _searches_ok(v),
 }
+
+
+def _searches_ok(v):
+    if not isinstance(v, list) or len(v) > 50:
+        return False
+    for x in v:
+        if not isinstance(x, dict) or set(x) - {"name", "query"}:
+            return False
+        if not isinstance(x.get("name"), str) or not isinstance(x.get("query"), str):
+            return False
+        if not (0 < len(x["name"]) <= 60) or not (0 < len(x["query"]) <= 200):
+            return False
+    return True
 THEMES = ("rubric", "slate", "bone")
-DEFAULTS = {"terminal": "", "allow_launch": False, "editor": "", "deep": False,
-            "idle": 120, "theme": "rubric"}
+# Q1 · `deep` defaults to True now: a session that delegated its editing to
+# subagents otherwise looks like it touched nothing, for a fifth of a second.
+# The setting survives so it can be turned off.
+DEFAULTS = {"terminal": "", "allow_launch": False, "editor": "", "deep": True,
+            "idle": 120, "theme": "rubric", "searches": []}
 
 
 def _is_program(v):

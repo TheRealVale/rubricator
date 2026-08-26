@@ -54,6 +54,11 @@ OPTIONS
   -h, --help        show this help
   -v, --version     show version
       --vendor      re-download the render libraries and exit
+      --json [DIR]  print the index to stdout as JSON and exit: documents,
+                    headings, your marks, and how much the files each document
+                    names have changed. Starts no server and opens nothing.
+                    Add --sessions for session ids and file lists — never for
+                    prompt text, which does not come through this door.
 
 WORKSPACE
   -w, --workspace [DIR]   the same workspace, named explicitly — safe to script
@@ -84,8 +89,10 @@ REVIEW
 MORE
   md serve [DIR…]         keep a workspace up on a fixed port (--port N), instead of
                           one that closes with its window
-      --deep              count what subagents changed too, so delegated work is
-                          attributed to the session that asked for it
+      --shallow           skip subagent transcripts. Delegated work is counted by
+                          default, because a session that did most of its editing
+                          through subagents otherwise looks like it touched
+                          nothing. `--deep` is still accepted and now does nothing.
 
 EXAMPLES
   md                       # the workspace for this directory
@@ -210,7 +217,7 @@ ws_run() {
     urlfile="$(mktemp "$CACHE/.serve.XXXXXX")"
     RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OPEN="$opendoc" \
       RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
-      nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} --serve >"$urlfile" 2>/dev/null &
+      nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${SHALLOW:+--shallow} --serve >"$urlfile" 2>/dev/null &
     local i=0 url=""
     while [ $i -lt 100 ]; do
       url="$(head -1 "$urlfile" 2>/dev/null || true)"
@@ -231,7 +238,7 @@ ws_run() {
 
   file="${out:-$CACHE/workspace-$(printf '%s' "$abs" | shasum -a 1 | cut -c1-10).html}"
   RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
-    "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} >/dev/null || exit 1
+    "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${SHALLOW:+--shallow} >/dev/null || exit 1
   if [ "$doopen" = 1 ] && [ -z "$out" ]; then
     url="file://$(urlenc "$file")"
     _c="$(chrome_app)"
@@ -251,6 +258,29 @@ case "$THEME" in rubric|slate|bone) ;; *) THEME="rubric" ;; esac
 
 # review modes hand off to the python runner (they block on a browser round-trip)
 case "${1:-}" in
+  --json)
+    # Q5 · the machine-readable door. A flag, not a protocol: it works from a
+    # script, from cron, and from an agent that has never heard of MCP, and it
+    # adds no process and no lifetime. Facts only — see machine_readable() in
+    # share/workspace.py for what is deliberately not in here.
+    shift
+    J_DIRS=(); J_SESSIONS=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --sessions) J_SESSIONS="--sessions" ;;
+        --deep)     J_SESSIONS="--sessions" ;;          # default now; kept so scripts do not break
+        --shallow)  SHALLOW=1 ;;
+        -*)         die "unknown --json option: $1" ;;
+        *)          J_DIRS+=("$1") ;;
+      esac
+      shift
+    done
+    [ ${#J_DIRS[@]} -gt 0 ] || J_DIRS=(".")
+    for d in "${J_DIRS[@]}"; do [ -d "$d" ] || die "not a directory: $d"; done
+    PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
+    [ -x "$PY" ] || die "python3 is required for --json"
+    exec env RUBRICATOR_HOME="$SHARE" RUBRICATOR_MACHINE=1 \
+      "$PY" "$SHARE/workspace.py" "${J_DIRS[@]}" $J_SESSIONS ${SHALLOW:+--shallow} ;;
   --workspace|-w)
     # the explicit door into the workspace; the bare "md" below uses the same runner
     shift
@@ -258,7 +288,8 @@ case "${1:-}" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --sessions)   WS_SESSIONS="--sessions" ;;
-        --deep)       WS_SESSIONS="--sessions"; DEEP=1 ;;
+        --deep)       WS_SESSIONS="--sessions" ;;
+        --shallow)    SHALLOW=1 ;;
         --static)     WS_STATIC=1 ;;
         --allow-launch) ALLOW_LAUNCH=1 ;;
         -o|--out)     shift; WS_OUT="${1:?--out needs a path}" ;;
@@ -280,7 +311,8 @@ case "${1:-}" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --sessions)     SV_ARGS+=(--sessions) ;;
-        --deep)         SV_ARGS+=(--sessions --deep) ;;
+        --deep)         SV_ARGS+=(--sessions) ;;
+        --shallow)      SV_ARGS+=(--shallow) ;;
         --allow-launch) ALLOW_LAUNCH=1 ;;
         --port)         shift; SV_PORT="${1:?--port needs a number}" ;;
         --port=*)       SV_PORT="${1#--port=}" ;;
@@ -333,7 +365,8 @@ while [ $# -gt 0 ]; do
     --theme)               shift; THEME="${1:?--theme needs rubric, slate or bone}"
                            case "$THEME" in rubric|slate|bone) ;; *) die "unknown theme: $THEME" ;; esac ;;
     --sessions)            SESSIONS="--sessions" ;;
-    --deep)                SESSIONS="--sessions"; DEEP=1 ;;
+    --deep)                SESSIONS="--sessions" ;;
+    --shallow)             SHALLOW=1 ;;
     --static)              WS_STATIC=1 ;;
     --allow-launch)        ALLOW_LAUNCH=1 ;;
     --vendor)              VENDOR_FORCE=1 ;;

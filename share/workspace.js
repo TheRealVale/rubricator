@@ -348,6 +348,33 @@ function searching(){ return can('text') && !textAll && !!query; }
 /* ── views ────────────────────────────────────────────────────────────── */
 var query = '', navQ = '', allQ = '', navOpts = false;
 var libSort = 'recent', libFlat = false, libFacet = {}, libOpen = {};
+var libStatus = '';
+/* Q2 · the facet keys off the leading word, the row shows the value verbatim.
+   The register expected `status:` values to repeat and they do not: this
+   repository has 13 distinct shapes across 16 documents that carry one, of
+   which `plan — <date>` is the only one appearing more than twice. A facet on
+   the whole string would be one document per chip. The leading word is a
+   truncation, not a classifier — nothing is mapped, merged or guessed, and the
+   full value is always the thing you read in the row. */
+function statusKey(d){
+  var v = ((d && d.status) || '').trim();
+  /* At least three letters, and the word has to end where it ends. Without the
+     length floor, `status: G1 shipped · G2–G3 partly` yields a chip called `g`,
+     which is not a status anyone would filter by — and two of this repository's
+     sixteen do exactly that. A `status:` whose value is a sentence has no key
+     and is absent from the facet, which is the honest answer: the field is
+     there, it just is not a status. The row still shows nothing invented. */
+  var m = /^([A-Za-z]{3,})(?![A-Za-z0-9])/.exec(v);
+  return m ? m[1].toLowerCase() : '';
+}
+function statusKeys(docs){
+  var seen = {}, out = [];
+  docs.forEach(function(d){
+    var k = statusKey(d);
+    if (k && !seen[k]){ seen[k] = 1; out.push(k); }
+  });
+  return out.sort();
+}
 var sesScope = 'here', sesLive = false, sesQuery = '';
 /* which document a row is: the one you are reading is marked, the ones
    sitting in other tabs are marked more quietly, so a split never loses
@@ -370,6 +397,7 @@ function viewSearch(){
     '<input id="q" placeholder="Search ' + D.docs.length + ' documents' +
     (promptsWithheld() ? '' : D.withSessions ? ' and ' + D.prompts.length + ' prompts' : '') + '…" value="' + esc(query) + '" autocomplete="off" spellcheck="false">' +
     '<span class="hint">/ to focus</span></div>');
+  out.push(savedRow());
   if (!q){
     out.push('<div class="empty">Type to search across every markdown file in this repo' +
       (D.withSessions ? ', and across every prompt you have ever written' : '') + '.<br><br>' +
@@ -430,7 +458,59 @@ function viewSearch(){
   fileTable(elsewhere, 'Solved elsewhere before', 'other repos · same topic');
   if (!docs.length && !prompts.length) out.push('<div class="empty">Nothing matched.</div>');
   else out.push('<div class="act"><button id="dossier">Copy dossier for your agent</button>' +
+    '<button class="ghost" id="dossier-open">read it first</button>' +
+    (can('settings') ? '<button class="ghost" id="search-save">save this search</button>' : '') +
     '<button class="ghost" id="dossier-what">what goes in it?</button></div>');
+  return out.join('');
+}
+
+/* ── Q3 · saved searches ──────────────────────────────────────────────────
+   `{name, query}` and nothing else. Standing rule 4: persist the selection,
+   never the assembly. Opening one re-runs the search against today's index, so
+   a pack saved a week ago reflects the corpus as it is now rather than as it
+   was — which is the whole reason it is worth saving at all. Stored in
+   config.json behind the whitelist (rule 2), because every run is a new origin
+   and localStorage would lose it. */
+function savedSearches(){
+  return (SET && SET.values && SET.values.searches) || [];
+}
+function saveSearch(name, q){
+  var list = savedSearches().filter(function(x){ return x.name !== name; });
+  list.push({ name: name, query: q });
+  setOne('searches', list.slice(-50), 'saved “' + name + '”');
+}
+function dropSearch(name){
+  setOne('searches', savedSearches().filter(function(x){ return x.name !== name; }),
+         'removed “' + name + '”');
+}
+function savedRow(){
+  var list = savedSearches();
+  if (!list.length) return '';
+  return '<div class="saved"><span class="lbl">saved</span>' + list.map(function(x){
+    return '<button class="chip" data-saved="' + esc(x.name) + '" title="' + esc(x.query) +
+           ' — re-run against today\'s index">' + esc(x.name) + '</button>';
+  }).join('') + '</div>';
+}
+
+/* Q3 · the dossier was assembled on every keystroke and thrown away — it could
+   only ever be copied, never read. Same builder, rendered. */
+function viewDossier(){
+  var q = query.trim();
+  var out = ['<div class="qbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/>' +
+    '<path d="M20 20l-3.6-3.6"/></svg><input id="q" placeholder="A topic…" value="' +
+    esc(query) + '" autocomplete="off" spellcheck="false"><span class="hint">/ to focus</span></div>'];
+  out.push(savedRow());
+  if (!q) return out.join('') + '<div class="empty">A dossier is what you would paste to an ' +
+    'agent before asking it anything: the documents that cover a topic, your open marks on ' +
+    'them with the text they are about, what you asked before, and the code most specific to ' +
+    'those conversations.<br><br>Type a topic. Nothing here is stored — a saved search keeps ' +
+    'the question, and the answer is rebuilt from the index every time you open it.</div>';
+  var text = buildDossier();
+  out.push('<pre class="dossier">' + esc(text) + '</pre>');
+  out.push('<div class="act"><button id="dossier">Copy it</button>' +
+    (can('settings') ? '<button class="ghost" id="search-save">save this search</button>' : '') +
+    '</div>');
   return out.join('');
 }
 
@@ -474,6 +554,10 @@ function libDocs(){
   if (libFacet.stale) out = out.filter(function(d){ return !!staleRow(d); });
   if (libFacet.untracked) out = out.filter(function(d){ return !!d.untracked; });
   if (libFacet.recent) out = out.filter(function(d){ return now - d.mtime < 14 * DAY; });
+  /* Q2 · a document that still says `planned` while the code shipped is a
+     falsifiable claim about itself, which a churn count is not. Filter to one,
+     sort by age, and the stale claims are in front of you. */
+  if (libStatus) out = out.filter(function(d){ return statusKey(d) === libStatus; });
   return out.sort(LIBSORT[libSort] || LIBSORT.recent);
 }
 function fileRow(d){
@@ -484,6 +568,10 @@ function fileRow(d){
     '<span class="nm">' + esc(d.rel.split('/').pop()) + '</span>' +
     (mark ? '<span class="kind">' + mark + '</span>' : '') +
     (d.untracked ? '<span class="kind" title="not committed yet">NEW</span>' : '') +
+    /* Q2 · the key is the chip, the full value is the tooltip — and a status
+       with no key gets no chip rather than an empty one. */
+    (statusKey(d) ? '<span class="kind st" title="front matter says: ' + esc(d.status) + '">' +
+      esc(statusKey(d)) + '</span>' : '') +
     /* O2 · in a multi-root workspace the row says which repository it is from,
        and whether marks can be written to it. Only the first root has a notes
        store; the others are read-only and now say so instead of having their
@@ -572,27 +660,68 @@ function viewStale(){
   return out.join('');
 }
 
-function viewNotes(){
+/* Q4 · the Notes surface, and the text of the Notes surface, from one walk of
+   the same data — so the Copy cannot drift from what you are looking at.
+
+   Grouped by verb because that is how the screen groups it. The register said
+   *grouped by document*, and *byte-comparable to what is rendered* is the
+   stronger of its two requirements, so the screen won.
+
+   The header is not decoration. `reanchor()` has exactly one caller — `openDoc`
+   — so every item for a document you have not opened this run carries a
+   `lineStart` from whenever it was last opened, possibly several rewrites ago.
+   The single-document export re-verifies its anchors; this one cannot, and says
+   so rather than implying a precision it does not have. */
+var VERB_ORDER = ['change','question','cut','expand','note','approve'];
+function notesWalk(){
   var items = allAnnos();
-  if (!items.length) return '<div class="empty">No annotations yet.<br><br>' +
+  var open = items.filter(isLive);
+  var moved = items.filter(function(i){ return anchorOf(i) === 'moved'; }).length;
+  var gone = items.length - open.length;
+  var groups = [], byVerb = {};
+  open.forEach(function(i){ (byVerb[i.verb] = byVerb[i.verb] || []).push(i); });
+  VERB_ORDER.forEach(function(v){ if (byVerb[v]) groups.push({ verb: v, items: byVerb[v] }); });
+  return { items: items, open: open, moved: moved, gone: gone, groups: groups };
+}
+function notesHead(w){
+  return w.open.length + ' open' + (w.moved ? ' · ' + w.moved + ' moved' : '') +
+         (w.gone ? ' · ' + w.gone + ' whose text is gone' : '');
+}
+function viewNotes(){
+  var w = notesWalk();
+  if (!w.items.length) return '<div class="empty">No annotations yet.<br><br>' +
     'Open a document with <span class="f">md &lt;file&gt;</span>, mark it up, and your notes show up here — ' +
     'across every document in the repo.</div>';
-  var open = items.filter(isLive);
-  var out = ['<div class="qnote">' + open.length + ' open · ' + (items.length - open.length) + ' resolved</div>'];
-  var byVerb = {};
-  open.forEach(function(i){ (byVerb[i.verb] = byVerb[i.verb] || []).push(i); });
-  ['change','question','cut','expand','note','approve'].forEach(function(v){
-    var list = byVerb[v]; if (!list) return;
-    out.push('<div class="grp">' + v + ' <span class="c">' + list.length + '</span></div>');
-    list.forEach(function(i){
+  var out = ['<div class="qnote">' + esc(notesHead(w)) +
+    '<button class="chip" id="notes-copy" title="Copy exactly what is listed here">copy</button></div>'];
+  w.groups.forEach(function(g){
+    out.push('<div class="grp">' + g.verb + ' <span class="c">' + g.items.length + '</span></div>');
+    g.items.forEach(function(i){
       out.push('<div class="row" data-doc="' + esc(i._doc.rel) + '" data-line="' +
         (i.lineStart || 0) + '">' +
         '<div class="t">' + esc(i.heading || i._doc.title) + '<span class="p">' + esc(i._doc.rel) +
-        ':' + i.lineStart + '</span></div>' +
+        ':' + i.lineStart + (anchorOf(i) === 'moved' ? ' moved' : '') + '</span></div>' +
         (i.note ? '<div class="snip">' + esc(i.note) + '</div>' : '') + '</div>');
     });
   });
   return out.join('');
+}
+function notesText(){
+  var w = notesWalk();
+  if (!w.items.length) return '';
+  var out = ['Notes across ' + D.name + ' — ' + notesHead(w) + '.',
+    'Line numbers are as of when each document was last opened, not as of now:',
+    'a document you have not opened this run may have been rewritten since.',
+    'For anchors that have just been re-verified, open the document and export from there.',
+    ''];
+  w.groups.forEach(function(g){
+    g.items.forEach(function(i){
+      out.push(i._doc.rel + ':' + (i.lineStart || 0) + ' [' + g.verb + ']' +
+               (anchorOf(i) === 'moved' ? ' (moved)' : '') +
+               (i.note ? ' ' + String(i.note).replace(/\s*\n\s*/g, ' ') : ''));
+    });
+  });
+  return out.join('\n') + '\n';
 }
 
 function inRepo(path){
@@ -845,6 +974,13 @@ window.RB = {
 });
 
 /* ── dossier ──────────────────────────────────────────────────────────── */
+function quoteLines(i){
+  try {
+    if (window.MDReview && MDReview.quote) return MDReview.quote(i) || [];
+  } catch(e){}
+  var q = String(i.quote || '');
+  return q ? [q.split('\n')[0].slice(0, 160)] : [];
+}
 function buildDossier(){
   var q = query.trim(), L = [];
   var docs = D.docs.map(function(d){ return { d:d, s:docScore(d,q) }; })
@@ -862,8 +998,14 @@ function buildDossier(){
     L.push('');
   }
   var an = [];
-  docs.forEach(function(x){ annosFor(x.d).filter(isLive)
-    .forEach(function(i){ an.push('  ' + x.d.rel + ':' + i.lineStart + ' [' + i.verb + '] ' + (i.note||'')); }); });
+  docs.forEach(function(x){ annosFor(x.d).filter(isLive).forEach(function(i){
+    an.push('  ' + x.d.rel + ':' + i.lineStart + ' [' + i.verb + ']' +
+            (anchorOf(i) === 'moved' ? ' (moved)' : '') + ' ' + (i.note || ''));
+    /* Q3 · the excerpt, which this used to drop — a note without the text it is
+       about asks the agent to go and find it. exportQuote already clips a
+       section to its heading and a long block to its first lines. */
+    quoteLines(i).forEach(function(qz){ an.push('      > ' + qz); });
+  }); });
   if (an.length){ L.push('My open notes on those documents:'); L.push.apply(L, an); L.push(''); }
   if (prompts.length){
     L.push('What I asked about it before:');
@@ -902,14 +1044,56 @@ function docTimeline(d){
   function x(t){ return (6 + 88 * (t - lo) / span).toFixed(2) + '%'; }
   var out = ['<div class="tl" title="' + commits.length + ' commits · ' + sess.length + ' sessions">'];
   out.push('<div class="axis"></div>');
-  commits.forEach(function(t){ out.push('<i class="c" style="left:' + x(t) + '"></i>'); });
+  /* Q1 · these carried no title and no data attribute, so a mark on the axis
+     was a mark on an axis. */
+  commits.forEach(function(t){
+    out.push('<i class="c" data-t="' + t + '" style="left:' + x(t) +
+             '" title="commit · ' + esc(ago(t)) + ' ago"></i>');
+  });
   sess.forEach(function(sv){
     out.push('<i class="s" data-ses="' + esc(sv.sid) + '" style="left:' + x(sv.t) +
              '" title="' + esc((sv.title || '').slice(0, 70)) + '"></i>');
   });
-  out.push('<i class="m" style="left:' + x(d.mtime) + '" title="last edited"></i>');
+  out.push('<i class="m" style="left:' + x(d.mtime) + '" title="last edited · ' +
+           esc(ago(d.mtime)) + ' ago"></i>');
   out.push('<span class="lo">' + ago(lo) + ' ago</span><span class="hi">now</span></div>');
   return out.join('');
+}
+
+/* ── Q1 · which conversations touched this document ───────────────────────
+   `D.touches` mapped 1,312 files back to session ids and had exactly two
+   consumers: a search-ranking denominator and 9x9px dots. This is the third,
+   and its empty state is designed first because the empty state is the common
+   one — 264 of 330 documents in one repository and 440 of 502 in another have
+   no session on record at all, and the mean over the covered ones is 1.09.
+
+   The reason is not that nothing happened. It is that the file list comes from
+   a transcript, and Claude Code sweeps transcripts after `cleanupPeriodDays`
+   (30 by default), so this join has a thirty-day half-life by construction.
+   Saying that is the difference between *no sessions* and *no sessions we can
+   still read*. */
+function docSessions(d){
+  if (!D.withSessions) return '';
+  var ids = (D.touches[d.abs] || []).slice();
+  if (!ids.length){
+    var R = D.retention, why = '';
+    if (R && R.lost) why = ' ' + R.lost + ' of ' + R.known + ' sessions here can be found but ' +
+      'not read any more — Claude Code removes transcripts after 30 days, and the file list ' +
+      'goes with them. Raise <code>' + esc(R.setting) + '</code> in ~/.claude/settings.json ' +
+      'to keep them longer.';
+    return '<div class="dsess empty">No session on record touched this.' + why + '</div>';
+  }
+  var rows = ids.map(function(sid){
+    var m = D.sessions[sid]; if (!m) return null;
+    return { sid: sid, m: m };
+  }).filter(Boolean).sort(function(a, b){ return (b.m.b || 0) - (a.m.b || 0); });
+  if (!rows.length) return '';
+  return '<div class="dsess"><b>' + rows.length + ' session' + (rows.length > 1 ? 's' : '') +
+    ' touched this</b>' + rows.map(function(r){
+      return '<a class="s" data-ses="' + esc(r.sid) + '">' +
+        '<span class="t">' + esc(clip(r.m.t || r.sid.slice(0, 8), 64)) + '</span>' +
+        '<span class="w">' + esc(ago(r.m.b)) + ' ago' + (r.m.live ? '' : ' · archived') + '</span></a>';
+    }).join('') + '</div>';
 }
 
 function markHits(root, q){
@@ -948,7 +1132,7 @@ function markHits(root, q){
    A surface is whatever a pane can hold. The shell knows only that it can
    render itself into a div and say what to call it; everything that is
    specific to a document, a session or a list lives down here. */
-var TITLES = { search:'Search', stale:'Stale', notes:'Notes', settings:'Settings' };
+var TITLES = { search:'Search', stale:'Stale', notes:'Notes', dossier:'Dossier', settings:'Settings' };
 
 function clip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 function grabCaret(host){
@@ -969,7 +1153,7 @@ function putCaret(c){
 function listSurface(kind){
   var mine = USER_VIEWS.filter(function(v){ return v.id === kind; })[0];
   var builtin = { search:viewSearch, stale:viewStale, notes:viewNotes,
-                  settings:viewSettings };
+                  dossier:viewDossier, settings:viewSettings };
   var S = {};
   S.render = function(host){ S.refresh(host); };
   S.refresh = function(host){
@@ -980,6 +1164,34 @@ function listSurface(kind){
     if (q) q.addEventListener('input', function(){ query = q.value; S.refresh(host); });
     var dz = host.querySelector('#dossier');
     if (dz) dz.onclick = function(){ copy(buildDossier()); toast('dossier copied — paste it to your agent'); };
+    var dop = host.querySelector('#dossier-open');
+    if (dop) dop.onclick = function(){
+      Shell.open({ kind:'dossier', id:'', title:'Dossier' });
+    };
+    var ss = host.querySelector('#search-save');
+    if (ss) ss.onclick = function(){
+      var q = query.trim();
+      if (!q) return toast('nothing to save');
+      var name = window.prompt('Name this search', q.slice(0, 40));
+      if (name && name.trim()) saveSearch(name.trim().slice(0, 60), q);
+    };
+    [].forEach.call(host.querySelectorAll('[data-saved]'), function(b){
+      b.onclick = function(e){
+        var x = savedSearches().filter(function(y){ return y.name === b.dataset.saved; })[0];
+        if (!x) return;
+        if (e.altKey) return dropSearch(x.name);
+        query = x.query;
+        S.refresh(host);
+      };
+    });
+    var nc = host.querySelector('#notes-copy');
+    if (nc) nc.onclick = function(e){
+      e.stopPropagation();
+      var t = notesText();
+      if (!t) return toast('nothing to copy');
+      copy(t);
+      toast('copied ' + (t.split('\n').length - 6) + ' notes');
+    };
     var dw = host.querySelector('#dossier-what');
     if (dw) dw.onclick = function(){ toast('documents, your open notes, past prompts (scrubbed) and the code most specific to them'); };
     putCaret(c);
@@ -1028,7 +1240,7 @@ function docSurface(rel, q, jump){
       });
     }
     S.headEl.textContent = d.rel;
-    S.timeEl.innerHTML = docTimeline(d);
+    S.timeEl.innerHTML = docTimeline(d) + docSessions(d);
 
     /* the same renderer the single-file reader uses, so a document behaves the
        same here: anchors, alerts, code copy, mermaid — and the same
@@ -1251,6 +1463,7 @@ function navDocs(){
   var sorts = [['recent','recent'],['stale','stale'],['notes','notes'],['size','size'],['title','name']];
   var facets = [['notes','has notes'],['stale','behind its code'],
                 ['untracked','untracked'],['recent','14 days']];
+  var sks = statusKeys(D.docs);
   var narrowed = docs.length !== D.docs.length;
   var h = ['<div class="nvctl"><div class="r">' +
     '<div class="seg">' +
@@ -1275,6 +1488,13 @@ function navDocs(){
     h.push('<div class="r">' + facets.map(function(f){
       return '<button class="chip' + (libFacet[f[0]] ? ' on' : '') + '" data-lfacet="' + f[0] + '">' +
              f[1] + '</button>'; }).join('') + '</div>');
+    if (sks.length) h.push('<div class="r">' +
+      '<span class="lbl">says</span>' +
+      sks.map(function(k){
+        return '<button class="chip' + (libStatus === k ? ' on' : '') +
+               '" data-lstatus="' + esc(k) + '" title="Documents whose front matter says ' +
+               esc(k) + '">' + esc(k) + '</button>';
+      }).join('') + '</div>');
   }
   h.push('</div>');
   h.push(docs.length
@@ -1826,6 +2046,7 @@ document.addEventListener('click', function(e){
     if (d.lmode)  libFlat = d.lmode === 'flat';
     if (d.lsort)  libSort = d.lsort;
     if (d.lfacet) libFacet[d.lfacet] = !libFacet[d.lfacet];
+    if (d.lstatus) libStatus = libStatus === d.lstatus ? '' : d.lstatus;
     if (d.sscope) sesScope = d.sscope;
     if (d.slive)  sesLive = !sesLive;
     return Shell.nav();

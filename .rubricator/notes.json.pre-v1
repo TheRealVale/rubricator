@@ -1,0 +1,36 @@
+{
+ "/Users/vsohr/Repositories/rubricator/README.md": {
+  "seq": 3,
+  "preamble": "Apply this feedback. Don't restructure anything I didn't mention.",
+  "template": "apply",
+  "items": [
+   {
+    "id": 1,
+    "verb": "approve",
+    "quote": "*A rubricator was the scribe who went through a finished manuscript adding the red marks —\nthe headings, the corrections, the notes in the margin. Same job, different century.*",
+    "anchor": "*A rubricator was the scribe who went through a finished manuscript adding the red marks —\nthe headings, the corrections, the notes in the margin. Same job, different century.*",
+    "note": "",
+    "lineStart": 6,
+    "lineEnd": 7,
+    "partial": false,
+    "section": false,
+    "heading": "rubricator",
+    "state": "open"
+   },
+   {
+    "id": 2,
+    "verb": "change",
+    "quote": "*A rubricator was the scribe who went through a finished manuscript adding the red marks —\nthe headings, the corrections, the notes in the margin. Same job, different century.*",
+    "anchor": "*A rubricator was the scribe who went through a finished manuscript adding the red marks —\nthe headings, the corrections, the notes in the margin. Same job, different century.*",
+    "note": "say this differently",
+    "lineStart": 6,
+    "lineEnd": 7,
+    "partial": false,
+    "section": false,
+    "heading": "rubricator",
+    "state": "open"
+   }
+  ],
+  "saved": 1787482233108
+ }
+}
