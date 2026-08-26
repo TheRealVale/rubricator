@@ -558,6 +558,10 @@ window.Shell = {
   open: open, close: closeTab, split: split, refresh: refresh, paint: paint,
   nav: nav, navMode: function(){ return navMode; }, setNavMode: setNavMode,
   status: status, palette: palette, focused: focused,
+  /* redraw the palette without touching focus or selection: an async
+     result landing mid-keystroke must not select the caret's text out
+     from under whoever is typing */
+  palRedraw: function(){ if (pal.on) palDraw(); },
   active: active, panes: function(){ return panes; }, focusIndex: function(){ return focus; },
   each: function(fn){
     panes.forEach(function(p, i){

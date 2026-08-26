@@ -544,7 +544,39 @@ enough to judge that work by. Phase N now comes before them — the build-order
 paragraph above says why, and nothing here is made harder by the week's wait.
 See [`signals-plan.md`](signals-plan.md).
 
-- [ ] **L1 · Search requires every term.** `count()` at `workspace.js:157-162`
+> **Shipped 2026-08-26, L1–L8.** One deviation, measured rather than argued.
+> **L1's scoring formula in this register was wrong.** `Σ per-term count +
+> 3 × phrase count` was specified, built, and then failed its own acceptance
+> test: raw frequency swamps the bonus, so for `auth flow` *neither* of the two
+> documents containing the phrase reached the top five — beaten by documents
+> saying "auth" forty times and "flow" ten. What ships is `Σ √(per-term count) +
+> 6 × phrase count`; damping the per-term half is what makes the bonus matter.
+> Measured against three alternatives on a 330-document corpus: phrase-carrying
+> documents in the top five went 0/2 → 2/2 for `auth flow` and 3/5 → 5/5 for
+> `rate limit`, and across 37 two-word queries built from two words of a
+> document's own title, the shipped matcher returned nothing for 27 while this
+> returns nothing for none. Every other figure in L1 reproduced exactly:
+> auth 132, `auth flow` 2, `flow auth` 0, `authentication flow` 0, `rate limit`
+> 17, `limit rate` 0, `business match` 0 → 111.
+>
+> The staleness numbers reproduced too, and the contradiction with them:
+> **repo D showed 61 navigator glyphs against 0 surface rows**, and repo A
+> printed *"nothing looks stale"* while 82 of its 99 documents had never been
+> looked at. The glyph is gone, the facet shares the surface's predicate, the
+> two empties are now different sentences with counts, and the truncation says
+> `showing 40 of 168`. `repoChurn` and the dead `stem` are deleted.
+>
+> L5 recovered more than the item claimed: `--others --exclude-standard` costs
+> 15 ms against the existing call's 7 ms on a 3,385-path repository, and the
+> `untracked` facet that `tasks.md` has claimed since phase B is finally real.
+> L6 raised the cap to 2,000 and swapped the blanket `startswith("/")` for a
+> thirteen-entry skiplist: 4,086 indexed prompts became **4,322**, 139 of them
+> now kept whole rather than cut at 600.
+>
+> Two new smoke tests, 12 and 13, so none of this can drift back. The suite is
+> fifteen.
+
+- [x] **L1 · Search requires every term.** `count()` at `workspace.js:157-162`
       is one case-insensitive `indexOf` of the whole query. On repo B's 330
       documents: `auth`→132, `auth flow`→2, `flow auth`→0, `authentication
       flow`→0, `rate limit`→17, `limit rate`→0. Against 37 two-word queries each
@@ -559,7 +591,7 @@ See [`signals-plan.md`](signals-plan.md).
       three ranking callers, two inline matchers, the navigator filter and the
       two displayed counts — go through one parser. **M**
 
-- [ ] **L2 · `⌘K` says what it is matching.** `workspace.py:459` strips `text`
+- [x] **L2 · `⌘K` says what it is matching.** `workspace.py:459` strips `text`
       from every doc in serve mode; `palSearch` then tests `hit(d.text)` on
       `undefined` and reports `total + ' hits'` unhedged. On repo B, `auth`
       gives **0 palette rows against 132 from the Search surface**. It silently
@@ -572,7 +604,7 @@ See [`signals-plan.md`](signals-plan.md).
       same count as the Search surface, and the count is labelled while the
       fetch is in flight. **S**
 
-- [ ] **L3 · The views that count notes read the notes.** `.rubricator/notes.json`
+- [x] **L3 · The views that count notes read the notes.** `.rubricator/notes.json`
       is written correctly and shipped to the page, and `workspace.js:74-98`
       installs a disk-aware storage adapter with exactly one caller,
       `review.js:47`. Every corpus-wide view goes through `annosFor()` at
@@ -588,7 +620,7 @@ See [`signals-plan.md`](signals-plan.md).
       badge, `⌘K` and the dossier after the server is restarted on a new
       ephemeral port. **S**
 
-- [ ] **L4 · The staleness signal stops calling itself a quality signal.** Four
+- [x] **L4 · The staleness signal stops calling itself a quality signal.** Four
       false statements in one subsystem. `workspace.js:370` renders *"Nothing
       looks stale…"* where the detector resolved **zero targets for 87 of 99**
       repo A documents, and again on repo D while the navigator paints
@@ -607,7 +639,7 @@ See [`signals-plan.md`](signals-plan.md).
       be judged, the `⚠` glyph is gone, `grep -rn repoChurn share/` returns
       nothing, and the row count and the displayed count agree. **S**
 
-- [ ] **L5 · The index sees the file the agent just wrote.**
+- [x] **L5 · The index sees the file the agent just wrote.**
       `workspace.py:32-40` builds the document set from `git ls-files` and
       returns early whenever any file is tracked, so the `os.walk` fallback is
       unreachable in a real repo and a markdown file the agent wrote is
@@ -620,7 +652,7 @@ See [`signals-plan.md`](signals-plan.md).
       untracked, after one reindex — which is also what makes the `untracked`
       facet claimed at [`tasks.md:77`](tasks.md) buildable. **S**
 
-- [ ] **L6 · The prompt index stops discarding 13.6% of what you typed.**
+- [x] **L6 · The prompt index stops discarding 13.6% of what you typed.**
       `workspace.py:237` does `scrub(txt)[:600]`. Over the indexed prompts, 127
       (3.2%) exceed 600 characters and **86,020 characters — 13.6% of all prompt
       text — are dropped**. The adjacent slash-command filter at `:233` drops
@@ -633,7 +665,7 @@ See [`signals-plan.md`](signals-plan.md).
       half, and `/api/orders returns 500 after the migration…` is in the index.
       **S**
 
-- [ ] **L7 · Silent data loss stops being a 1.9-second toast.**
+- [x] **L7 · Silent data loss stops being a 1.9-second toast.**
       `workspace.js:96` reports a failed disk write with `toast('note not saved
       to disk')`, cleared after 1,900 ms and logged nowhere — the sole report of
       losing the one thing the tool exists to keep. Route it to a line in the
@@ -642,7 +674,7 @@ See [`signals-plan.md`](signals-plan.md).
       *Done when:* a `/notes` POST forced to fail leaves a visible, persistent
       line in the status strip, and it clears on the next successful save. **S**
 
-- [ ] **L8 · The hook names what you are about to lose.** On expiry,
+- [x] **L8 · The hook names what you are about to lose.** On expiry,
       `review.js:664-676` disables Send while still rendering the live item
       count. The hook window writes nothing to disk by construction — it serves
       the static tier from a temp file it unlinks at `hook.py:221-223` — so the

@@ -212,9 +212,13 @@ the word highlighted. Prompt hits in the Search surface are clickable for the sa
 Scoped to the current repository by default, with a count of how many more are elsewhere and
 one button to widen.
 
-**Stale** lists documents whose code moved on without them. Churn is counted only in the
-files each document actually mentions or links, so it flags *"this spec describes code that
-changed 392 times since you last touched it"* rather than *"this repo is busy"*.
+**Stale** lists documents whose *named* files kept changing after the document stopped —
+counted only in the paths each one mentions in backticks or links, so it says *"this spec
+describes code that changed 392 times since you last touched it"* rather than *"this repo
+is busy"*. Read it as what a document claims about code, not as a quality score: it ranks
+by commits, which correlates far more with how many paths a document quotes than with its
+age. It also says how many documents it could not judge at all — a document that names no
+file is not fresh, it is unmeasured, and on a prose-heavy repository that is most of them.
 
 **Notes**, the third mode, collects your annotations across every document — every open Question, everything
 marked Cut — because what you are hunting is often your own reaction, not the text.

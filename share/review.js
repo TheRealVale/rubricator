@@ -670,8 +670,25 @@ function hookMode(){
     if (left <= 0){
       expired = true;
       banner.classList.add('expired');
-      banner.querySelector('.txt').textContent = 'Timed out — Claude fell back to the terminal prompt';
+      /* The hook window writes nothing to disk by construction — it serves the
+         static tier from a temp file it unlinks — and every fire is a fresh
+         ephemeral origin, so on expiry the marks are gone. The old banner
+         disabled Send and said only that Claude had fallen back, while the
+         live item count sat beside it: the tool knew exactly how much you were
+         about to lose and did not say the number. Copying becomes the primary
+         action, because it is the only one left that saves anything. */
+      var n = askItems().length + noteItems().length;
+      banner.querySelector('.txt').textContent = n
+        ? 'Timed out — Claude fell back to the terminal prompt. Your '
+          + n + ' mark' + (n > 1 ? 's are' : ' is') + ' still here, and will go when this window closes.'
+        : 'Timed out — Claude fell back to the terminal prompt';
       clock.textContent = '';
+      if (n){
+        copyLink.textContent = 'Copy ' + n + ' mark' + (n > 1 ? 's' : '') + ' to the clipboard';
+        copyLink.classList.remove('lnk');
+        copyLink.classList.add('primary');
+        copyLink.focus();
+      }
       window.__mdHookSync();
       return;
     }

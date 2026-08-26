@@ -6,6 +6,32 @@ status: plan — 2026-08-23
 
 # What the surfaces claim, and what they can support
 
+> **Shipped 2026-08-26.** All eight items are in. One thing this document got
+> wrong, and it is the item it argued hardest for.
+>
+> **§3's scoring formula does not work.** `Σ per-term count + 3 × phrase count`
+> is stated here as the answer to the AND problem, and it was built exactly as
+> written and then failed the acceptance test this document sets: for
+> `auth flow`, neither of the two documents that contain the phrase reached the
+> top five. Raw frequency swamps a linear bonus — a document saying "auth"
+> forty times and "flow" ten scores 50 against 5 for one that says the phrase
+> once. What ships is `Σ √(per-term count) + 6 × phrase count`. Damping the
+> per-term half, not enlarging the bonus, is what makes the difference:
+> phrase-carrying documents in the top five went 0/2 → 2/2 on `auth flow` and
+> 3/5 → 5/5 on `rate limit`, against three candidate formulas measured side by
+> side on the same 330-document corpus.
+>
+> The lesson is the document's own: a formula that reads correctly is not a
+> measured formula. Every other number here reproduced exactly, including the
+> ones that argue *against* the fix — `business match` really does go from 0 to
+> 111, which is why the ranking half was never optional.
+>
+> Two smaller notes. §6's refusal held: the extension whitelist was not widened
+> (**X14**), and what shipped instead is the honest empty state — a document
+> that names no file is reported as unmeasured rather than counted as clean.
+> And L5 turned out cheaper than costed: `--others --exclude-standard` is 15 ms
+> against the existing call's 7 ms on a 3,385-path repository.
+
 Every surface in this workspace that reports a **judgement** — a hit count, a note
 count, an all-clear — reports one it cannot support. Search says *nothing matched*
 when it means *I looked for your two words glued together*. `⌘K` prints a

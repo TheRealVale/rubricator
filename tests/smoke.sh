@@ -319,5 +319,72 @@ else
 fi
 unset RUBRICATOR_CACHE RUBRICATOR_STATE
 
+# ── 12 · the index payload tells the truth ─────────────────────────────────
+# L3, L4, L5 at once, through the RUBRICATOR_JSON seam: an unstaged document is
+# indexed and flagged, ignored files stay ignored, notes travel with the page
+# keyed to match doc.abs, and repoChurn — 26% of the git pass, read by nothing —
+# is gone.
+scratch="$WORK/idx"; mkdir -p "$scratch/node_modules"
+(cd "$scratch" && git init -q . \
+  && printf '# tracked\n' > tracked.md && git add tracked.md \
+  && git -c user.email=t@t -c user.name=t commit -qm init) >/dev/null 2>&1
+printf '# the agent just wrote this\n' > "$scratch/fresh.md"
+printf 'node_modules/\n' > "$scratch/.gitignore"
+printf '# should stay ignored\n' > "$scratch/node_modules/ignored.md"
+mkdir -p "$scratch/.rubricator"
+python3 -c 'import json,sys,os
+p=sys.argv[1]
+json.dump({os.path.realpath(os.path.join(p,"tracked.md")):{"saved":1,"items":[{"id":1,"verb":"note","quote":"x"}]}},
+          open(os.path.join(p,".rubricator","notes.json"),"w"))' "$scratch"
+RUBRICATOR_JSON=1 python3 "$REPO/share/workspace.py" "$scratch" > "$WORK/idx.json" 2>/dev/null
+python3 - "$WORK/idx.json" "$scratch" <<'PYEOF' > "$WORK/idx.txt" 2>&1
+import json, os, sys
+d = json.load(open(sys.argv[1])); scratch = sys.argv[2]
+rels = {x["rel"]: x for x in d["docs"]}
+checks = {
+  "unstaged document indexed":      "fresh.md" in rels,
+  "and flagged untracked":          bool(rels.get("fresh.md", {}).get("untracked")),
+  "tracked one not flagged":        not rels.get("tracked.md", {}).get("untracked"),
+  "gitignored file stays out":      not any("node_modules" in r for r in rels),
+  "notes travel with the payload":  bool(d.get("notes")),
+  "notes key matches doc.abs":      any(k == rels.get("tracked.md", {}).get("abs") for k in (d.get("notes") or {})),
+  "repoChurn is gone":              not any("repoChurn" in v for v in (d.get("stale") or {}).values()),
+}
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "12 · the index sees untracked files, carries notes, and drops repoChurn"
+else
+  no "12 · the payload is wrong" "$(grep '^XX' "$WORK/idx.txt" | tr '\n' ' ')"
+fi
+
+# ── 13 · search requires every term, and ranks the phrase first ─────────────
+# L1. The shipped matcher was one indexOf of the whole query, so `flow auth`
+# and `auth flow` were different questions and neither found much.
+if command -v node >/dev/null; then
+  python3 -c 'import re,sys
+src = open(sys.argv[1]).read()
+i = src.index("function terms(q)"); j = src.index("function snippet(text, q, len)")
+open(sys.argv[2], "w").write(src[i:j])' "$REPO/share/workspace.js" "$WORK/parser.js"
+  cat >> "$WORK/parser.js" <<'JSEOF'
+var doc = "the auth flow is described here; auth appears again, and flow too";
+var other = "auth is mentioned but the other word appears nowhere near it";
+var fail = [];
+if (hits(doc, "auth flow") !== hits(doc, "flow auth")) fail.push("term order changes the matched set");
+if (!(count(doc, "auth flow") > count(doc, "flow auth"))) fail.push("the phrase gets no bonus over its reverse");
+if (!count(doc, "authentication") === false && count(doc, "authentication") !== 0) fail.push("absent term still matches");
+if (count(other, "auth flow") !== 0) fail.push("AND not enforced");
+if (!(count(doc, "auth flow") > count(other, "auth"))) fail.push("phrase not ranked above a lone term");
+if (occurrences(doc, "auth") !== 2) fail.push("occurrences() miscounts: " + occurrences(doc, "auth"));
+console.log(fail.length ? "XX " + fail.join("; ") : "ok");
+JSEOF
+  res=$(node "$WORK/parser.js" 2>&1)
+  case "$res" in ok*) ok "13 · search requires every term and ranks the phrase first" ;;
+                 *)   no "13 · the query parser is wrong" "$res" ;; esac
+else
+  skip "13 · query parser" "no node"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

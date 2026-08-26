@@ -93,7 +93,12 @@ if (can('notes') && window.MDReview){
     DISK[path] = val;
     clearTimeout(window.__noteT);
     window.__noteT = setTimeout(function(){
-      api('notes', { path: path, store: val }, null, function(){ toast('note not saved to disk'); });
+      api('notes', { path: path, store: val },
+          function(){ noteTrouble(''); },
+          /* This was a toast, cleared after 1,900 ms and logged nowhere — the
+             sole report that the tool had failed to keep the one thing it
+             exists to keep. It now stays in the strip until a save succeeds. */
+          function(){ noteTrouble(path.split('/').pop()); });
     }, 400);
   };
 }
@@ -113,13 +118,28 @@ if (window.MDReview){
 
 /* annotations live in the reader's local storage, keyed by a hash of the abs path */
 function hash(s){ var h=5381,i=s.length; while(i) h=(h*33^s.charCodeAt(--i))>>>0; return h.toString(36); }
+/* Every corpus-wide view of your notes comes through here, and it used to read
+   `localStorage` only — while the notes themselves were being written correctly
+   to `.rubricator/notes.json` and shipped to the page as `DISK`, in scope on
+   the line below. The server binds port 0, so every `md <dir>` is a new origin
+   and therefore a fresh empty `localStorage`: not empty on the first run, empty
+   on *every* run. So the Notes surface, the tab badges, the facets, ⌘K and —
+   worst — the dossier builder, which ships the result into an agent's prompt,
+   all answered "which of my notes are still open?" with *none*, every launch,
+   with the answer sitting on disk three inches away.
+
+   Disk first, because disk is the durable one. `localStorage` remains the
+   static tier's only store, so it stays as the fallback rather than going. */
 function annosFor(doc){
-  try {
-    var raw = localStorage.getItem('md-review:' + hash(doc.abs));
-    if (!raw) return [];
-    var st = JSON.parse(raw);
-    return (st.items || []).map(function(i){ i._doc = doc; return i; });
-  } catch(e){ return []; }
+  var st = DISK[doc.abs] || null;
+  if (!st){
+    try {
+      var raw = localStorage.getItem('md-review:' + hash(doc.abs));
+      st = raw ? JSON.parse(raw) : null;
+    } catch(e){ st = null; }
+  }
+  if (!st) return [];
+  return (st.items || []).map(function(i){ i._doc = doc; return i; });
 }
 function allAnnos(){
   return D.docs.reduce(function(acc, d){ return acc.concat(annosFor(d)); }, []);
@@ -145,20 +165,79 @@ function copy(text){
     a.style.top='-1000px'; document.body.appendChild(a); a.select();
     try{ document.execCommand('copy'); }catch(e){} a.remove(); }
 }
-function snippet(text, q, len){
-  text = text || '';
-  if (!q) return esc(text.slice(0, len || 150).trim());
-  var i = text.toLowerCase().indexOf(q.toLowerCase());
-  if (i < 0) return esc(text.slice(0, len || 150).trim());
-  var a = Math.max(0, i - 60), b = Math.min(text.length, i + q.length + (len || 110));
-  return (a ? '…' : '') + esc(text.slice(a, i)) + '<mark>' + esc(text.slice(i, i+q.length)) +
-         '</mark>' + esc(text.slice(i+q.length, b)) + (b < text.length ? '…' : '');
+/* ── one query parser, and every matcher goes through it ──────────────────
+   `count()` used to be a single case-insensitive indexOf of the whole query,
+   so a two-word search asked whether that exact string appeared. Measured on a
+   330-document corpus: `auth` found 132, `auth flow` found 2, `flow auth` and
+   `authentication flow` found nothing. Against 37 two-word queries each built
+   from two words of a document's own title, it returned zero for 25 of them.
+
+   Requiring every term fixes the misses and creates a different problem — with
+   AND alone, `business match` goes from 0 hits to 111, because both words are
+   everywhere. So the ranking half is not optional.
+
+   The plan specified `Σ per-term count + 3 × phrase count`, and that was
+   measured and rejected: raw frequency swamps the bonus, so for `auth flow`
+   neither of the two documents that actually contain the phrase reached the
+   top five, beaten by documents saying "auth" forty times and "flow" ten. What
+   ships is `Σ √(per-term count) + 6 × phrase count` — damping the per-term
+   half is what makes the bonus matter. Measured against the alternatives on a
+   330-document corpus: phrase-carrying documents in the top five went 0/2 to
+   2/2 for `auth flow` and 3/5 to 5/5 for `rate limit`, and over 37 two-word
+   queries each built from two words of a document's own title, the shipped
+   matcher returned nothing for 27 while this returns nothing for none.
+   No stemming, no fuzzy matching, no index. */
+function terms(q){
+  return (q || '').toLowerCase().split(/\s+/).filter(Boolean);
+}
+/* every term present — the AND half, for callers that want a yes or no */
+function hits(text, q){
+  if (!q) return true;
+  if (!text) return false;
+  var t = text.toLowerCase(), ts = terms(q);
+  for (var i = 0; i < ts.length; i++) if (t.indexOf(ts[i]) < 0) return false;
+  return true;
+}
+function occurrencesOf(t, s){
+  var n = 0, i = 0;
+  while (s && (i = t.indexOf(s, i)) >= 0){ n++; i += s.length; }
+  return n;
+}
+/* the literal number of times the query's terms appear, for anything that
+   shows a figure to a human rather than sorting by it */
+function occurrences(text, q){
+  if (!q || !text) return 0;
+  var t = text.toLowerCase();
+  if (!hits(text, q)) return 0;
+  return terms(q).reduce(function(a, s){ return a + occurrencesOf(t, s); }, 0);
 }
 function count(text, q){
   if (!q || !text) return 0;
-  var n = 0, i = 0, t = text.toLowerCase(), s = q.toLowerCase();
-  while ((i = t.indexOf(s, i)) >= 0){ n++; i += s.length; }
+  var t = text.toLowerCase(), ts = terms(q);
+  var n = 0;
+  for (var i = 0; i < ts.length; i++){
+    var c = occurrencesOf(t, ts[i]);
+    if (!c) return 0;                       // every term, or nothing
+    n += Math.sqrt(c);                      // damped: see the note above
+  }
+  if (ts.length > 1) n += 6 * occurrencesOf(t, q.toLowerCase().trim());
   return n;
+}
+function snippet(text, q, len){
+  text = text || '';
+  if (!q) return esc(text.slice(0, len || 150).trim());
+  /* prefer the whole phrase; fall back to the first term that appears, so a
+     multi-word query still lands the excerpt on something relevant */
+  var lt = text.toLowerCase(), needle = q.toLowerCase().trim();
+  var i = lt.indexOf(needle);
+  if (i < 0){
+    var ts = terms(q);
+    for (var k = 0; k < ts.length && i < 0; k++){ needle = ts[k]; i = lt.indexOf(needle); }
+  }
+  if (i < 0) return esc(text.slice(0, len || 150).trim());
+  var a = Math.max(0, i - 60), b = Math.min(text.length, i + needle.length + (len || 110));
+  return (a ? '…' : '') + esc(text.slice(a, i)) + '<mark>' + esc(text.slice(i, i + needle.length)) +
+         '</mark>' + esc(text.slice(i + needle.length, b)) + (b < text.length ? '…' : '');
 }
 
 /* ── the topic join ───────────────────────────────────────────────────── */
@@ -186,7 +265,7 @@ function fileRank(sids, weights, q){
     });
     if (!hits) continue;
     var score = (weight * hits) / df;
-    if (ql && k.toLowerCase().indexOf(ql) >= 0) score *= 4;   // the name itself is evidence
+    if (ql && hits(k, ql)) score *= 4;                        // the name itself is evidence
     out.push({ file: k, hits: hits, df: df, s: score, here: k.indexOf(D.root + '/') === 0 });
   }
   out.sort(function(a,b){ return b.s - a.s || b.hits - a.hits; });
@@ -263,7 +342,7 @@ function viewSearch(){
         '<div class="snip">' + snippet(x.d.text, q) + '</div>' +
         '<div class="meta">' +
         (nameHit(x.d, q) ? '<span class="pill">name</span>' : '') +
-        '<span>' + count(x.d.text, q) + ' in the text</span><span>' + x.d.words + ' words</span>' +
+        '<span>' + occurrences(x.d.text, q) + ' in the text</span><span>' + x.d.words + ' words</span>' +
         '<span>touched ' + ago(x.d.mtime) + ' ago</span>' +
         (an ? '<span class="pill ok">' + an + ' note' + (an>1?'s':'') + '</span>' : '') + '</div></div>');
     });
@@ -299,10 +378,29 @@ function viewSearch(){
 function noteCount(d){
   return annosFor(d).filter(function(i){ return i.state !== 'stale'; }).length;
 }
-function isStale(d){
-  if (d.kind && d.kind !== 'md') return false;   // a contract does not go stale
+/* There were two predicates for one idea. The navigator's ⚠ fired on
+   `targetChurn > 0` and the Stale surface additionally required the document to
+   be 30 days untouched, so one repository showed 231 triangles against 129
+   rows. The glyph is gone — it was unranked, decorated 46% of a corpus, and
+   said "code it describes moved on" about a signal that correlates r = 0.84
+   with how many paths a document quotes and r = 0.12 with its age. What
+   survives is the surface, ranked, and the facet now shares its predicate so
+   the two finally agree. */
+function staleRow(d){
+  if (d.kind && d.kind !== 'md') return null;    // a contract does not go stale
   var s = D.stale[d.rel];
-  return !!(s && s.targetChurn > 0);
+  if (!s) return null;
+  if (!(s.targetChurn > 0)) return null;
+  if (!((now - (s.last || 0)) > 30 * DAY)) return null;
+  return s;
+}
+/* a document the detector could not judge at all: it named no file the index
+   recognises, so it is not "fresh" — it is unmeasured, and the surface has to
+   say so rather than counting it as clean */
+function unjudgeable(d){
+  if (d.kind && d.kind !== 'md') return false;
+  var s = D.stale[d.rel];
+  return !s || !(s.targets && s.targets.length);
 }
 var LIBSORT = {
   recent: function(a,b){ return b.mtime - a.mtime; },
@@ -314,7 +412,8 @@ var LIBSORT = {
 function libDocs(){
   var out = D.docs.slice();
   if (libFacet.notes) out = out.filter(function(d){ return noteCount(d) > 0; });
-  if (libFacet.stale) out = out.filter(isStale);
+  if (libFacet.stale) out = out.filter(function(d){ return !!staleRow(d); });
+  if (libFacet.untracked) out = out.filter(function(d){ return !!d.untracked; });
   if (libFacet.recent) out = out.filter(function(d){ return now - d.mtime < 14 * DAY; });
   return out.sort(LIBSORT[libSort] || LIBSORT.recent);
 }
@@ -325,8 +424,8 @@ function fileRow(d){
     '" data-doc="' + esc(d.rel) + '">' +
     '<span class="nm">' + esc(d.rel.split('/').pop()) + '</span>' +
     (mark ? '<span class="kind">' + mark + '</span>' : '') +
+    (d.untracked ? '<span class="kind" title="not committed yet">NEW</span>' : '') +
     (n ? '<span class="n">' + n + '</span>' : '') +
-    (isStale(d) ? '<span class="sub w" title="code it describes moved on">⚠</span>' : '') +
     (d.pages ? '<span class="sub">' + d.pages + 'p</span>' : '') +
     (libSort === 'size' && d.words ? '<span class="sub">' + d.words + 'w</span>' : '') +
     '<span class="sub">' + ago(d.mtime) + '</span></div>';
@@ -365,12 +464,29 @@ function libTree(docs){
 }
 function viewStale(){
   if (!D.hasGit) return '<div class="empty">No git history here, so there is nothing to compare documents against.</div>';
-  var rows = D.docs.map(function(d){ return { d: d, s: D.stale[d.rel] || {} }; })
-    .filter(function(x){ return (x.s.targetChurn || 0) > 0 && (now - (x.s.last||0)) > 30*DAY; })
+  var rows = D.docs.map(function(d){ return { d: d, s: staleRow(d) }; })
+    .filter(function(x){ return !!x.s; })
     .sort(function(a,b){ return b.s.targetChurn - a.s.targetChurn; });
-  if (!rows.length) return '<div class="empty">Nothing looks stale — every document that names code has been touched since that code last changed.</div>';
+  var blind = D.docs.filter(unjudgeable).length;
+  /* Two different empties, and the old text asserted the wrong one. It said
+     "every document that names code has been touched since that code last
+     changed" on a repository where the detector had resolved zero targets for
+     87 of 99 documents — an all-clear about documents it never looked at. */
+  if (!rows.length){
+    return '<div class="empty">' +
+      (blind >= D.docs.length
+        ? 'Nothing here could be judged. This looks for files a document names in backticks '
+          + 'and matches them against git; none of these ' + D.docs.length + ' documents named one.'
+        : 'None of the ' + (D.docs.length - blind) + ' documents that name a file has fallen behind it.'
+          + (blind ? '<br><br>' + blind + ' of ' + D.docs.length + ' named no file this could check, '
+                     + 'so nothing is known about them either way.' : '')) +
+      '</div>';
+  }
   var out = ['<div class="qnote">Documents whose named files kept changing after the document stopped. ' +
-    'Churn is counted only in the files each document actually mentions or links.</div>',
+    'Churn is counted only in the files each document actually mentions in backticks or links — ' +
+    'so this measures what a document claims about code, not whether it is any good.' +
+    (blind ? ' <b>' + blind + ' of ' + D.docs.length + '</b> named no file this could check and are not '
+             + 'ranked here at all.' : '') + '</div>',
     '<table class="ws"><thead><tr><th>Document</th><th class="num">untouched</th>' +
     '<th class="num">commits since</th><th class="num">files named</th></tr></thead><tbody>'];
   rows.slice(0, 40).forEach(function(x){
@@ -381,7 +497,11 @@ function viewStale(){
       '<td class="num">' + x.s.targetChurn + '</td><td class="num" style="color:var(--fg-dim)">' +
       (x.s.targets||[]).length + '</td></tr>');
   });
-  return out.join('') + '</tbody></table>';
+  out.push('</tbody></table>');
+  /* it sliced to 40 and said nothing: 40 of 129 and 40 of 154 looked identical */
+  if (rows.length > 40)
+    out.push('<div class="qnote">showing 40 of ' + rows.length + ', ranked by commits since</div>');
+  return out.join('');
 }
 
 function viewNotes(){
@@ -768,7 +888,7 @@ function buildDossier(){
   if (docs.length){
     L.push('Documents that cover it:');
     docs.forEach(function(x){
-      L.push('  ' + x.d.rel + '  — "' + x.d.title + '" (' + count(x.d.text,q) + ' mentions)');
+      L.push('  ' + x.d.rel + '  — "' + x.d.title + '" (' + occurrences(x.d.text,q) + ' mentions)');
     });
     L.push('');
   }
@@ -826,19 +946,31 @@ function docTimeline(d){
 function markHits(root, q){
   var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], n;
   while ((n = w.nextNode())) nodes.push(n);
-  var s = q.toLowerCase();
+  /* every term, longest first, so `auth flow` highlights both words rather than
+     nothing — the same AND the matcher uses. Longest first stops a short term
+     eating the start of a longer one it is a prefix of. */
+  var ts = terms(q).sort(function(a, b){ return b.length - a.length; });
+  if (!ts.length) return;
   nodes.forEach(function(node){
-    var t = node.nodeValue, i = t.toLowerCase().indexOf(s);
-    if (i < 0 || !node.parentNode) return;
+    var text = node.nodeValue, lt = text.toLowerCase();
+    if (!node.parentNode) return;
+    var spans = [];
+    ts.forEach(function(s){
+      var i = lt.indexOf(s);
+      while (i >= 0){ spans.push([i, i + s.length]); i = lt.indexOf(s, i + s.length); }
+    });
+    if (!spans.length) return;
+    spans.sort(function(a, b){ return a[0] - b[0]; });
     var frag = document.createDocumentFragment(), last = 0;
-    while (i >= 0){
-      frag.appendChild(document.createTextNode(t.slice(last, i)));
-      var m = document.createElement('mark'); m.className = 'hit'; m.textContent = t.slice(i, i+q.length);
+    spans.forEach(function(sp){
+      if (sp[0] < last) return;                       // overlapping terms: keep the first
+      frag.appendChild(document.createTextNode(text.slice(last, sp[0])));
+      var m = document.createElement('mark'); m.className = 'hit';
+      m.textContent = text.slice(sp[0], sp[1]);
       frag.appendChild(m);
-      last = i + q.length;
-      i = t.toLowerCase().indexOf(s, last);
-    }
-    frag.appendChild(document.createTextNode(t.slice(last)));
+      last = sp[1];
+    });
+    frag.appendChild(document.createTextNode(text.slice(last)));
     node.parentNode.replaceChild(frag, node);
   });
 }
@@ -1144,11 +1276,12 @@ function navDocs(){
   if (navQ){
     var s = navQ.toLowerCase();
     docs = docs.filter(function(d){
-      return d.rel.toLowerCase().indexOf(s) >= 0 || (d.title || '').toLowerCase().indexOf(s) >= 0;
+      return hits(d.rel, navQ) || hits(d.title || '', navQ);
     });
   }
   var sorts = [['recent','recent'],['stale','stale'],['notes','notes'],['size','size'],['title','name']];
-  var facets = [['notes','has notes'],['stale','stale'],['recent','14 days']];
+  var facets = [['notes','has notes'],['stale','behind its code'],
+                ['untracked','untracked'],['recent','14 days']];
   var narrowed = docs.length !== D.docs.length;
   var h = ['<div class="nvctl"><div class="r">' +
     '<div class="seg">' +
@@ -1263,7 +1396,7 @@ function navNotes(){
 function navAll(){
   marks();
   var q = allQ.trim(), lq = q.toLowerCase(), h = [], counts = [];
-  function hit(s){ return !!s && s.toLowerCase().indexOf(lq) >= 0; }
+  function hit(s){ return !!s && hits(s, q); }
   if (q && !textAll && can('text')) ensureAllText(function(){ Shell.nav(); });
 
   var docs = q ? D.docs.filter(function(d){ return hit(d.rel) || hit(d.title) || hit(d.text); })
@@ -1339,9 +1472,19 @@ function navFor(mode){
    rarely know which of them it is. */
 function palSearch(q, kind){
   q = (q || '').trim();
+  /* In serve mode `workspace.py` strips `text` from every document, so the
+     palette was matching `undefined` for bodies and reporting the result as a
+     confident hit count: on a 330-document corpus, `auth` gave 0 palette rows
+     against 132 from the Search surface. Worse, it silently became full-text
+     for the rest of the run if you happened to visit the Search surface or the
+     All navigator first — two ways to get two different answers to the same
+     keystroke. Ask for the bodies, and until they land say so in the sentence
+     `searching()` already ships rather than printing a number. */
+  if (q && !textAll && can('text')) ensureAllText(function(){ Shell.palRedraw(); });
   var lq = q.toLowerCase(), groups = [], total = 0;
+  var partial = q && !textAll && can('text');
   function want(k){ return !kind || kind === k; }
-  function hit(s){ return s && s.toLowerCase().indexOf(lq) >= 0; }
+  function hit(s){ return !!s && hits(s, q); }
 
   if (want('doc')){
     var docs = D.docs.filter(function(d){ return !q || hit(d.rel) || hit(d.title) || hit(d.text); });
@@ -1430,7 +1573,9 @@ function palSearch(q, kind){
   if (D.withSessions) kinds.push('session');
   kinds.push('note', 'surface');
   return { groups: groups, kinds: kinds,
-           count: q ? total + (total === 1 ? ' hit' : ' hits') : '' };
+           count: !q ? ''
+                  : partial ? 'searching the documents…'
+                  : total + (total === 1 ? ' hit' : ' hits') };
 }
 
 function menuItems(){
@@ -1514,6 +1659,15 @@ function withheldNote(){
        + '<code>--static</code> to search them.</div>';
 }
 
+/* the last note that failed to reach disk, if any — held until one succeeds */
+var noteFail = '';
+function noteTrouble(name){
+  if (noteFail === name) return;
+  noteFail = name;
+  if (name) console.error('rubricator: could not write notes for ' + name + ' to .rubricator/notes.json');
+  stat();
+}
+
 function stat(){
   var bits = [can('watch') ? 'watching for changes' : (can('live') ? 'served locally' : 'a static page')];
   bits.push('indexed in ' + D.took + 's');
@@ -1523,6 +1677,7 @@ function stat(){
      counted from history.jsonl, which outlives the transcripts. */
   var R = D.retention;
   if (R && R.lost) bits.push(R.readable + '/' + R.known + ' readable');
+  if (noteFail) bits.push('<b class="warn">notes for ' + esc(noteFail) + ' are not on disk</b>');
   Shell.status(bits.join(' · '),
     R && R.lost
       ? R.lost + ' of ' + R.known + ' sessions can be found but not read — Claude Code '

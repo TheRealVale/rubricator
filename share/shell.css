@@ -199,3 +199,7 @@ html[data-mode="light"] #pal{background:rgba(60,50,35,.20)}
   #nav:not(.rail){position:absolute;left:0;top:46px;bottom:24px;z-index:20;box-shadow:var(--shadow)}
   .stat .r{display:none}
 }
+
+/* a failure to write your notes is not a transient event, so it is not styled
+   like one: it stays in the strip until a save succeeds */
+.stat .warn{ color:var(--v-cut, #c0392b); font-weight:600 }

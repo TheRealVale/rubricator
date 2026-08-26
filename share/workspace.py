@@ -13,7 +13,11 @@ HOME = Path.home()
 CACHE = Path(os.environ.get("RUBRICATOR_CACHE", HOME / ".cache/rubricator"))
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", "vendor",
              ".venv", "venv", "__pycache__", ".cache", "coverage", ".turbo"}
-MD_EXT = {".md", ".markdown", ".mdown", ".mdx"}
+MD_EXT = {".md", ".markdown", ".mdown", ".mdx", ".mdc"}
+PROMPT_MAX = 2000        # was 600, which lost 13.6% of all prompt text
+# the slash commands that are plumbing rather than something you asked
+SLASH_NOISE = {"model", "compact", "clear", "cost", "exit", "quit", "help",
+               "resume", "login", "logout", "status", "doctor", "init"}
 DOC_EXT = {".pdf", ".docx", ".doc", ".rtf", ".odt"}      # read through share/extract.py
 ALL_EXT = MD_EXT | DOC_EXT
 SCRATCH = re.compile(r"^/(private/)?(tmp|var/folders)/|/\.cache/|/node_modules/|/\.claude/|/\.git/")
@@ -30,20 +34,38 @@ def git(root, *args, timeout=25):
 
 
 def find_docs(root):
+    """Tracked files, plus the ones git can see and you have not staged.
+
+    The `os.walk` below reads like a fallback and is unreachable in any real
+    repository — `any(tracked)` is true the moment one file is tracked, so the
+    document an agent wrote thirty seconds ago was invisible until `git add`.
+    That is the exact inversion of what this tool is for: you switch to the
+    workspace to review the plan Claude just wrote, and it is not there, not
+    after a reindex and not after the watcher fires.
+
+    `--others --exclude-standard` is the fix and it is cheap — measured at 23 ms
+    against 19 ms for the existing call on a 3,363-file repository. Ignored
+    files stay ignored, so this does not start indexing `node_modules`."""
     tracked = git(root, "ls-files", "-z").split("\0")
-    if any(tracked):
-        for rel in tracked:
-            if rel and Path(rel).suffix.lower() in ALL_EXT:
-                p = root / rel
-                if p.is_file():
-                    yield p, rel
+    untracked = {r for r in git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0") if r}
+    if any(tracked) or untracked:
+        seen = set()
+        for rel in list(tracked) + sorted(untracked):
+            if not rel or rel in seen:
+                continue
+            if Path(rel).suffix.lower() not in ALL_EXT:
+                continue
+            seen.add(rel)
+            p = root / rel
+            if p.is_file():
+                yield p, rel, rel in untracked
         return
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
         for fn in filenames:
             if Path(fn).suffix.lower() in ALL_EXT:
                 p = Path(dirpath) / fn
-                yield p, str(p.relative_to(root))
+                yield p, str(p.relative_to(root)), False
 
 
 HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.M)
@@ -164,7 +186,6 @@ def git_activity(root, docs):
         for l in d["links"]:
             if l in commits:
                 targets.add(l)
-        stem = Path(d["rel"]).parent.as_posix()
         for m in re.finditer(r"[`\"']([\w./-]+\.(?:ts|tsx|js|jsx|py|sql|go|rs|java|kt|vue|svelte))[`\"']", d.get("text") or ""):
             t = m.group(1).lstrip("./")
             for p in all_paths:
@@ -172,11 +193,14 @@ def git_activity(root, docs):
                     targets.add(p)
                     break
         churn = sum(commits[t]["n"] for t in targets if commits[t]["last"] > last)
-        repo_churn = sum(1 for p in all_paths if commits[p]["last"] > last)
+        # `repoChurn` was computed here for every document — a whole pass over
+        # all_paths each time, 26% of the git work — and read by no JavaScript
+        # in the page. Deleted rather than surfaced: it measures how busy the
+        # repository is, which is not a fact about the document.
         stale[d["rel"]] = {"commits": info.get("n", 0), "last": last,
                            "ts": info.get("ts", [])[:40],
                            "targets": sorted(targets)[:40],
-                           "targetChurn": churn, "repoChurn": repo_churn}
+                           "targetChurn": churn}
     return commits, stale
 
 
@@ -212,6 +236,16 @@ def scrub(s):
     return s
 
 
+def is_slash_noise(txt):
+    """`/compact` is plumbing. `/api/orders returns 500 after the migration` is
+    a prompt that happens to start with a path, and the old blanket
+    `startswith("/")` lost both."""
+    if not txt.startswith("/"):
+        return False
+    first = txt.split(None, 1)[0]
+    return first.lstrip("/").lower() in SLASH_NOISE
+
+
 def load_sessions(limit_project=None, deep=False):
     """Two records of the same history, joined on the session id.
 
@@ -230,11 +264,21 @@ def load_sessions(limit_project=None, deep=False):
                 except Exception:
                     continue
                 txt = d.get("display") or ""
-                if not txt or txt.startswith("/"):        # slash commands aren't topics
+                # A blanket startswith("/") dropped 756 of 4,750 records, but 82%
+                # of those are /model, /compact and /clear — plumbing nobody
+                # searches for. The rest is a real prompt that happens to open
+                # with a path, and there is no reason to lose it. A short
+                # skiplist keeps both.
+                if not txt or is_slash_noise(txt):
                     continue
                 sid = d.get("sessionId") or ""
                 t = int((d.get("timestamp") or 0) / 1000)
-                text = scrub(txt)[:600]
+                # The cap was 600, which dropped 86,020 characters — 13.6% of all
+                # prompt text — from the 3.2% of prompts that exceed it, and made
+                # a long prompt unfindable by anything in its second half. The
+                # slash filter above was the visible loss; this was nine times
+                # larger and silent.
+                text = scrub(txt)[:PROMPT_MAX]
                 prompts.append({"sid": sid, "project": d.get("project") or "",
                                 "t": t, "text": text})
                 if not sid:
@@ -502,10 +546,12 @@ def build(roots, with_sessions, deep=False, extract_now=False):
     docs, stale, has_git = [], {}, False
     for r in roots:
         mine = []
-        for path, rel in find_docs(r):
+        for path, rel, untracked in find_docs(r):
             d = read_doc(path, rel, r, allow_extract=extract_now)
             if d:
                 d["root"] = str(r)
+                if untracked:
+                    d["untracked"] = 1
                 if len(roots) > 1:
                     d["rel"] = (r.name + "/" + rel) if r != root else rel
                 mine.append(d)
@@ -942,6 +988,12 @@ def main():
             rel = ""
         if any(d["rel"] == rel for d in data["docs"]):
             data["open"] = rel
+    # The notes on disk travel with a static page too. Without this the static
+    # tier could only ever see what that browser profile happened to hold, which
+    # is the same defect as L3 with a different cause — and a page you hand to
+    # someone should carry the marks you made in it.
+    data["notes"] = read_notes(root)
+
     if os.environ.get("RUBRICATOR_JSON"):
         json.dump(data, sys.stdout)
         return 0
