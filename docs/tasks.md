@@ -143,12 +143,33 @@ start a process, and it should look like it.
 
 - [x] **E1 · Watch mode over SSE** — `docs/watch-plan.md`, now a small addition.
 - [x] **E2 · Per-file timeline** — commits and sessions on one axis.
-- [x] **E3 · Correlation graph** — the mindmap view, gated behind a node budget.
+- [–] **E3 · Correlation graph** — **removed 2026-08-26 (P3).** Built, shipped,
+      and deleted for a reason that is not the one first given. It was *not* slow:
+      the spring loop ported verbatim to V8 runs in 19.5 ms at 299 nodes and
+      234 ms at a thousand, so the freeze this register once predicted was never
+      there and that claim is struck (X2). It was **illegible**. It drew only
+      connected nodes — 11 on a 99-document repository, 300 on a 502-document one
+      — into a fixed 900×560 viewBox with no zoom and no pan: 1,680 px² per
+      labelled node at the low end, an unreadable mat at the high end, and no
+      corpus size in between at which it is both legible and informative. Its
+      edges also came from the target extraction L4 has just relabelled, so
+      keeping it meant re-tuning `g.length > 12` and `hit.length <= 15` every
+      time that subsystem moved. There was never a node budget either, which is
+      one of O1's four false lines: what shipped was a manual *Draw it* gate and
+      an advisory string above 120 nodes. 99 lines of JavaScript and 12 of CSS.
+      Nothing else read them.
 - [x] **E4 · Subagent transcripts** (`--deep`) so delegated file edits are attributed.
 - [x] **E5 · `md serve`** — a persistent workspace on a stable port.
 - [x] **E6 · Provider interface** — commits, GitHub issues, a notes folder.
 - [x] **E7 · User views** — `~/.config/rubricator/views/*.js`, loaded if present.
-- [x] **E8 · Multi-root workspace.**
+- [~] **E8 · Multi-root workspace.** Opens, indexes and reads. Not finished and
+      not going to be (X22): only the first root has a notes store, so the other
+      roots are read-only and their rows say so, `asset()` resolves against the
+      first, and `remember_project` stores single paths, so a multi-root
+      workspace cannot be reopened. Measured usage on this machine when the
+      decision was taken: four recents, all single paths; all three cached pages
+      single-root. O2 made the refusal explicit instead of writing a second
+      repository's marks into the first.
 
 ---
 
@@ -1009,7 +1030,7 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       *Done when:* each of the four lines states what is in the code, and C7's
       claim is either deleted or built. **S**
 
-- [ ] **O2 · Multi-root becomes read-only, and says so.** Reproduced:
+- [x] **O2 · Multi-root becomes read-only, and says so.** Reproduced:
       `build([rubricator, repo A])` gives 110 documents, 99 of them with a
       stale key of the form `repo A/repo A/…` matching nothing and
       `commits: 0`, because `workspace.py:399-400` prefixes inside the
@@ -1027,7 +1048,7 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       reason rather than written into the first repo, `E8` reads `[~]`, and
       `md ~/Repositories` says what it is about to do. **S**
 
-- [ ] **O3 · `continue-plan.md`'s measurement was confounded.** Rows 3 and 4 of
+- [x] **O3 · `continue-plan.md`'s measurement was confounded.** Rows 3 and 4 of
       its §1 table — *a shell tool call in `-p`: ran, with no prompt and no
       approval event* and *the same, with `--permission-mode manual`: ran
       anyway* — measured the author's own `~/.claude/settings.json`
@@ -1048,8 +1069,12 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       2.1.241*, and sits where a reader of rows 3 and 4 cannot miss it; and the
       *Not planned: a permission UI* paragraph above no longer claims a manual
       permission mode was tested. **S**
+      *Ticked 2026-08-26 having been written earlier:* both halves went in with
+      the measurement that found the confound, and the item was never marked.
+      Checked line by line against the four conditions above rather than
+      assumed — no new text was needed.
 
-- [ ] **O4 · The platform matrix, and the Chrome path fixed at every site.**
+- [x] **O4 · The platform matrix, and the Chrome path fixed at every site.**
       `/Applications/Google Chrome.app` is a literal at `bin/md:175, 176, 188,
       189, 417` and `hook.py:20` — six occurrences, **four guard sites**: three
       in `bin/md` (`:175`, `:188`, `:423`) and one in `hook.py` (`:110`). Only
@@ -1068,6 +1093,10 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       *Done when:* all four guard sites resolve Chrome the same way, and the
       matrix answers the first question a Linux visitor asks without promising
       anything. **M**
+      *Shipped 2026-08-26* as [`platform.md`](platform.md). The resolver looks
+      in `/Applications`, `~/Applications` and then `mdfind`, caches the answer
+      per process, and is asked by all four sites; `share/platform.py` was not
+      extracted, and the matrix says why.
 
 - [ ] **O5 · The standing rules, written down once.** Twelve decisions this
       investigation settled that will otherwise be re-litigated — the register
@@ -1086,7 +1115,7 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       with its justification, and the README's sentence is amended to the post-M6
       truth. **M**
 
-- [ ] **O6 · The shipped plans name four private repositories.**
+- [x] **O6 · The shipped plans name four private repositories.**
       `workspace-plan.md:183-185` tabulates `<repo>/requirements.md`,
       `<repo>/ROADMAP.md` and a `public-docs/features/*` path by name;
       `architecture-plan.md:182-186` and `conversations-plan.md:192` reproduce
@@ -1101,6 +1130,15 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       *Done when:* `grep -rE '<the four names>' --include='*.md' .` returns
       either nothing or only lines the owner has explicitly kept, and
       `measurements.md`'s parenthetical is updated to match.
+      *Decided 2026-08-26: the names go.* A public MIT repository is the wrong
+      place for three private repository names, two document filenames from
+      inside one of them and four prompt fragments, and the five newer plans
+      already had the convention to move them into. The mapping is the one
+      `measurements.md` already uses, so no figure loses its referent, and the
+      ASCII mocks were repadded rather than left ragged. **The git history still
+      carries the names**: they were pushed to a public repository, and
+      rewriting published history is a worse remedy than the disclosure. What
+      this buys is that nothing at the tip names them and nothing new will.
 
 ---
 
@@ -1111,7 +1149,7 @@ and three of the claims a rewrite would naturally reach for were measured false.
 This is also where the tool gets a version tag and a distribution channel, which
 only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
 
-- [ ] **P1 · The front page stops understating the tool.** `README.md:26` says
+- [x] **P1 · The front page stops understating the tool.** `README.md:26` says
       *"One bash script and a page."* Measured: **7,372 lines across 18 files**
       of own code (7,379 with `vendor.txt`; 12,314 with the five vendored
       libraries, which the next sentence already discloses). *One bash script
@@ -1136,7 +1174,7 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       lost anchor resolved, and `README.md:245` matches what K5b has or has not
       shipped. **M**
 
-- [ ] **P2 · Cut four sections; backfill with what ships.** Themes, *Extending
+- [x] **P2 · Cut four sections; backfill with what ships.** Themes, *Extending
       it*, the graph paragraph and the power-flag block come out of a
       4,074-word, twenty-heading README — advertising an extension API before
       you have a user invites the reader to ask who else is building on it.
@@ -1163,7 +1201,7 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       the three above, the page opens with the owner's wording as quoted, and
       both screenshots are in the repo. **M**
 
-- [ ] **P3 · Delete the graph.** Not for the reason first given — the spring
+- [x] **P3 · Delete the graph.** Not for the reason first given — the spring
       loop was ported verbatim to V8 and runs in **19.5 ms** at 299 nodes,
       234 ms at a thousand, so there is no freeze and that claim is struck (X2).
       Delete it because it is structurally illegible: it draws only connected
@@ -1176,7 +1214,7 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       *Done when:* `viewGraph`, `graphEdges` and their CSS are gone, `E3` reads
       *removed*, and the register says why in one paragraph. **S**
 
-- [ ] **P4 · Prior art, named and numbered correctly.** The README does have a
+- [x] **P4 · Prior art, named and numbered correctly.** The README does have a
       prior-art section, at line 442, since the first commit — the finding that
       said otherwise was wrong. What it lacks is numbers, scale and the native
       alternatives. Name, with figures dated to the day they were fetched:
@@ -1198,7 +1236,7 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       call and carries its date, and none of the three struck phrases appears
       anywhere in the repo. **S**
 
-- [ ] **P5 · The keyboard tool gets a keyboard.** Three small repairs, none of
+- [x] **P5 · The keyboard tool gets a keyboard.** Three small repairs, none of
       them an accessibility project. `all:unset` appears **23 times** across the
       three stylesheets and resets `outline-style`, so the platform's focus ring
       is gone by construction — one global
@@ -1217,7 +1255,7 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       *Done when:* every focusable control shows a focus ring, `⇧Tab` reverses,
       `?` lists the keymap, and `/` in Notes mode filters notes. **S**
 
-- [ ] **P6 · A tag, topics, a badge.** Zero tags, zero releases, zero topics,
+- [x] **P6 · A tag, topics, a badge.** Zero tags, zero releases, zero topics,
       empty homepage, no CI badge. Cut `v2.0.0`, set six topics, point the
       homepage somewhere, add the CI badge from K3 — each answers a specific
       reader, and the badge is the only place K3's assertion becomes visible to
@@ -1229,7 +1267,7 @@ only make sense once K–O hold. See [`scope-plan.md`](scope-plan.md).
       `topics`, one release, and the README's first line carries a green badge.
       **S**
 
-- [ ] **P7 · The plugin manifest, in the repo.** Ship
+- [x] **P7 · The plugin manifest, in the repo.** Ship
       `.claude-plugin/marketplace.json`, `plugin.json` and `hooks/hooks.json`,
       so a Claude Code user can run `/plugin marketplace add
       TheRealVale/rubricator` and get the hook without `install-hook.sh`

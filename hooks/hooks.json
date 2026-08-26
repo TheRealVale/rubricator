@@ -1,0 +1,17 @@
+{
+  "description": "Opens rubricator's review window when Claude finishes a plan, and returns your decision.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/md\" --hook plan",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}

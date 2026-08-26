@@ -46,9 +46,20 @@ Four of the five are private and appear throughout these plans as **repo A** to
 **repo D**; the letters are stable across every document, so a figure quoted in
 one plan can be matched to a figure in another. Nothing from inside them appears
 anywhere in this repository beyond their aggregate counts — no titles, no paths,
-no headings, no quoted lines. (That discipline is newer than the repository:
-`workspace-plan.md` and `architecture-plan.md` were written before it and name
-both the repositories and, in two places, documents inside them. See **O6**.)
+no headings, no quoted lines.
+
+That discipline was newer than the repository, and **O6 made the older half
+agree with it on 2026-08-26**: `workspace-plan.md`, `architecture-plan.md`,
+`conversations-plan.md` and `README.md` named three of the four repositories
+between them, tabulated two documents inside one by filename, and reproduced
+four prompt fragments in mock interfaces. All of it now reads `repo A`–`repo D`
+or a neutral stand-in, and `grep -riE 'werdewaerts|lattisfy|hypergol|conventum'`
+over the working tree returns nothing.
+
+One limit, stated rather than glossed: **the git history still carries them.**
+The names were pushed to a public repository and rewriting published history is
+a worse remedy than the disclosure. What this achieves is that nothing at the
+tip names them and nothing new will.
 
 | repo | tracked `*.md` | tracked files | documents the index builds |
 |---|---:|---:|---:|

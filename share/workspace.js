@@ -86,6 +86,33 @@ var DISK = D.notes || {};
    it over as `nkey`. Falling back to `abs` keeps a page built by an older
    build readable. review.js's own localStorage key is untouched. */
 function nkeyOf(d){ return (d && (d.nkey || d.abs)) || ''; }
+
+/* A static page carries `D.notes` — workspace.py ships the sidecar with it
+   deliberately, so a page you hand to someone arrives with the marks you made
+   in it. It then never read them: the bridge below is installed only when there
+   is a server to write back to, so the review layer fell through to
+   `localStorage`, which on a freshly opened file is empty. The navigator badge
+   read `DISK` (L3) and said 3; the tray beside it said *Nothing yet*. Same
+   defect as L3, one tier over, and it survived L3 because L3 fixed the
+   aggregate views and this is the per-document one.
+
+   Read-only, because there is nowhere to write: marks made on a static page
+   stay in that browser, which is what the page already says. */
+if (!can('notes') && window.MDReview && D.notes){
+  window.MDReview.identity = { by: D.by || '' };
+  var _localGet = window.MDReview.storage.get;
+  window.MDReview.storage.get = function(key, path, nkey){
+    var mine = null;
+    try { mine = _localGet.call(this, key, path, nkey); } catch(e){}
+    var theirs = DISK[nkey || path] || null;
+    if (!theirs) return mine;
+    if (!mine) return theirs;
+    /* whichever was saved later; a mark made in this browser after the page was
+       built is newer than the one baked into it */
+    return (mine.saved || 0) > (theirs.saved || 0) ? mine : theirs;
+  };
+}
+
 if (can('notes') && window.MDReview){
   window.MDReview.identity = { by: D.by || '' };
   window.MDReview.storage.get = function(key, path, nkey){
@@ -457,6 +484,15 @@ function fileRow(d){
     '<span class="nm">' + esc(d.rel.split('/').pop()) + '</span>' +
     (mark ? '<span class="kind">' + mark + '</span>' : '') +
     (d.untracked ? '<span class="kind" title="not committed yet">NEW</span>' : '') +
+    /* O2 · in a multi-root workspace the row says which repository it is from,
+       and whether marks can be written to it. Only the first root has a notes
+       store; the others are read-only and now say so instead of having their
+       marks written into the first repository. */
+    (d.repo ? '<span class="kind repo"' + (d.readonly
+        ? ' title="Read-only here — marks are stored in the first repository of a '
+          + 'multi-root workspace. Open ' + esc(d.repo) + ' on its own to mark it."'
+        : ' title="' + esc(d.repo) + '"') + '>' + esc(d.repo) +
+      (d.readonly ? ' ·&nbsp;ro' : '') + '</span>' : '') +
     (n ? '<span class="n">' + n + '</span>' : '') +
     (d.pages ? '<span class="sub">' + d.pages + 'p</span>' : '') +
     (libSort === 'size' && d.words ? '<span class="sub">' + d.words + 'w</span>' : '') +
@@ -715,105 +751,6 @@ function promptList(mine, q){
     }).join('') + '</div>';
 }
 
-/* ── E3 · the graph: which documents belong together ─────────────────────── */
-var graphOn = false;
-function graphEdges(){
-  /* two documents are related when they describe the same files, or when one
-     session touched both — the two signals the index already holds */
-  var docs = D.docs, idx = {}, edges = {};
-  docs.forEach(function(d, i){ idx[d.rel] = i; });
-  function link(a, b, w){
-    if (a === b) return;
-    var k = a < b ? a + '\u0000' + b : b + '\u0000' + a;
-    edges[k] = (edges[k] || 0) + w;
-  }
-  var byTarget = {};
-  docs.forEach(function(d){
-    ((D.stale[d.rel] || {}).targets || []).forEach(function(t){
-      (byTarget[t] = byTarget[t] || []).push(d.rel);
-    });
-  });
-  for (var t in byTarget){
-    var g = byTarget[t];
-    if (g.length > 12) continue;            // a file everything mentions says nothing
-    for (var i = 0; i < g.length; i++) for (var j = i + 1; j < g.length; j++) link(g[i], g[j], 1);
-  }
-  if (D.withSessions){
-    for (var sid in D.sessions){
-      var files = D.sessions[sid].files || [];
-      if (!files.length || files.length > 400) continue;
-      var hit = [];
-      docs.forEach(function(d){ if (files.indexOf(d.abs) >= 0) hit.push(d.rel); });
-      if (hit.length > 1 && hit.length <= 15){
-        for (var a = 0; a < hit.length; a++) for (var b = a + 1; b < hit.length; b++) link(hit[a], hit[b], 2);
-      }
-    }
-  }
-  return Object.keys(edges).map(function(k){
-    var p = k.split('\u0000');
-    return { a: idx[p[0]], b: idx[p[1]], w: edges[k] };
-  }).filter(function(e){ return e.a != null && e.b != null; });
-}
-function viewGraph(){
-  var n = D.docs.length;
-  if (!graphOn){
-    return '<div class="empty">A map of which documents belong together, drawn from the ' +
-      'files they describe and the sessions that touched them.<br><br>' +
-      n + ' documents' + (n > 120 ? ' — that is a lot to lay out' : '') + '.<br><br>' +
-      '<div class="act"><button data-graph="1">Draw it</button></div></div>';
-  }
-  var edges = graphEdges();
-  if (!edges.length) return '<div class="act"><button class="ghost" data-graph="0">back</button></div>' +
-    '<div class="empty">Nothing connects yet: no two documents describe the same files, and ' +
-    'no session touched more than one of them.</div>';
-
-  /* a plain spring layout — at this size it converges in well under a second */
-  var deg = {}; edges.forEach(function(e){ deg[e.a] = (deg[e.a]||0)+1; deg[e.b] = (deg[e.b]||0)+1; });
-  var ids = Object.keys(deg).map(Number);
-  var W = 900, H = 560, P = [];
-  ids.forEach(function(id, i){
-    var a = 2 * Math.PI * i / ids.length;
-    P.push({ id: id, x: W/2 + Math.cos(a) * 220, y: H/2 + Math.sin(a) * 200, vx: 0, vy: 0 });
-  });
-  var pos = {}; P.forEach(function(p){ pos[p.id] = p; });
-  for (var step = 0; step < 220; step++){
-    for (var i = 0; i < P.length; i++) for (var j = i+1; j < P.length; j++){
-      var dx = P[i].x - P[j].x, dy = P[i].y - P[j].y, d2 = dx*dx + dy*dy || 1;
-      var f = 5200 / d2;
-      var dx2 = dx * f, dy2 = dy * f;
-      P[i].vx += dx2; P[i].vy += dy2; P[j].vx -= dx2; P[j].vy -= dy2;
-    }
-    edges.forEach(function(e){
-      var A = pos[e.a], B = pos[e.b]; if (!A || !B) return;
-      var dx = B.x - A.x, dy = B.y - A.y, d = Math.sqrt(dx*dx + dy*dy) || 1;
-      var f = (d - 130) * 0.012 * Math.min(3, e.w);
-      A.vx += dx/d*f; A.vy += dy/d*f; B.vx -= dx/d*f; B.vy -= dy/d*f;
-    });
-    P.forEach(function(p){
-      p.x += Math.max(-12, Math.min(12, p.vx)); p.y += Math.max(-12, Math.min(12, p.vy));
-      p.vx *= 0.55; p.vy *= 0.55;
-      p.x = Math.max(60, Math.min(W-60, p.x)); p.y = Math.max(30, Math.min(H-30, p.y));
-    });
-  }
-  var out = ['<div class="ctl"><button class="chip on" data-graph="0">back to the list</button>' +
-    '<span class="sp">' + ids.length + ' connected documents · ' + edges.length + ' links</span></div>',
-    '<div class="graph"><svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">'];
-  edges.forEach(function(e){
-    var A = pos[e.a], B = pos[e.b]; if (!A || !B) return;
-    out.push('<line x1="'+A.x.toFixed(1)+'" y1="'+A.y.toFixed(1)+'" x2="'+B.x.toFixed(1)+
-             '" y2="'+B.y.toFixed(1)+'" stroke-width="'+Math.min(3, e.w)+'"/>');
-  });
-  P.forEach(function(p){
-    var d = D.docs[p.id], r = 5 + Math.min(9, deg[p.id]);
-    out.push('<g class="n" data-doc="'+esc(d.rel)+'"><circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+
-      '" r="'+r+'"/><text x="'+p.x.toFixed(1)+'" y="'+(p.y - r - 5).toFixed(1)+'">'+
-      esc(d.title.slice(0, 26))+'</text></g>');
-  });
-  out.push('</svg></div>');
-  return out.join('');
-}
-
-/* ── settings ────────────────────────────────────────────────────────────── */
 var SET = D.settings || null;
 function setOne(key, value, note){
   var o = {}; o[key] = value;
@@ -1011,7 +948,7 @@ function markHits(root, q){
    A surface is whatever a pane can hold. The shell knows only that it can
    render itself into a div and say what to call it; everything that is
    specific to a document, a session or a list lives down here. */
-var TITLES = { search:'Search', stale:'Stale', notes:'Notes', graph:'Graph', settings:'Settings' };
+var TITLES = { search:'Search', stale:'Stale', notes:'Notes', settings:'Settings' };
 
 function clip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 function grabCaret(host){
@@ -1032,7 +969,7 @@ function putCaret(c){
 function listSurface(kind){
   var mine = USER_VIEWS.filter(function(v){ return v.id === kind; })[0];
   var builtin = { search:viewSearch, stale:viewStale, notes:viewNotes,
-                  graph:viewGraph, settings:viewSettings };
+                  settings:viewSettings };
   var S = {};
   S.render = function(host){ S.refresh(host); };
   S.refresh = function(host){
@@ -1610,6 +1547,52 @@ function palSearch(q, kind){
                   : total + (total === 1 ? ' hit' : ' hits') };
 }
 
+/* ── P5 · the keymap ─────────────────────────────────────────────────────
+   The whole workspace keymap existed only in the README — a tool whose
+   interface *is* a keymap, failing at its own premise. Ported from the reader's
+   ⌘/ sheet: same markup, same classes, this page's keys. */
+var KEYS = [
+  ['Moving', [
+    ['⌘ K', 'find anything — documents, sessions, notes, surfaces'],
+    ['⇧ ⌘ K', 'widen a session search past this repository'],
+    ['/', 'filter the navigator, in whichever mode it is in'],
+    ['⌘ 1-9', 'jump to a tab'], ['⌘ ⌥ [ ]', 'previous / next tab'],
+    ['⌘ W', 'close the tab'], ['⌘ \\', 'split the pane'], ['⌘ B', 'the navigator'],
+    ['⌘ E', 'the tab strip']
+  ]],
+  ['Marking', [
+    ['j / k', 'move between blocks'], ['c', 'change'], ['?', 'question'],
+    ['x', 'cut'], ['e', 'expand'], ['n', 'note'], ['a', 'approve'],
+    ['f', 'the feedback panel'], ['⌘ ⏎', 'copy the feedback'],
+    ['esc', 'close what is open']
+  ]],
+  ['This page', [
+    ['r', 'reindex'], ['t', 'light / dark'], ['?', 'this sheet']
+  ]]
+];
+var KEYS_NOTE =
+  '<b>⌘F is deliberately not bound.</b> It falls through to the browser\'s own ' +
+  'find bar, which already has a hit count, next and previous, and wrap-around — ' +
+  'and searches the page you are actually looking at. The reader binds ⌘F because ' +
+  'it has one document; this page does not because it has several.';
+function drawKeys(){
+  var c = document.getElementById('keys-cols');
+  if (!c || c.dataset.done) return;
+  c.innerHTML = KEYS.map(function(g){
+    return '<div class="grp"><b>' + esc(g[0]) + '</b>' + g[1].map(function(r){
+      return '<div class="row"><kbd>' + r[0] + '</kbd><span>' + esc(r[1]) + '</span></div>';
+    }).join('') + '</div>';
+  }).join('') + '<div class="note" style="grid-column:1/-1">' + KEYS_NOTE + '</div>';
+  c.dataset.done = '1';
+}
+function toggleKeys(on){
+  var k = document.getElementById('keys');
+  if (!k) return;
+  drawKeys();
+  k.hidden = on === undefined ? !k.hidden : !on;
+  if (!k.hidden) { var x = document.getElementById('keys-x'); if (x) x.focus(); }
+}
+
 function menuItems(){
   var out = [];
   Object.keys(TITLES).forEach(function(k){
@@ -1625,6 +1608,7 @@ function menuItems(){
   }
   out.push({ sep:true });
   out.push({ label:'Split the pane', key:'⌘\\', run: function(){ Shell.split(); } });
+  out.push({ label:'Keys', key:'?', run: function(){ toggleKeys(true); } });
   if (can('reindex')) out.push({ label:'Reindex', key:'r', run: function(){ reindex(); } });
   return out;
 }
@@ -1871,8 +1855,6 @@ document.addEventListener('click', function(e){
     libDirs(libDocs()).forEach(function(d){ libOpen[d] = !shut; });
     return Shell.nav();
   }
-  var gb = e.target.closest('[data-graph]');
-  if (gb){ graphOn = gb.dataset.graph === '1'; return Shell.refresh(); }
   var dir = e.target.closest('[data-dir]');
   if (dir){
     libOpen[dir.dataset.dir] = libOpen[dir.dataset.dir] === false;
@@ -1902,18 +1884,30 @@ document.addEventListener('keydown', function(e){
     /* the review layer only hears Escape while a document is on screen; from a
        list the tray would otherwise be stuck open */
     if (typing) return e.target.blur();
+    var ks = document.getElementById('keys');
+    if (ks && !ks.hidden){ ks.hidden = true; return; }
     var tray = $('tray'), t = Shell.active();
     if (tray.classList.contains('open') && (!t || t.kind !== 'doc')) $('tray-close').click();
     return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === '/'){
+    /* P5 · `/` used to knock the navigator out of Notes mode before focusing
+       the filter, so the one keystroke for "filter what I am looking at" could
+       not filter notes — the only mode where you are hunting your own words. */
     e.preventDefault();
-    if (Shell.navMode() === 'notes') Shell.setNavMode('docs');
     Shell.nav();
     var i = $('nvq-i');
     if (i) i.focus(); else Shell.palette(true);
     return;
+  }
+  if (e.key === '?'){
+    /* `?` is also the Question verb. The review layer owns it while a document
+       is on screen, and only then — so the sheet takes the key from the lists,
+       where nothing else wants it, and never out from under a mark. */
+    var at = Shell.active();
+    if (at && at.kind === 'doc') return;
+    e.preventDefault(); return toggleKeys();
   }
   if (e.key === 'r' && can('reindex')){ e.preventDefault(); return reindex(); }
   if (e.key === 't'){ pickTheme(MD.nextTheme()); }
@@ -1938,6 +1932,16 @@ if (D.withSessions){
 }
 
 /* ── go ─────────────────────────────────────────────────────────────────── */
+/* the sheet's own controls */
+['keys-x'].forEach(function(id){
+  var b = document.getElementById(id);
+  if (b) b.addEventListener('click', function(){ toggleKeys(false); });
+});
+(function(){
+  var k = document.getElementById('keys');
+  if (k) k.addEventListener('click', function(e){ if (e.target === k) toggleKeys(false); });
+})();
+
 var restored = Shell.init({
   storeKey: 'rubricator:layout:' + hash(D.root),
   make: makeSurface, spec: specFor, nav: navFor, search: palSearch,

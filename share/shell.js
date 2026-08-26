@@ -443,11 +443,15 @@ function wire(){
     if (e.key === 'Enter'){ e.preventDefault(); return palRun(e.metaKey || e.ctrlKey); }
     if (e.key === 'Escape'){ e.preventDefault(); return palette(false); }
     if (e.key === 'Tab'){
+      /* P5 · there was no shift check, so ⇧Tab advanced the filter instead of
+         stepping back through it — in a palette whose whole point is that you
+         can reach anything without the mouse. */
       e.preventDefault();
       var ks = [].map.call($('pal-kinds').children, function(b){ return b.dataset.pk; });
       ks.push('');
       var i = ks.indexOf(pal.kind);
-      pal.kind = ks[(i + 1) % ks.length];
+      var step = e.shiftKey ? -1 : 1;
+      pal.kind = ks[(i + step + ks.length) % ks.length];
       return palDraw();
     }
   });

@@ -194,9 +194,9 @@ A crude repo-wide version already found real hits here:
 
 | Doc | Untouched | Commits since |
 |---|---|---|
-| `lattisfy/requirements.md` | 152 days | 604 |
-| `lattisfy/ROADMAP.md` | 125 days | 586 |
-| `Conventum-Hub/public-docs/features/*` | 210+ days | ~2,300 |
+| repo B, a requirements document | 152 days | 604 |
+| repo B, a roadmap | 125 days | 586 |
+| repo C, a directory of feature specs | 210+ days | ~2,300 |
 
 Pure git plus the corpus — **no session data needed**, so it can ship before any of the
 archaeology. **Half a session.**

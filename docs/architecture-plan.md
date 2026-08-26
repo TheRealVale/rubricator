@@ -179,13 +179,13 @@ So the browser must **say which kind a session is**, or the Resume button lies.
 
 ```
 ┌────────────────────────────────────┬──────────────────────────┐
-│ ● today   werdewaerts        23 ▸  │  ● resumable             │
-│   "we currently can only start…"   │  fed9ca97 · werdewaerts  │
+│ ● today   repo A             23 ▸  │  ● resumable             │
+│   "…the first prompt, truncated"   │  fed9ca97 · repo A       │
 │ ● Aug 20  rubricator         41 ▸  │  23 prompts · 2h 10m     │
 │   "lets build it, and then publish"│                          │
-│ ○ Aug 12  lattisfy            8 ▸  │  Prompts                 │
-│   "why does the worker cold start" │   1. we currently can…   │
-│                                    │   2. lets first fully…   │
+│ ○ Aug 12  repo B              8 ▸  │  Prompts                 │
+│   "…and the one before it"         │   1. …                   │
+│                                    │   2. …                   │
 │ [ this repo | all repos ]          │                          │
 │ [ ● resumable only ]               │  Files touched (12)      │
 │                                    │   share/workspace.py     │

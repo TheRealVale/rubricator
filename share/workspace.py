@@ -534,6 +534,27 @@ def load_extra_providers():
 
 
 # ── assembly ─────────────────────────────────────────────────────────────────
+def first_contact(roots):
+    """O2. `md ~/Repositories` is a plausible first command, and it answered
+    silently: 1,982 documents, no git anywhere, one flat list, a 41.1 MB page.
+    Nothing about that is wrong — it is just almost never what was meant, and
+    the tool said nothing either way. Saying so costs one stat per child."""
+    for r in roots:
+        if (r / ".git").exists():
+            continue
+        try:
+            kids = [d for d in sorted(r.iterdir()) if d.is_dir() and (d / ".git").exists()]
+        except Exception:
+            continue
+        if len(kids) < 3:
+            continue
+        sys.stderr.write(
+            f"rubricator: {r} is not a repository — it holds {len(kids)} of them.\n"
+            f"  Indexing all of it: no commit history, no staleness signal, one flat list,\n"
+            f"  and marks for every repository stored in this directory rather than in theirs.\n"
+            f"  For one of them:  md {kids[0]}\n")
+
+
 def build(roots, with_sessions, deep=False, extract_now=False):
     """roots may be one directory or several; the first is the one the page is
     named after and the one relative paths are shown against."""
@@ -543,6 +564,7 @@ def build(roots, with_sessions, deep=False, extract_now=False):
     root = roots[0]
     t0 = time.time()
 
+    first_contact(roots)
     docs, stale, has_git = [], {}, False
     for r in roots:
         mine = []
@@ -554,12 +576,21 @@ def build(roots, with_sessions, deep=False, extract_now=False):
                 if untracked:
                     d["untracked"] = 1
                 if len(roots) > 1:
-                    d["rel"] = (r.name + "/" + rel) if r != root else rel
+                    d["repo"] = r.name          # O2 · the row says which one
+                    d["readonly"] = 1 if r != root else 0
                 mine.append(d)
+        # O2 · git_activity keys its result by d["rel"], so the prefix has to go
+        # on afterwards. It used to go on inside the loop as well, and every
+        # staleness key for a second root came out as `repo A/repo A/…`,
+        # matching no document and reading as `commits: 0` for 99 of 110.
         commits, st = git_activity(r, mine)
         has_git = has_git or bool(commits)
+        pre = (r.name + "/") if (len(roots) > 1 and r != root) else ""
         for k, v in st.items():
-            stale[(r.name + "/" + k) if (len(roots) > 1 and r != root) else k] = v
+            stale[pre + k] = v
+        if pre:
+            for d in mine:
+                d["rel"] = pre + d["rel"]
         docs.extend(mine)
 
     data = {

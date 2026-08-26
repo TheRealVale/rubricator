@@ -189,19 +189,19 @@ properly. One control, three answers to nine questions.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ hypergol · Plan the affix redesign                    [⤺ resume] [⑂] │
+│ repo D · Plan the widget redesign                     [⤺ resume] [⑂] │
 │ ● fable-5 · main · 137 turns · 4h 20m       ① transcript ② you ③ what│
 ├────┬─────────────────────────────────────────────────────────────────┤
 │ ▎  │ ▸ you                                       14:02   ⧉  ↻  ✎     │
-│ ▎  │   lets plan the affix redesign, i want the rolls to …           │
+│ ▎  │   lets plan the widget redesign, i want the parts to …          │
 │ ▊  │                                                                 │
 │ ▊  │ ▸ claude                                    14:02      ✎        │
-│ ▎  │   I'll look at how affixes are rolled today before              │
+│ ▎  │   I'll look at how widgets are built today before               │
 │ ▎  │   proposing anything.                                           │
 │ ▎  │   ┌─────────────────────────────────────────────┐               │
-│ ▎  │   │ ⌕ Read   src/affix.ts                       │               │
-│ ▎  │   │ ✎ Edit   docs/affixes.md      edited   ⊕diff│               │
-│ ▎  │   │ + Write  docs/affix-plan.md   created  ⊕open│               │
+│ ▎  │   │ ⌕ Read   src/widget.ts                      │               │
+│ ▎  │   │ ✎ Edit   docs/widgets.md      edited   ⊕diff│               │
+│ ▎  │   │ + Write  docs/widget-plan.md  created  ⊕open│               │
 │ ▎  │   └─────────────────────────────────────────────┘               │
 │ ▎  │   ⋯ 4 thoughts                                                  │
 │ ══ │   ── context compacted ──                                       │

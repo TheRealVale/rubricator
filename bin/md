@@ -58,6 +58,11 @@ OPTIONS
 WORKSPACE
   -w, --workspace [DIR]   the same workspace, named explicitly — safe to script
                           against, whatever the bare default becomes
+
+  More than one directory opens them side by side, but only the first can be
+  marked up: notes live in one store, and that store belongs to the first
+  repository. Rows from the others are badged read-only. Open a repository on
+  its own to mark it.
       --sessions          also index your own Claude Code history, so a topic resolves
                           to the sessions that discussed it and the files they changed.
                           Local only — cannot be combined with --out.
@@ -87,7 +92,7 @@ EXAMPLES
   md --sessions            # …and correlate it with your Claude Code history
   md README.md
   md ~/Repositories/other  # the workspace for another repo
-  md . ../other-repo       # both at once
+  md . ../other-repo       # both at once (read-only past the first: see below)
   md serve --port 7777 --sessions
   git show HEAD:NOTES.md | md -
   md -o /tmp/spec.html docs/spec.md    # self-contained, shareable HTML
@@ -139,6 +144,33 @@ ensure_vendor() {
 
 die() { printf 'md: %s\n' "$1" >&2; exit 1; }
 
+# ── where Chrome is ──────────────────────────────────────────────────────────
+# O4. This was the literal "/Applications/Google Chrome.app" at four guard
+# sites — three here and one in share/hook.py — so a fix scoped to this file
+# left the hook opening the wrong thing. Every site now asks this, and the hook
+# asks its own copy of the same three questions.
+#
+# The degradation is cosmetic: every caller falls back to plain `open`, which
+# uses the default browser and works. What is lost without Chrome is the
+# app-window presentation, nothing else. Prints the bundle path, or nothing.
+_CHROME_APP=""
+chrome_app() {
+  if [ -n "$_CHROME_APP" ]; then
+    [ "$_CHROME_APP" = "-" ] || printf '%s\n' "$_CHROME_APP"
+    return 0
+  fi
+  local c
+  for c in "/Applications/Google Chrome.app" "$HOME/Applications/Google Chrome.app"; do
+    if [ -d "$c" ]; then _CHROME_APP="$c"; printf '%s\n' "$c"; return 0; fi
+  done
+  if command -v mdfind >/dev/null 2>&1; then
+    c="$(mdfind "kMDItemCFBundleIdentifier == 'com.google.Chrome'" 2>/dev/null | head -1)"
+    if [ -n "$c" ] && [ -d "$c" ]; then _CHROME_APP="$c"; printf '%s\n' "$c"; return 0; fi
+  fi
+  _CHROME_APP="-"
+  return 0
+}
+
 urlenc() {
   local s="$1" out="" c
   while [ -n "$s" ]; do
@@ -188,8 +220,9 @@ ws_run() {
     done
     rm -f "$urlfile"
     if [ -n "$url" ]; then
-      if [ -d "/Applications/Google Chrome.app" ]; then
-        open -na "/Applications/Google Chrome.app" --args --app="$url" --window-size=1320,980 >/dev/null 2>&1 || open "$url"
+      _c="$(chrome_app)"
+      if [ -n "$_c" ]; then
+        open -na "$_c" --args --app="$url" --window-size=1320,980 >/dev/null 2>&1 || open "$url"
       else open "$url"; fi
       return 0
     fi
@@ -201,8 +234,9 @@ ws_run() {
     "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${DEEP:+--deep} >/dev/null || exit 1
   if [ "$doopen" = 1 ] && [ -z "$out" ]; then
     url="file://$(urlenc "$file")"
-    if [ -d "/Applications/Google Chrome.app" ]; then
-      open -na "/Applications/Google Chrome.app" --args --app="$url" --window-size=1280,960 >/dev/null 2>&1 || open "$url"
+    _c="$(chrome_app)"
+    if [ -n "$_c" ]; then
+      open -na "$_c" --args --app="$url" --window-size=1280,960 >/dev/null 2>&1 || open "$url"
     else open "$url"; fi
   else
     printf '%s\n' "$file"
@@ -434,13 +468,13 @@ find "$CACHE/index" -name 'sessions*.json' -mtime +7 -delete 2>/dev/null || true
 
 # ── open ─────────────────────────────────────────────────────────────────────
 FILEURL="file://$(urlenc "$HTML")"
-CHROME="/Applications/Google Chrome.app"
+CHROME="$(chrome_app)"
 
 case "$OPEN_MODE" in
   none)    printf '%s\n' "$HTML" ;;
   browser) open "$FILEURL" ;;
   app)
-    if [ -d "$CHROME" ]; then
+    if [ -n "$CHROME" ]; then
       open -na "$CHROME" --args --app="$FILEURL" --window-size=1120,900 >/dev/null 2>&1 \
         || open "$FILEURL"
     else

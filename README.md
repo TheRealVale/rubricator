@@ -1,20 +1,44 @@
 # rubricator
 
-Read markdown in a beautiful window, mark it up like a document reviewer, and send the
-notes straight to your AI coding agent.
+[![ci](https://github.com/TheRealVale/rubricator/actions/workflows/ci.yml/badge.svg)](https://github.com/TheRealVale/rubricator/actions/workflows/ci.yml)
+[![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+
+**Mark up a document an agent is going to rewrite, and still have your marks afterwards.**
+Read it, mark the parts that matter, send the marks to your agent. When it rewrites the
+file, your notes follow their text to the new lines — and the ones whose text is gone say
+so.
+
+That last clause is the point. A mark that quietly relocates to the wrong paragraph, or
+gets filed under *resolved* because its text was deleted, is worse than no mark. So there
+are three states and the tray shows all three: **attached** (the text is still there),
+**moved** (the exact text is gone, its longest surviving line was found), **text gone**.
+An approval whose text changed gets a line of its own, because an approval you didn't give
+is the one that costs you.
+
+Living *documents*, not just living plans — the ADR from March, the requirements document
+rewritten four times, the sixty-page vendor PDF. **PDFs and Word files are read alongside
+markdown**, with no extra dependency, and they carry the whole review layer: you can mark a
+paragraph of a contract, and the export tells your agent which page it came from.
+
+It also indexes **every prompt you have typed** — 4,327 of them here, across 19 project
+directories over 131 days, searchable in one field in about a second. That half is durable:
+the prompt log outlives the transcripts, so you can find what you asked six weeks ago in a
+repository you have since renamed.
 
 *A rubricator was the scribe who went through a finished manuscript adding the red marks —
 the headings, the corrections, the notes in the margin. Same job, different century.*
 
-Built for one job: an agent writes a plan, you read it, and you need to say *"this bit —
-no"* without retyping it into a terminal.
+![The review tray after the document was rewritten: two marks attached, one whose text is gone](docs/anchors.png)
 
-![rubricator reviewing a plan](docs/review.png)
+*Three marks on a document an agent has since rewritten. Two are still on their text. The
+third is tagged **text gone** — the tray says `2 · 1 gone`, the status strip says `1 lost
+its text`, and nothing anywhere calls it resolved.*
 
 ```bash
 md                    # the workspace for this directory, README already open
 md README.md          # render and open one file
 md docs/              # the workspace, scoped to a subdirectory
+md --sessions         # …and correlate it with your Claude Code history
 md docs/spec.md -b    # a normal browser tab instead of an app window
 git show HEAD:NOTES.md | md -
 ```
@@ -23,10 +47,22 @@ The argument decides which door you come in by: a file opens the reader, a direc
 or nothing at all — opens the workspace. Documents opened from the workspace carry the
 full review layer, so you can mark them up without leaving it.
 
-One bash script and a page. No build step, no runtime dependency beyond what macOS ships.
-Rendering happens in the browser from pinned local copies of the libraries, so it works
-offline and the page you generate with `-o` is a single self-contained file you can send
-to someone.
+**How much of it there is.** 8,432 lines across 18 files, plus 4,935 in the five vendored
+libraries it renders with. It is a bash entry point, a browser page, a small HTTP server, a
+subprocess launcher and a document extractor — not, as this page used to say, *one bash
+script and a page*. There is no build step and no runtime dependency beyond what macOS
+ships. Rendering happens in the browser from pinned, checksum-verified local copies, so it
+works offline, and the page you generate with `-o` is a single self-contained file you can
+send to someone.
+
+**What it does with your material.** Nothing leaves the machine — there is no account, no
+telemetry, no network call after the one-time library fetch. Your marks are written to
+`.rubricator/notes/` inside the repository they belong to, as plain JSON you can read,
+diff and commit; that is the only sync there is, and it is deliberate. The prompt index
+lives in `~/.cache/rubricator`, mode 0700, files 0600, excluded from Time Machine, and
+expires after seven days. Credentials in prompt text are scrubbed at index time against a
+shared list. A static page built with `-o` leaves your prompt corpus out entirely rather
+than baking it into a file you might send, and says so on the page.
 
 **Two tiers.** A single file opens as a static page — self-contained, shareable, no server.
 The workspace starts a small local server instead, which is what lets it fetch documents as
@@ -44,7 +80,8 @@ cd rubricator
 ```
 
 Then open a new terminal. `install.sh` puts `md` in `~/.local/bin`, fetches the three
-render libraries (pinned and checksum-verified), and adds a small block to `~/.zshrc` for
+render libraries — five files, pinned and checksum-verified — and adds a small block to
+`~/.zshrc` for
 tab completion.
 
 > [!NOTE]
@@ -67,6 +104,8 @@ Uninstall with `./uninstall.sh` — it removes what it added and leaves your doc
 - `⌘/` lists every shortcut
 
 ## Reviewing
+
+![the review layer on a single file](docs/review.png)
 
 Select any text for the verb popover, or hover a block and press a key:
 
@@ -120,14 +159,26 @@ Which means a note can't accidentally reject a plan: with only notes outstanding
 reads **Approve with notes**, and the approval carries them along as context.
 
 **Across revisions.** Notes are stored per file and re-anchored by *content*, not line
-number. After the agent rewrites the document, reopen it: untouched notes follow their text
-to its new lines, and notes whose text is gone are marked *resolved* and greyed out. What's
-left is your open-items list.
+number. Reopen a document the agent has rewritten and it says what happened before you
+scroll — *7 of your marks moved, 2 lost their text*.
+
+Three states, because one bit was not enough. **Attached**: the text you marked is still
+there, verbatim, and the mark is on it. **Moved**: the exact text is gone, but the longest
+surviving line of it was found, so the mark is at that line and the tray shows both the
+text you marked and what the document says there now. **Text gone**: nothing of it
+survived. That last one is *not* the same as resolved, and calling it resolved — which this
+tool did until phase M — reports a deletion as an accomplishment. An `approve` that moved
+or lost its text is counted in a line of its own at the top of the tray, because an
+approval you did not actually give is the expensive one.
+
+The quote you marked is never overwritten. What's left is your open-items list.
 
 ## Workspace mode
 
 A bare `md` points rubricator at a whole repo instead of one file. `-w` does the same
 thing explicitly, which is what you want in a script.
+
+![the workspace: navigator, document, and the marks that came back with it](docs/workspace.png)
 
 ```bash
 md                       # index this repo and open it
@@ -146,7 +197,7 @@ self-contained file instead.
 One window: the **navigator** down the left, **panes** in the middle, the review **tray**
 down the right, and a status strip along the bottom that says what the server is doing.
 
-A **pane** holds any surface — a document, a session, a search, the graph, settings — and
+A **pane** holds any surface — a document, a session, a search, your notes, settings — and
 keeps its own tabs and its own history. `⌘\` splits the window; ⌘-click anything to open it
 in the split rather than here. Tabs sit at the top of each pane rather than along the bottom
 of the window, because with two panes a single strip cannot say which pane a tab belongs to.
@@ -182,7 +233,8 @@ files it changed, and which documents it bears on — worked out from the overla
 files a session touched and the files each document describes.
 
 **Reading one.** `history.jsonl` only ever held your half of the conversation; the other
-half is in the transcript, which is read on demand — 17 MB parses in 0.05 s — and rendered
+half is in the transcript, which is read on demand — the largest one here is 105.0 MB and
+parses in 0.32 s (measured 2026-08-26) — and rendered
 as what it was: your turns on the right, Claude's on the left, thinking collapsed to a
 count, tool calls behind a disclosure, and the files it wrote as chips you can open. A
 reply is not one message, so an autonomous stretch reads as the dozen exchanges it was
@@ -246,6 +298,14 @@ notes, what you asked before, the files — on the clipboard for your agent.
 
 With the hook installed you never copy anything.
 
+```
+/plugin marketplace add TheRealVale/rubricator
+/plugin install rubricator@rubricator
+```
+
+That is the whole install, typed inside Claude Code, and it edits nothing of yours. If you
+would rather not use plugins, the script still does it the old way:
+
 ```bash
 ./install-hook.sh          # adds one PreToolUse/ExitPlanMode hook; backs up your settings
 ./install-hook.sh --remove # undo
@@ -260,21 +320,21 @@ Claude finishes a plan → the review window opens by itself → Claude waits wh
 | close the window | `ask` — falls back to the normal prompt |
 | walk away | `ask` after nine minutes |
 
-> [!WARNING]
-> **Approve may still not skip the prompt — a fix is in, and unconfirmed.**
-> Measured 2026-08-25 on `claude` 2.1.241: the hook returned
-> `permissionDecision: "allow"`, the window closed, and Claude Code showed its
-> approval menu regardless, so Approve cost a window and changed nothing. The
-> hooks page is explicit that `allow` needs `updatedInput` paired with it for
-> `ExitPlanMode`, and the hook sent none. As of 2026-08-26 it pairs the plan
-> back unchanged, which should settle it — but *should* is not *does*, and
-> confirming it needs one human, one plan and one keypress. This note stays up
-> until someone takes it. **Send feedback** returns `deny`, needs no pairing,
-> and has always worked as described. See [K5b](docs/tasks.md).
+**About that first row.** On 2026-08-25, measured against `claude` 2.1.241, Approve did
+not skip the terminal prompt: the hook returned `permissionDecision: "allow"`, the window
+closed, and Claude Code showed its approval menu anyway — so Approve cost you a window and
+changed nothing. The cause is documented: for `ExitPlanMode`, `allow` has to be paired with
+`updatedInput`, and the hook sent none. Since 2026-08-26 it pairs the plan back unchanged,
+which should settle it. *Should* is not *does*, and the only way to know is one person, one
+plan, one keypress; until someone does that, this paragraph says what is known rather than
+what is hoped. **Send feedback** needs no pairing and has always worked as described.
 
-`ExitPlanMode` doesn't carry the plan text — the plan is a file the agent wrote — so the
-hook reads the session transcript to find it. Feedback then anchors into that real file,
-and because notes key off its path, they survive the rewrite.
+`ExitPlanMode` hands the hook the plan directly — `planFilePath` for where the agent wrote
+it, `plan` for the text — and the hook reads the path in preference to the text, because
+your marks are keyed to the document's path and a plan read from its real file keeps them
+across the rewrite. Searching the session transcript is still in there as a fallback for
+builds that send neither, and it is a fallback rather than the mechanism: it can only find
+*a* recent plan, and on a machine running two sessions that is not necessarily yours.
 
 Nothing here can wedge a session. Missing plan, malformed input, no `python3`, crashed
 runner: every failure exits quietly and leaves the normal flow untouched. Closing the window
@@ -295,7 +355,7 @@ share/template.html the reader page: CSS, chrome, TOC, theme
 share/render.js     markdown into the reader's DOM — shared by both pages, so a
                     document behaves the same wherever it is opened
 share/review.*      annotation layer — anchors, verbs, storage, export
-share/ui.*          outline modes, search, resizable panel, shortcuts
+share/ui.*          outline modes, search, resizable panel, shortcuts (reader only)
 share/shell.*       the window: navigator, panes, tabs, palette, status strip
 share/workspace.*   the repo index, and what each surface looks like
 share/serve.py      the local server: ephemeral port, per-run token, idle exit
@@ -303,6 +363,8 @@ share/actions.py    the verb allowlist — the only place the page can cause any
 share/extract.py    PDF and Word into text, cached on mtime and size
 share/transcript.py one conversation, parsed on demand
 share/hook.py       blocking review server for --review and --hook
+docs/platform.md    what is macOS-bound here, and what a Linux port would cost
+.claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook
 ```
 
 In the live tier, annotations are written to `.rubricator/notes/<path>.json` in the repo —
@@ -317,10 +379,19 @@ to `.git/info/exclude`; this one removes that line the first time it sees it, an
 Two people marking different documents never touch the same file, and a conflict, when it
 comes, is a small JSON file you can resolve by hand.
 
-In the static tier marks live in the browser's local storage, keyed by the document's
-absolute path — so a note written in the workspace is there when you open that same file on
-its own. Rubricator writes nothing into the documents themselves and nothing leaves the
-machine.
+In the static tier there is no server to write with, so marks go to the browser's local
+storage instead. **They do not cross between the two tiers, and no version of this tool can
+make them** — the workspace is served from `http://127.0.0.1:<port>` on a fresh ephemeral
+port every run and a static page is `file://`, which are different origins, and different
+origins do not share local storage. That is the same-origin policy doing its job, not a
+limitation waiting to be fixed.
+
+What does cross is the repository file. A static page built *after* you marked things up
+carries the marks with it, because the sidecar is read at build time. So the sidecar is not
+a compromise for the live tier — it is the only durable store there is, and local storage
+is the fallback for the tier that has nowhere else to put anything.
+
+Rubricator writes nothing into the documents themselves and nothing leaves the machine.
 
 Everything is written down. [`docs/tasks.md`](docs/tasks.md) is the register — one line
 per task, and a table at the top saying where each plan stands. The plans themselves keep
@@ -333,34 +404,10 @@ The live workspace watches the files it indexed. Change one on disk and the page
 says so; change the one you are reading and it reloads in place, keeping your
 scroll position. Nothing to enable.
 
-**Graph** draws which documents belong together, from the files they describe and
-the sessions that touched them. It asks before laying out, because that is a real
-computation and you should be the one to ask for it.
-
 Every document carries a small **timeline**: commits as grey marks, sessions that
 touched it in accent, the last edit in green. Click a session mark to open it.
 
-```bash
-md serve --port 7777        # a workspace that stays up, on a port you can bookmark
-md . ../other-repo          # more than one repo in one workspace
-md --deep                   # count what subagents changed, not just the main thread
-```
-
-`--deep` matters more than it sounds: work you delegated is recorded in separate
-transcripts, so without it a session that did most of its editing through subagents
-looks like it touched nothing. Here it is the difference between 1,286 files
-attributed and 1,579.
-
-### Extending it
-
-Two directories, both optional:
-
-- `~/.config/rubricator/views/*.js` — each file may call
-  `RB.view({id, label, render})` and becomes a surface of its own, reachable from ⌘K
-  and the surface menu. `RB` hands you the index,
-  the helpers and `RB.open(rel)`.
-- `~/.config/rubricator/providers/*.py` — each file may define `provide(root)`,
-  and whatever it returns lands in the page as `D.extra[name]`.
+The rest of the flags are in `md --help`, which is where a flag list stays current.
 
 ## Letting it start things
 
@@ -431,30 +478,14 @@ offers a folder chooser; picking one opens it in **its own window**, the way an 
 second project — the workspace you were in keeps its panes, its notes and its watch.
 
 This matters more than it sounds, because session search already spans every repository on the
-machine: you find the conversation in `hypergol` from a `werdewaerts` workspace, and now there
-is somewhere to go with it.
+machine: you find the conversation in one repository from another repository's workspace, and
+now there is somewhere to go with it.
 
 The page never sends a path. It either asks the server to open the chooser — a native dialog,
 Standard Additions rather than app scripting, so macOS asks for nothing — or it names a project
 the server itself remembered. Anything else is refused, including a traversal dressed up as a
 recent one. Opening a project is deliberately *not* behind `--allow-launch`: the only thing it
 can start is rubricator, on a folder you picked.
-
-## Themes
-
-Three, and each has a rule rather than a mood:
-
-- **Rubric** *(default)* — warm graphite and vermilion. A rubricator was the scribe who added
-  the red marks, so red here is reserved for *your* annotations and status wears earth
-  pigments instead. The two never argue over the same colour.
-- **Slate** — near-monochrome and cool. One steel signal; status is told by lightness and
-  shape rather than hue, so nothing on screen is coloured for decoration.
-- **Bone** — the light theme taken seriously: warm paper and iron-gall text, not an inverted
-  dark UI.
-
-Pick one under **Settings**, press `t` to cycle, or `md --theme slate`. The choice is stored
-in the settings file *and* in the browser, so a document you open on its own matches the
-workspace you chose it in.
 
 ## Settings
 
@@ -475,15 +506,43 @@ window only, and the screen says so rather than pretending the setting changed.
 
 ## Prior art
 
-If you want this loop with more breadth than one person maintains, look at
-[plannotator](https://github.com/backnotprop/plannotator) — code diffs, PR review, many
-agents, team sharing. [md-annotator](https://github.com/konradmichalik/md-annotator) and
-[Imark](https://imarkmd.com) solve neighbouring problems; Imark's approach of storing notes
-inside the `.md` file is better than local storage if you move between machines.
+Numbers fetched from each project's own API on **2026-08-26**, and they will be stale by
+the time you read this.
 
-rubricator's bet is different: no server, no daemon, no install beyond a script, and small
-enough that you can read all of it and change the parts you don't like. The palette is one
-CSS block at the top of `share/template.html`.
+**[plannotator](https://github.com/backnotprop/plannotator)** — 8,058 stars, 1,074 commits,
+148 releases, Apache-2.0, created **2025-12-28**, which is nearly eight months ahead of this
+repository. It does everything here and more: PR and MR diff review, team sharing, many
+agents. It registers a `PermissionRequest` hook where rubricator registers `PreToolUse`. And
+it has a **Version Browser** — it saves each plan submission and shows a change badge when
+the agent resubmits — which is the one thing it does that rubricator has no answer to. If
+you want this loop with more breadth than one person maintains, use it.
+
+**[PlanBridge](https://github.com/contextbridge/planbridge)** — 27 stars, MIT, localhost,
+created 2026-04-29. *Precision feedback for coding agent plans*: the same idea at a similar
+size.
+
+**Moat** — hosted rather than local, which is the whole difference. No figures here because
+it is not a repository to count.
+
+**[Imark](https://imarkmd.com)** — 48 stars, MIT, created 2026-08-05. A native macOS
+markdown reader that stores its notes **inside the `.md` file** as HTML comments. That is a
+better answer than local storage if you move between machines, and a worse one if you mind
+your documents being edited. [md-annotator](https://github.com/konradmichalik/md-annotator)
+solves a neighbouring problem.
+
+**The tools you already have.** Claude Code opens the plan in `$EDITOR` with `Ctrl+G`, and
+the vendor's own VS Code extension opens it as a full Markdown document with inline
+comments. Both are free, installed, and enough for many people. rubricator is worth a
+window only if the verb grammar and the marks-survive-the-rewrite part are worth it to you.
+
+**Session viewers**, if that is the half you want: [recensa](https://github.com/S40911120/recensa)
+(70), [universal-session-viewer](https://github.com/tad-hq/universal-session-viewer) (18),
+[cc_transcript_viewer](https://github.com/tim-hua-01/cc_transcript_viewer) (12),
+[kortex](https://github.com/chicongst/kortex) (7). Several of them read transcripts more
+carefully than this does.
+
+rubricator's bet is different: no server you leave running, no account, no daemon, and a
+codebase small enough to read in an evening and change the parts you don't like.
 
 ## Limitations
 

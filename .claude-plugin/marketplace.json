@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "rubricator",
+  "description": "rubricator — read markdown, mark it up, send the notes to your AI",
+  "owner": { "name": "Valentin Sohr" },
+  "plugins": [
+    {
+      "name": "rubricator",
+      "source": "./",
+      "description": "Review a plan before Claude acts on it, in a browser window with a verb grammar. Send feedback returns deny plus your annotated notes; Approve returns allow with the plan paired back.",
+      "category": "productivity",
+      "author": { "name": "Valentin Sohr" },
+      "homepage": "https://github.com/TheRealVale/rubricator",
+      "license": "MIT"
+    }
+  ]
+}

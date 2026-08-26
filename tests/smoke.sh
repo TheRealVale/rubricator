@@ -611,5 +611,81 @@ else
   no "16 · the notes layout is wrong" "$(grep '^XX' "$WORK/n.txt" | tr '\n' ' ')"
 fi
 
+# ── 17 · a second root is read-only, and its rows line up ───────────────────
+# O2. Reproduced before the fix: build([A, B]) gave 110 documents, 99 of them
+# with a staleness key of the form `B/B/…` matching nothing and reading as
+# commits: 0 — the prefix was applied inside the find_docs loop and again after
+# git_activity. And a mark taken on B was written into A's notes store.
+mr="$WORK/mr"
+for d in a b; do
+  mkdir -p "$mr/$d/src"
+  printf '# %s\n\nsee `src/main.py`\n' "$d" > "$mr/$d/doc.md"
+  printf 'x=1\n' > "$mr/$d/src/main.py"
+  (cd "$mr/$d" && git init -q . && git add -A \
+    && git -c user.email=t@t -c user.name=t commit -qm one \
+    && printf 'x=2\n' > src/main.py && git add -A \
+    && git -c user.email=t@t -c user.name=t commit -qm two) >/dev/null 2>&1
+done
+RUBRICATOR_JSON=1 python3 "$RUBRICATOR_HOME/workspace.py" "$mr/a" "$mr/b" \
+  > "$WORK/mr.json" 2>/dev/null
+python3 - "$WORK/mr.json" <<'PYEOF' > "$WORK/mr.txt" 2>&1
+import json, sys
+d = json.load(open(sys.argv[1]))
+rels = {x["rel"] for x in d["docs"]}
+by = {x["rel"]: x for x in d["docs"]}
+checks = {
+  "the second root is prefixed once":   rels == {"doc.md", "b/doc.md"},
+  "staleness keys match documents":     set(d["stale"]) and set(d["stale"]) <= rels,
+  "the first root is writable":         by["doc.md"].get("readonly") == 0,
+  "the second is not":                  by["b/doc.md"].get("readonly") == 1,
+  "and the row says which repo":        by["b/doc.md"].get("repo") == "b",
+}
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "17 · a multi-root workspace lines up and says which rows are read-only"
+else
+  no "17 · multi-root is still confused" "$(grep '^XX' "$WORK/mr.txt" | tr '\n' ' ')"
+fi
+
+# ── 18 · a static page reads the marks it carries ───────────────────────────
+# Found by looking at a screenshot: the tab badge said 3 and the tray beside it
+# said "Nothing yet". workspace.py ships the sidecar with a static page on
+# purpose, and the page then read localStorage instead — L3's defect, one tier
+# over. Asserts on the wiring, because the DOM assertion needs a browser and
+# this must fail on the per-push path.
+if command -v node >/dev/null; then
+  python3 - "$REPO/share/workspace.js" "$WORK/bridge.js" <<'PYEOF'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+i = src.index("function nkeyOf(d)")
+j = src.index("if (can('notes') && window.MDReview){")
+open(sys.argv[2], "w", encoding="utf-8").write(src[i:j])
+PYEOF
+  { printf 'var CAPS={};\n'
+    printf 'function can(k){ return !!CAPS[k]; }\n'
+    printf 'var D={ notes:{ "docs/p.md": {saved:100, items:[{id:1,verb:"note"}]} }, by:"" };\n'
+    printf 'var DISK = D.notes;\n'
+    printf 'var localStorage={ getItem:function(){ return null; }, setItem:function(){} };\n'
+    printf 'var window={ MDReview:{ identity:null, storage:{ get:function(){ return null; }, set:function(){} } } };\n'
+    cat "$WORK/bridge.js"
+    cat <<'JSEOF'
+var f = [];
+var got = window.MDReview.storage.get('md-review:x', '/abs/docs/p.md', 'docs/p.md');
+if (!got || !got.items || got.items.length !== 1)
+  f.push('a static page did not read the notes it was built with');
+var none = window.MDReview.storage.get('md-review:y', '/abs/docs/other.md', 'docs/other.md');
+if (none !== null) f.push('an unmarked document invented a store');
+console.log(f.length ? 'XX ' + f.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/bridge_test.js"
+  res=$(node "$WORK/bridge_test.js" 2>&1)
+  case "$res" in ok*) ok "18 · a static page reads the marks it carries" ;;
+                 *)   no "18 · a static page ignores its own sidecar" "$res" ;; esac
+else
+  skip "18 · static notes bridge" "no node"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

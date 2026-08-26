@@ -227,6 +227,16 @@ html[data-mode="light"] .i-sun{display:none} html[data-mode="light"] .i-moon{dis
 </style>
 <style>
 <!--@include ui.css-->
+
+/* ── P5 · the focus ring, put back ───────────────────────────────────────────
+   `all:unset` appears 23 times across these stylesheets and it resets
+   `outline-style`, so every control built that way lost the platform's focus
+   ring by construction — on a tool whose interface is a keymap. `!important`
+   is load-bearing rather than lazy: `.anno .x{all:unset}` is a two-class
+   selector and outranks a bare `:focus-visible`, so without it the reset wins
+   on exactly the elements that need the ring most. `:focus-visible`, not
+   `:focus`, so a mouse click does not draw one. */
+:focus-visible{outline:2px solid var(--accent) !important;outline-offset:2px}
 </style>
 </head>
 <body>

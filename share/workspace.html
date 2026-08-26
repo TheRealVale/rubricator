@@ -89,6 +89,9 @@ html[data-mode="light"] .act button{color:#fff}
 .tfile .w{color:var(--yellow)}
 .tfile .kind{font-family:var(--mono);font-size:8.5px;letter-spacing:.09em;color:var(--fg-dim);
   border:1px solid var(--border);padding:0 4px;line-height:14px}
+/* O2 · which repository a row is from, in a multi-root workspace, and whether
+   its marks can be written. Only the first root has a notes store. */
+.tfile .kind.repo{border-color:var(--border);color:var(--fg-muted)}
 .docnote{font-size:12px;color:var(--yellow);border:1px solid color-mix(in srgb,var(--yellow) 35%,transparent);
   padding:9px 13px;margin-bottom:22px}
 
@@ -201,17 +204,15 @@ html[data-mode="light"] .act button{color:#fff}
 .tl .lo{position:absolute;left:0;top:0}
 .tl .hi{position:absolute;right:0;top:0}
 
-/* ── the graph ──────────────────────────────────────────────────────────── */
-.graph{border:1px solid var(--border-soft);border-radius:12px;background:var(--bg-elev);
-  overflow-x:auto;padding:6px}
-.graph svg{width:100%;min-width:640px;height:auto;display:block}
-.graph line{stroke:var(--border);opacity:.85}
-.graph circle{fill:var(--bg-soft);stroke:var(--accent);stroke-width:1.6}
-.graph .n{cursor:pointer}
-.graph .n:hover circle{fill:var(--accent-soft)}
-.graph text{fill:var(--fg-muted);font-size:11px;text-anchor:middle;font-family:var(--font)}
-.graph .n:hover text{fill:var(--fg)}
-
+/* ── P5 · the focus ring, put back ───────────────────────────────────────────
+   `all:unset` appears 23 times across these stylesheets and it resets
+   `outline-style`, so every control built that way lost the platform's focus
+   ring by construction — on a tool whose interface is a keymap. `!important`
+   is load-bearing rather than lazy: `.anno .x{all:unset}` is a two-class
+   selector and outranks a bare `:focus-visible`, so without it the reset wins
+   on exactly the elements that need the ring most. `:focus-visible`, not
+   `:focus`, so a mouse click does not draw one. */
+:focus-visible{outline:2px solid var(--accent) !important;outline-offset:2px}
 
 /* ── the navigator is narrow: one row of controls, the knobs behind a
       toggle, and a tree that gets the rest of the width ─────────────────── */
@@ -239,7 +240,28 @@ html[data-mode="light"] .act button{color:#fff}
   box-shadow:var(--shadow);font-size:12.5px;opacity:0;pointer-events:none;transition:.18s}
 .toast.show{opacity:1;transform:translateX(-50%)}
 </style>
-<style>__REVIEWCSS__</style>
+<style>__REVIEWCSS__
+/* ── P5 · the keymap sheet ─────────────────────────────────────────────── */
+#keys{position:fixed;inset:0;z-index:95;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.42);backdrop-filter:blur(2px)}
+#keys[hidden]{display:none}
+html[data-mode="light"] #keys{background:rgba(60,50,35,.20)}
+#keys .box{position:relative;width:min(680px,92vw);max-height:80vh;overflow-y:auto;
+  background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:22px 26px 26px}
+#keys h3{margin:0 0 16px;font-size:14px;font-weight:600;color:var(--fg)}
+#keys .x{all:unset;cursor:pointer;position:absolute;top:12px;right:14px;
+  color:var(--fg-dim);font-size:18px;line-height:1;padding:2px 6px;border-radius:6px}
+#keys .x:hover{color:var(--fg);background:var(--bg-soft)}
+#keys .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px 30px}
+#keys .grp b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--fg-dim);margin-bottom:8px}
+#keys .row{display:flex;align-items:baseline;gap:10px;margin-bottom:5px;font-size:12.5px}
+#keys kbd{font-family:var(--mono);font-size:10.5px;color:var(--fg-muted);
+  border:1px solid var(--border);border-radius:5px;padding:1px 6px;white-space:nowrap;flex:none;min-width:44px;text-align:center}
+#keys .row span{color:var(--fg-muted)}
+#keys .note{margin-top:18px;font-size:11.5px;color:var(--fg-dim);line-height:1.55;
+  border-top:1px solid var(--border-soft);padding-top:13px}
+</style>
 </head>
 <body>
 <div id="app">
@@ -281,6 +303,16 @@ html[data-mode="light"] .act button{color:#fff}
   <footer class="stat"><span class="l" id="stat-l"></span><span class="r" id="stat-r"></span></footer>
 </div>
 
+<!-- P5 · the keymap, in the tool whose interface is a keymap. Ported from the
+     reader's ⌘/ sheet rather than invented a second time: same shape, same
+     class names, the workspace's own keys. Reached from More and from ?. -->
+<div id="keys" hidden>
+  <div class="box">
+    <button class="x" id="keys-x" aria-label="Close">&times;</button>
+    <h3>Keys</h3>
+    <div class="cols" id="keys-cols"></div>
+  </div>
+</div>
 <div id="pal">
   <div class="box">
     <div class="qb">

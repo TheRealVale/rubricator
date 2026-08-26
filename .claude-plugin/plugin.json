@@ -1,0 +1,10 @@
+{
+  "name": "rubricator",
+  "description": "Review a plan before Claude acts on it. Opens the plan in a browser window with a verb grammar — change, question, cut, expand, note, approve — and returns your marks as the hook's decision.",
+  "version": "2.0.0",
+  "author": { "name": "Valentin Sohr" },
+  "homepage": "https://github.com/TheRealVale/rubricator",
+  "repository": "https://github.com/TheRealVale/rubricator",
+  "license": "MIT",
+  "keywords": ["markdown", "review", "plan", "hooks", "annotation"]
+}

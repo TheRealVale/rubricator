@@ -17,7 +17,28 @@ HOME    = Path.home()
 SHARE   = Path(os.environ.get("RUBRICATOR_HOME", HOME / ".local/share/rubricator"))
 MD_BIN  = os.environ.get("RUBRICATOR_BIN", str(HOME / ".local/bin/md"))
 PLANS   = HOME / ".claude" / "plans"
-CHROME  = "/Applications/Google Chrome.app"
+# O4. The literal used to be here and at three sites in bin/md, and only two
+# of the four went through a variable — so a fix scoped to bin/md left this one
+# opening nothing. Same three questions, asked once per process. The failure is
+# cosmetic: every caller falls back to plain `open`.
+def _chrome_app():
+    import subprocess as _sp
+    for c in ("/Applications/Google Chrome.app",
+              os.path.expanduser("~/Applications/Google Chrome.app")):
+        if os.path.isdir(c):
+            return c
+    try:
+        out = _sp.run(["mdfind", "kMDItemCFBundleIdentifier == 'com.google.Chrome'"],
+                      capture_output=True, text=True, timeout=5).stdout.split("\n")
+        for c in out:
+            if c.strip() and os.path.isdir(c.strip()):
+                return c.strip()
+    except Exception:
+        pass
+    return ""
+
+
+CHROME  = _chrome_app()
 WAIT    = int(os.environ.get("RUBRICATOR_TIMEOUT", "540"))    # under the hook's 600s ceiling
 CACHE   = Path(os.environ.get("RUBRICATOR_CACHE", str(HOME / ".cache/rubricator")))
 ROUTE_KEEP = 50          # the route log answers one question; it is not history
@@ -133,7 +154,7 @@ def serve():
 def open_window(url):
     if os.environ.get("RUBRICATOR_NO_WINDOW"):   # tests drive the page themselves
         return
-    if os.path.isdir(CHROME):
+    if CHROME:
         try:
             subprocess.run(["open", "-na", CHROME, "--args", "--app=" + url,
                             "--window-size=1180,940"],

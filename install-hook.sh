@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Install (or remove) the Claude Code hook that opens rubricator's review window
 # when Claude finishes a plan.   Usage:  ./install-hook.sh [--remove]
+#
+# P7. There is now a channel that does not need this script at all:
+#
+#   /plugin marketplace add TheRealVale/rubricator
+#   /plugin install rubricator@rubricator
+#
+# which delivers hooks/hooks.json and needs no edit to your settings.json.
+# Prefer it. This script stays for the people who install with ./install.sh and
+# do not want a second mechanism, and because it is the only path that also
+# works when rubricator lives somewhere the plugin loader will not look. It
+# backs your settings up before touching them and is idempotent either way.
 set -euo pipefail
 
 SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
@@ -62,3 +73,4 @@ python3 -m json.tool < "$SETTINGS" > /dev/null && echo "  settings.json is valid
 echo "  backup: $BACKUP"
 echo
 echo "  Restart Claude Code for it to take effect.   Undo: $0 --remove"
+echo "  (Or skip this script entirely: /plugin marketplace add TheRealVale/rubricator)"
