@@ -593,6 +593,7 @@ checks = {
   "absolute key migrated to relative": list(n) == ["README.md"],
   "one file per document":             os.path.isfile(repo + "/.rubricator/notes/README.md.json"),
   "the old file is kept, not deleted": os.path.isfile(repo + "/.rubricator/notes.json.pre-v1"),
+  "and kept out of git":               "notes.json.pre-v1" in open(repo + "/.rubricator/.gitignore").read(),
   "md . and md docs/ agree":           W.notes_key(repo, repo + "/docs/plan.md") ==
                                        W.notes_key(repo + "/docs", repo + "/docs/plan.md") == "docs/plan.md",
   "version stamped":                   d.get("v") == 1,

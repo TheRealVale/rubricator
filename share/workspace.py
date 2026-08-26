@@ -827,6 +827,15 @@ def _legacy_split(root):
             moved += 1
     try:
         old.replace(old.with_name("notes.json.pre-v1"))
+        # The backup is a migration artefact, not content — and `.rubricator/`
+        # is meant to be committed now, so without this the first `git add -A`
+        # after an upgrade sweeps a file full of absolute paths from one machine
+        # into the repository. Inside `.rubricator/`, which rule 1 permits, and
+        # narrow enough that it cannot hide the notes themselves.
+        gi = old.parent / ".gitignore"
+        if not gi.exists():
+            gi.write_text("# the pre-M6 notes file, kept in case you want it back\n"
+                          "notes.json.pre-v1\n", encoding="utf-8")
     except Exception:
         return
     if moved:
