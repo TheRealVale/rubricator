@@ -391,7 +391,15 @@ carries the marks with it, because the sidecar is read at build time. So the sid
 a compromise for the live tier — it is the only durable store there is, and local storage
 is the fallback for the tier that has nowhere else to put anything.
 
-Rubricator writes nothing into the documents themselves and nothing leaves the machine.
+**What it does write, in full**, because *nothing is written into your files* is the kind of
+sentence that is easy to say and hard to keep: `.rubricator/notes/` in the repository you
+pointed it at, `~/.config/rubricator/` for settings and saved searches,
+`~/.cache/rubricator/` for the prompt index, and `~/.local/state/rubricator/` for the log of
+plan reviews. Nothing else, and never a file git already tracks or a file it found by
+indexing. Your documents are never modified — a mark is a sidecar, not an edit — and the
+notes file is deliberately **not** hidden from you: it appears in `git status`, because
+committing it is how two people share marks and you cannot commit a file you do not know is
+there. Nothing leaves the machine.
 
 Everything is written down. [`docs/tasks.md`](docs/tasks.md) is the register — one line
 per task, and a table at the top saying where each plan stands. The plans themselves keep
@@ -407,7 +415,36 @@ scroll position. Nothing to enable.
 Every document carries a small **timeline**: commits as grey marks, sessions that
 touched it in accent, the last edit in green. Click a session mark to open it.
 
-The rest of the flags are in `md --help`, which is where a flag list stays current.
+```bash
+md serve --port 7777        # a workspace that stays up, on a port you can bookmark
+md . ../other-repo          # more than one repo at once (read-only past the first)
+md --shallow                # skip subagent transcripts; they are counted by default
+```
+
+The rest is in `md --help`, which is where a flag list stays current.
+
+## For an agent, or a script
+
+```bash
+md --json .                 # the index, on stdout, as JSON
+md --json --sessions .      # …with session ids and the files they touched
+```
+
+No server, no protocol, no process to keep alive — a flag. It prints the
+documents, their headings, your marks with their anchor states and the text they
+were made against, and how many commits have landed in the files each document
+names. It exits 0 and starts nothing.
+
+Two things deliberately do **not** come through that door. There is no
+staleness *verdict* — the counts are there, under a field called `activity`, and
+what they mean is your call, because a machine-readable field called `stale`
+would be this tool deciding for you through an interface where nobody reads the
+caveat. And there is no prompt text: it tells you how many prompts it withheld
+and nothing else, which is the same rule that stops `--out` writing them.
+
+Your marks are also just files. `.rubricator/notes/<path>.json` is small, plain
+JSON with a version field — an agent can `cat` it without asking rubricator
+anything.
 
 ## Letting it start things
 
@@ -546,7 +583,11 @@ codebase small enough to read in an evening and change the parts you don't like.
 
 ## Limitations
 
-- macOS only in practice (uses `open`; the Chrome app window is a nicety, any browser works)
+- **macOS.** Not *not yet* — a decision, with the six places it is load-bearing and the
+  honest Linux answer to each written down in [`docs/platform.md`](docs/platform.md)
+- **a mark on a single rewritten sentence is not recovered.** The fallback tries the
+  anchor's own lines, longest first, so a paragraph survives its opening being rewritten —
+  but a one-line mark whose one line is gone is orphaned, and says so
 - notes from the workspace live in the repo, under `.rubricator/notes/`; a static page
   keeps them in that browser profile instead. Neither syncs between machines on its own —
   the repo files do if you commit them, which is the supported path and the only transport
@@ -555,6 +596,9 @@ codebase small enough to read in an evening and change the parts you don't like.
   and a chat bubble is not one. See §7b of `docs/conversations-plan.md`
 - continuing a session from the window is designed but unbuilt — `docs/continue-plan.md`
 - the Claude Code hook is Claude Code specific; the clipboard and `--review` paths are not
+- **a multi-root workspace is read-only past the first repository**, and cannot be
+  reopened. Deliberate: finishing it was measured against how it is actually used — four
+  recent workspaces, all single paths — and refused
 
 This list used to say that raw HTML in markdown was rendered unsanitised. That stopped
 being true when an `<img onerror>` executed during testing — see *Why it is off by

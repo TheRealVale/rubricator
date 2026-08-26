@@ -24,11 +24,12 @@ Effort: **S** an evening or less · **M** a day or two · **L** about a week
 | [`conversations-plan.md`](conversations-plan.md) | reading a session | G1 shipped · G2–G3 partly · see its §7b |
 | [`documents-plan.md`](documents-plan.md) | PDF and Word | H1–H4 shipped · H5–H7 open |
 | [`continue-plan.md`](continue-plan.md) | adding a turn to a session from the window | agreed in shape, unbuilt. Two rows of its §1 table were confounded — O3 |
-| [`install-plan.md`](install-plan.md) | the documented install, and how CI keeps it honest — phase K | plan, unstarted |
-| [`signals-plan.md`](signals-plan.md) | what the surfaces claim and what they can support — phase L | plan, unstarted |
-| [`anchoring-plan.md`](anchoring-plan.md) | a mark survives the rewrite — phase M | plan, unstarted |
-| [`retention-plan.md`](retention-plan.md) | what the tool keeps, and what it must not — phase N | plan, unstarted |
-| [`scope-plan.md`](scope-plan.md) | what this is for, and what it will never be — phases O and P, the standing rules, the killed list | plan, unstarted |
+| [`install-plan.md`](install-plan.md) | the documented install, and how CI keeps it honest — phase K | **shipped 2026-08-26**; its own note records what K5 could not gate on |
+| [`retention-plan.md`](retention-plan.md) | what the tool keeps, and what it must not — phase N | **shipped 2026-08-26** |
+| [`signals-plan.md`](signals-plan.md) | what the surfaces claim and what they can support — phase L | **shipped 2026-08-26**; §3's scoring formula did not work and the correction is recorded in it |
+| [`anchoring-plan.md`](anchoring-plan.md) | a mark survives the rewrite — phase M | **shipped 2026-08-26**; two corrections recorded in it |
+| [`scope-plan.md`](scope-plan.md) | what this is for, and what it will never be — phases O and P, the standing rules, the killed list | **shipped 2026-08-26** |
+| [`platform.md`](platform.md) | what is macOS-bound, and what a port would cost — O4 | decision record, closed |
 
 ---
 
@@ -79,8 +80,13 @@ through: a Library you can navigate and read from, and a Sessions browser that
 is honest about which sessions can still be picked up.
 
 - [x] **B1 · Library view.** Directory tree with a flat mode, note counts,
-      staleness marks, sort by recency · staleness · notes · size · title,
-      facets for has-notes · stale · untracked · front-matter tag.
+      activity marks, sort by recency · activity · notes · size · title, and
+      five facets: **has notes · behind its code · untracked · 14 days**, plus a
+      **says** row built from `status:` in front matter (Q2). *Corrected
+      2026-08-26 (O1): this line was wrong in both directions.* It claimed a
+      `stale` facet, which ships under a different name because L4 stopped the
+      signal calling itself a quality score; it claimed a front-matter facet
+      that did not exist until Q2; and it omitted the `14 days` facet that did.
 - [x] **B2 · Library detail.** Selecting a row opens it in the reader pane beside
       the tree, rather than as a full-screen overlay.
 - [x] **B3 · Session metadata.** Extend `sessions.py`: per session — title (first
@@ -109,10 +115,29 @@ is honest about which sessions can still be picked up.
 - [x] **C5 · Documents fetched on open** in the live tier, so the page stops
       embedding every document body — and the libraries are served too. Search
       answers from titles and headings immediately, then pulls every body once.
-- [x] **C6 · Notes on disk.** `.rubricator/notes.json` at the repo root, with
-      `localStorage` as the static-tier fallback and a one-time migration.
-- [x] **C7 · Index cache.** `~/.cache/rubricator/index/<roothash>.json`,
-      invalidated by mtime + git HEAD; sessions cached separately.
+- [x] **C6 · Notes on disk.** `.rubricator/notes/<path>.json` — one file per
+      document, keyed relative to the enclosing git repository (M6). The static
+      tier reads the sidecar shipped with the page and falls back to
+      `localStorage` for anything it does not carry. *Corrected 2026-08-26
+      (O1):* this line said *one file* and *a one-time migration* into
+      `localStorage`. The file became a directory in M6, which does carry a
+      one-time migration — the old `notes.json` is split on first read and kept
+      as `notes.json.pre-v1`. The `localStorage` migration this line meant is a
+      different thing and **cannot exist**: the lazy per-document copy at
+      `workspace.js:76-90` cannot cross the `file://` → `http://127.0.0.1:<port>`
+      origin boundary, and no version of this tool can make it. The sidecar is
+      the crossing, and it is a decision rather than a compromise.
+- [–] **C7 · Index cache.** **Never built, and deliberately not.** *Struck
+      2026-08-26 (O1):* this line described `~/.cache/rubricator/index/<roothash>.json`
+      invalidated by mtime and git HEAD. `grep -rn roothash` finds only prose;
+      `_cache_read`/`_cache_write` (`workspace.py:486,495`) serve the session
+      index alone, which is the *"sessions cached separately"* half and is real.
+      The document half was reasoned against rather than dropped —
+      `workspace.py:6-7` says so in a comment: *"Everything here is recomputed on
+      every run: at ~0.6s for 500 MB there is nothing worth caching, and nothing
+      to invalidate."* A cache with nothing to invalidate is a bug waiting for a
+      corpus. The line is struck rather than deleted, because a reader who
+      remembers the claim should find out what happened to it.
 
 ---
 
@@ -335,7 +360,25 @@ Design canvas: the shell, the session reader, and the direction exploration.
 
 ## Phases K–Q
 
-> **Where this stands.** K1–K4 shipped with the commit that added these plans:
+> **Where this stands: all 47 shipped, 2026-08-26.** K · N · L · M · O · P · Q,
+> in that order. Every phase has a dated note under its heading recording what
+> the plan got wrong, because five of the seven got something wrong and the
+> corrections are worth more than the plans were. The smoke suite went from 6
+> assertions to 21 (23 with a browser) and was **mutation-tested**: the suite
+> was run against a clone with one regression introduced at a time, and only a
+> test that went red counts. That exercise found three tests that could not
+> fail — including one that had been asserting on an empty corpus since it was
+> written — and every phase M item is now pinned by a test that goes red when
+> the item is reverted.
+>
+> What is still owed: **K5b's observation half.** Whether Approve now skips the
+> terminal prompt needs one human, one plan and one keypress, and no amount of
+> building settles it. The README says what is known rather than what is hoped.
+>
+> The paragraphs below are the state as the programme opened, kept as the
+> record of what was believed at the start.
+>
+> **Where this stood.** K1–K4 shipped with the commit that added these plans:
 > the install copies every file in `share/` rather than eight of eighteen, the
 > installer renders a test page and exits non-zero if it cannot, `tests/smoke.sh`
 > holds eight assertions and CI runs them. K5 is deliberately not done — standing
@@ -378,7 +421,9 @@ Design canvas: the shell, the session reader, and the direction exploration.
 > bus is carefully argued and holds. Forty-four repairs against that is a short
 > list, and 35 of them are an evening or less.
 
-A–J were features. K–Q are repairs, and there are 44 of them. Every item below
+A–J were features. K–Q are repairs, and there are **47** of them — the count
+was 44 when this was written, and **K4b** and **K5b** were added on evidence
+found while building K. All 47 shipped on 2026-08-26. Every item below
 is justified by a claim that was independently re-measured and survived a
 hostile re-read that tried to kill it. Where the re-measurement corrected the
 original claim, the item below carries the corrected version rather than the one
@@ -396,8 +441,8 @@ zero targets for 87 of 99 documents. A tray that calls a deleted paragraph
 copy of every prompt from twenty projects. Four `[x]` lines above describing
 features that were never built.
 
-**35 of the 44 are S and 9 are M. None is longer.** That is the finding, not a
-rounding. The programme that survived verification is small; what did not
+**35 of the original 44 are S and 9 are M. None is longer.** That is the
+finding, not a rounding. The programme that survived verification is small; what did not
 survive is most of the ambition — no diff review, no MCP server, no transcript
 archive, no code-knowledge map. All of it is in [Killed](#killed), which is the
 more valuable half of this register: it is what stops the ideas coming back.
@@ -1016,7 +1061,7 @@ above describe features that do not exist, and one of them has a data-loss
 shape behind it. An hour of bookkeeping restores a planning instrument the rest
 of this programme depends on. See [`scope-plan.md`](scope-plan.md).
 
-- [ ] **O1 · Four false register lines.** `C7` claims a document index cache at
+- [x] **O1 · Four false register lines.** `C7` claims a document index cache at
       `~/.cache/rubricator/index/<roothash>.json`; `grep -rn roothash` finds
       only prose, `_cache_read`/`_cache_write` serve sessions alone, and
       `workspace.py:6-7` argues in a comment that document caching is not worth
@@ -1098,7 +1143,7 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       per process, and is asked by all four sites; `share/platform.py` was not
       extracted, and the matrix says why.
 
-- [ ] **O5 · The standing rules, written down once.** Twelve decisions this
+- [x] **O5 · The standing rules, written down once.** Twelve decisions this
       investigation settled that will otherwise be re-litigated — the register
       line said six; twelve is what was settled. Each carries the measurement or
       the enumeration that justifies it, because a rule with no evidence under
@@ -1114,6 +1159,13 @@ of this programme depends on. See [`scope-plan.md`](scope-plan.md).
       *Done when:* the twelve are in [`scope-plan.md`](scope-plan.md) §5, each
       with its justification, and the README's sentence is amended to the post-M6
       truth. **M**
+      *Shipped 2026-08-26.* §5 was written with this phase's argument and is
+      checked here rather than rewritten; the README's amendment went further
+      than the item asked — instead of qualifying *nothing is written into your
+      files*, it enumerates the four directories that are written, says a mark is
+      a sidecar and not an edit, and says the notes file is deliberately visible
+      and why. A sentence that lists what it does is harder to drift than one
+      that claims an absence.
 
 - [x] **O6 · The shipped plans name four private repositories.**
       `workspace-plan.md:183-185` tabulates `<repo>/requirements.md`,
