@@ -19,6 +19,8 @@ MD_BIN  = os.environ.get("RUBRICATOR_BIN", str(HOME / ".local/bin/md"))
 PLANS   = HOME / ".claude" / "plans"
 CHROME  = "/Applications/Google Chrome.app"
 WAIT    = int(os.environ.get("RUBRICATOR_TIMEOUT", "540"))    # under the hook's 600s ceiling
+CACHE   = Path(os.environ.get("RUBRICATOR_CACHE", str(HOME / ".cache/rubricator")))
+ROUTE_KEEP = 50          # the route log answers one question; it is not history
 
 TOKEN   = secrets.token_urlsafe(9)
 RESULT  = {}
@@ -27,10 +29,34 @@ HTML    = b""
 
 
 # ── locating the plan ────────────────────────────────────────────────────────
+def plan_from_payload(payload):
+    """Claude Code hands the hook the plan directly: `planFilePath` for where it
+    wrote it, `plan` for the text. Both are documented, on the tool input and
+    sometimes at the top level depending on the build, so look in both places.
+
+    Preferring the path over the text is not fussiness — annotations key off the
+    document's path, so a plan read from its real file keeps its notes across the
+    rewrite, and one read from a temporary copy does not."""
+    ti = payload.get("tool_input") or {}
+    for src, val in (("tool_input.planFilePath", ti.get("planFilePath")),
+                     ("planFilePath", payload.get("planFilePath"))):
+        if isinstance(val, str) and val and os.path.isfile(val):
+            return val, src
+    return None, None
+
+
 def find_plan(payload):
-    """ExitPlanMode carries no plan text — the plan is a file the agent wrote.
-    The transcript records its path, so read it from there; newest-file is the
-    fallback when the transcript is unavailable."""
+    """The fallback, and the reason K5 exists.
+
+    ExitPlanMode was believed to carry no plan text, so this greps the tail of
+    the transcript for a path under ~/.claude/plans and falls back to the newest
+    file there. Both halves are guesses: anyone who set `plansDirectory` gets no
+    hit at all, and the mtime fallback can pick up a *concurrent* session's plan
+    and hand you the wrong document to review.
+
+    Kept only until one real hook fire confirms the payload fields arrive on this
+    build — standing rule 12. `RUBRICATOR_HOOK_LOG` records which path was taken,
+    so the confirmation is a by-product of ordinary use rather than an errand."""
     hits = []
     tp = payload.get("transcript_path")
     if tp and os.path.isfile(tp):
@@ -150,22 +176,72 @@ def render(path, hook_meta, out):
         return f.read()
 
 
+def read_plan(path):
+    """The plan as it was written, for pairing back as `updatedInput`. Read from
+    disk rather than carried from the render, because the render subprocess owns
+    its own copy and this has to be the bytes Claude Code will act on."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return None            # better an unpaired allow than a wedged session
+
+
+def note_route(payload, path, how):
+    """Standing rule 12: do not scope a design on a documented-but-unfired
+    platform feature. This is the firing. One line per hook run, appended to
+    RUBRICATOR_HOOK_LOG if it is set — which the smoke tests set, and which a
+    curious user can set for one session. It records the payload's shape rather
+    than its contents, so the plan text never reaches the log."""
+    dest = os.environ.get("RUBRICATOR_HOOK_LOG") or str(CACHE / "hook-route.jsonl")
+    ti = payload.get("tool_input") or {}
+    line = json.dumps({
+        "at": int(time.time()),
+        "top_keys": sorted(payload.keys()),
+        "tool_input_keys": sorted(ti.keys()),
+        "has_plan_text": bool(ti.get("plan") or payload.get("plan")),
+        "route": how, "found": bool(path),
+    })
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        old = []
+        if os.path.isfile(dest):
+            with open(dest, encoding="utf-8") as f:
+                old = f.read().splitlines()[-(ROUTE_KEEP - 1):]
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write("\n".join(old + [line]) + "\n")
+        os.chmod(dest, 0o600)
+    except Exception:
+        pass          # a log that cannot be written must not break a review
+
+
 # ── decisions ────────────────────────────────────────────────────────────────
 def emit(obj):
     sys.stdout.write(json.dumps(obj))
     sys.stdout.flush()
 
 
-def hook_decision(action, text, label):
+def hook_decision(action, text, label, plan_text=None):
     if action == "approve":
         ctx = "The plan was reviewed and approved in rubricator."
         if (text or "").strip():
             ctx += "\n\n" + text.strip()
-        return {"hookSpecificOutput": {
+        out = {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "allow",
             "additionalContext": ctx},
             "systemMessage": f"rubricator: {label} approved" +
                              (" with notes" if (text or "").strip() else "")}
+        # `allow` alone does not approve an ExitPlanMode. Measured 2026-08-25 on
+        # claude 2.1.241: the window closed and Claude Code's own approval menu
+        # appeared anyway, so Approve cost a window and changed nothing. The
+        # hooks page is explicit — allow "skips the permission prompt, except
+        # for … AskUserQuestion and ExitPlanMode, which need updatedInput paired
+        # with it". So pair it, with the plan exactly as it was proposed:
+        # rubricator reviews a plan, it does not rewrite one, and handing back
+        # an edited plan would cross the write rule.
+        if plan_text:
+            out["hookSpecificOutput"]["updatedInput"] = {"plan": plan_text}
+        return out
     if action == "feedback" and (text or "").strip():
         return {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -194,7 +270,13 @@ def main():
         except Exception:
             payload = {}
 
-    path = arg if not is_hook else find_plan(payload)
+    if is_hook:
+        path, how = plan_from_payload(payload)
+        if not path:
+            path, how = find_plan(payload), "find_plan"
+        note_route(payload, path, how)
+    else:
+        path, how = arg, "argument"
     if not path or not os.path.isfile(path):
         if is_hook:
             emit({"systemMessage": "md: no plan file found — skipping review"})
@@ -232,7 +314,7 @@ def main():
     close_window(port)
 
     if is_hook:
-        emit(hook_decision(action, text, label))
+        emit(hook_decision(action, text, label, plan_text=read_plan(path)))
     else:
         if action == "feedback" and text.strip():
             sys.stdout.write(text.strip() + "\n")

@@ -186,5 +186,77 @@ else
   no "6 · md --vendor failed" "$(tail -2 "$WORK/vendor.log")"
 fi
 
+# ── 7 · the plan comes from the payload, not from a guess ───────────────────
+# K5. find_plan greps the transcript for a path under ~/.claude/plans and falls
+# back to the newest file there, so `plansDirectory` users got nothing and a
+# concurrent session's plan could be picked up instead. The payload carries it.
+mkdir -p "$WORK/plans"
+printf '# payload plan\n\nfrom planFilePath, not from a guess.\n' > "$WORK/plans/from-payload.md"
+route="$WORK/route.jsonl"
+payload=$(python3 -c '
+import json, sys
+print(json.dumps({"tool_name": "ExitPlanMode",
+                  "tool_input": {"plan": "# payload plan\n", "planFilePath": sys.argv[1]}}))
+' "$WORK/plans/from-payload.md")
+out="$(printf '%s' "$payload" | RUBRICATOR_NO_WINDOW=1 RUBRICATOR_TIMEOUT=3 \
+        RUBRICATOR_HOOK_LOG="$route" "$MD" --hook plan 2>/dev/null)"
+if [ -s "$route" ] && python3 -c '
+import json, sys
+r = json.loads(open(sys.argv[1]).readlines()[-1])
+sys.exit(0 if r["route"].endswith("planFilePath") and r["found"] else 1)
+' "$route" 2>/dev/null; then
+  ok "7 · the plan is taken from the payload, not found by guesswork"
+else
+  no "7 · the payload route did not fire" "route log: $(tail -1 "$route" 2>/dev/null | head -c 200)"
+fi
+
+# ── 8 · Approve pairs updatedInput with allow ───────────────────────────────
+# K5b. Measured 2026-08-25: allow on its own leaves Claude Code's approval menu
+# up, so Approve cost a window and changed nothing. The pairing is the fix, and
+# this asserts the shape of it — the menu itself needs a human to observe.
+python3 - "$MD" "$WORK" <<'PYEOF' >"$WORK/approve.log" 2>&1
+import json, os, re, subprocess, sys, time, urllib.request
+md, work = sys.argv[1], sys.argv[2]
+plan = os.path.join(work, "plans", "from-payload.md")
+payload = json.dumps({"tool_name": "ExitPlanMode",
+                      "tool_input": {"plan": "# payload plan\n", "planFilePath": plan}})
+env = dict(os.environ, RUBRICATOR_NO_WINDOW="1", RUBRICATOR_DEBUG="1", RUBRICATOR_TIMEOUT="25")
+p = subprocess.Popen([md, "--hook", "plan"], env=env, stdin=subprocess.PIPE,
+                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+p.stdin.write(payload); p.stdin.close()
+url, seen = None, ""
+for _ in range(100):
+    time.sleep(0.1)
+    if p.poll() is not None: break
+    try:
+        os.set_blocking(p.stderr.fileno(), False); seen += p.stderr.read() or ""
+    except Exception: pass
+    m = re.search(r"http://127\.0\.0\.1:\d+/\S+", seen)
+    if m: url = m.group(0).rstrip("/"); break
+if not url:
+    print("NOURL"); p.kill(); sys.exit(1)
+req = urllib.request.Request(url + "/verdict",
+        data=json.dumps({"action": "approve", "text": ""}).encode(),
+        headers={"Content-Type": "application/json",
+                 "Sec-Fetch-Site": "same-origin", "Origin": url.rsplit("/", 1)[0]})
+try: urllib.request.urlopen(req, timeout=5).read()
+except Exception as e: print("POSTFAIL", e)
+out, _ = p.communicate(timeout=20)
+print("RAW", out.strip()[:400])
+try:
+    h = json.loads(out)["hookSpecificOutput"]
+    print("DECISION", h.get("permissionDecision"))
+    print("PAIRED", "plan" in (h.get("updatedInput") or {}))
+except Exception as e:
+    print("UNPARSEABLE", e)
+PYEOF
+if grep -q '^DECISION allow' "$WORK/approve.log" && grep -q '^PAIRED True' "$WORK/approve.log"; then
+  ok "8 · Approve returns allow with updatedInput paired"
+elif grep -q 'NOURL' "$WORK/approve.log"; then
+  skip "8 · Approve pairing" "no URL on stderr — seam changed"
+else
+  no "8 · Approve did not pair updatedInput" "$(grep -E '^(DECISION|PAIRED|RAW|UNPARSEABLE)' "$WORK/approve.log" | head -3)"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

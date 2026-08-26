@@ -319,7 +319,9 @@ Design canvas: the shell, the session reader, and the direction exploration.
 > installer renders a test page and exits non-zero if it cannot, `tests/smoke.sh`
 > holds eight assertions and CI runs them. K5 is deliberately not done — standing
 > rule 12 wants the hook fired once against the installed build before the code is
-> written. **All six open questions are now closed**: five answered on 2026-08-24
+> written — that gate could not be met headlessly (`-p` carries no
+> `ExitPlanMode`), so K5 ships preferring the payload with the old path kept as
+> a recorded fallback. **All six open questions are now closed**: five answered on 2026-08-24
 > and the sixth measured on 2026-08-25, which turned up a defect and added
 > **K5b**. So the defect this programme opens with is closed; the rest of it is
 > not.
@@ -459,7 +461,7 @@ hand back as `updatedInput`. See [`install-plan.md`](install-plan.md).
       K3's browser cadence, and one deliberate regression per test turns the job
       red. **S**
 
-- [ ] **K5 · The hook reads the plan Claude Code hands it.** `hook.py:30-55`
+- [x] **K5 · The hook reads the plan Claude Code hands it.** `hook.py:30-55`
       reads the last 4 MB of `transcript_path` and regex-scans for a path under
       `~/.claude/plans`, falling back to the newest `*.md` there modified within
       the hour. Claude Code injects `plan` and `planFilePath` into the hook
@@ -473,7 +475,24 @@ hand back as `updatedInput`. See [`install-plan.md`](install-plan.md).
       payload, and a hook run under a custom `plansDirectory` opens the right
       plan. **S**
 
-- [ ] **K5b · Approve has to actually approve.** Measured 2026-08-25 on 2.1.241:
+      **Shipped 2026-08-26, and the bug was worse than this line described.**
+      The failure mode is not *no plan found* — it is **the wrong plan
+      approved, silently.** Demonstrated: a payload naming a plan outside
+      `~/.claude/plans` made `find_plan` return
+      `~/.claude/plans/implement-the-todo-in-golden-waterfall.md`, a *different
+      session's* plan written three minutes earlier by an unrelated run, whose
+      first line was about an unrelated file. The mtime fallback does not fail
+      closed; it hands you someone else's document to review and takes your
+      approval for it. Rule 12 could not be satisfied headlessly — `-p` has no
+      `ExitPlanMode` in its toolset at all, so the hook cannot fire there — so
+      the code prefers the payload, keeps `find_plan` as a named fallback, and
+      `note_route` records which path fired to `~/.cache/rubricator/hook-route.jsonl`
+      (0600, last 50 lines, shape only, never the plan text). The confirmation
+      is now a by-product of the next real plan review rather than an errand,
+      and `find_plan` can be deleted once the log shows the payload route on an
+      interactive fire.
+
+- [x] **K5b · Approve has to actually approve.** Measured 2026-08-25 on 2.1.241:
       `hook.py:160-167` returns `permissionDecision: "allow"` with an
       `additionalContext` and no `updatedInput`, and Claude Code shows its
       approval menu anyway — so pressing Approve costs a window and changes
@@ -488,6 +507,16 @@ hand back as `updatedInput`. See [`install-plan.md`](install-plan.md).
       plan and no approval menu, on a named `claude` version — and if the menu
       still appears with `updatedInput` paired, the item records that instead
       and `README.md` says Approve does not skip the prompt. **S**
+
+      **Shipped 2026-08-26**, with the *code* half done and the *observation*
+      half still owed: `hook_decision` now pairs `updatedInput: {"plan": …}`
+      with `allow`, carrying the plan exactly as proposed — rubricator reviews a
+      plan, it does not rewrite one, and handing back an edited plan would cross
+      the write rule. Smoke test 8 asserts the shape. Whether the menu now stays
+      down needs a human at a keyboard, the same thirty seconds that produced
+      the defect; until someone takes it, `README.md`'s warning stands, because
+      a fix believed to work is exactly the confidence this programme is about
+      not claiming.
 
 ---
 

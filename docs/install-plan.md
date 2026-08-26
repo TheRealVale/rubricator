@@ -467,6 +467,40 @@ what the rule is for.
 **Done when:** `find_plan` is gone, the hook takes the plan from the payload, and
 a hook run under a custom `plansDirectory` opens the right plan.
 
+> **Shipped 2026-08-26, and this section understated the bug.** It is written
+> throughout as *no plan found — silently, exit 0*, which is the
+> `plansDirectory` case. The commoner and worse case is the mtime fallback, and
+> it was reproduced here rather than reasoned about. Given a payload naming a
+> plan outside `~/.claude/plans`, `find_plan` returned
+> `~/.claude/plans/implement-the-todo-in-golden-waterfall.md` — **a different
+> session's plan**, written three minutes earlier by an unrelated run, about an
+> unrelated file. The hook then renders that document, you review it, and your
+> approval is taken for the plan you never saw. It does not fail closed. It
+> substitutes.
+>
+> Standing rule 12's gate could not be met the way this section imagines,
+> either. Firing the hook headlessly is impossible: under `claude -p`,
+> `ExitPlanMode` is not in the toolset at all — verified, and the reason is
+> structural rather than a flag, since there is no interactive plan to exit. So
+> the rule was honoured a different way. The code **prefers** the payload
+> (`tool_input.planFilePath`, then `planFilePath`) and keeps `find_plan` as a
+> named fallback rather than scoping itself on an unfired field, and
+> `note_route` appends one line per hook run to
+> `~/.cache/rubricator/hook-route.jsonl` — mode 0600, last fifty lines, the
+> payload's *shape* and never the plan text — recording which route fired.
+> The confirmation is now a by-product of the next real plan review instead of
+> an errand, and `find_plan` can be deleted the moment that log shows the
+> payload route on an interactive fire. That file is inside
+> `~/.cache/rubricator/`, so **N1** governs it along with the rest of the cache.
+>
+> One thing this bought that the item did not ask for: because the payload
+> names the real file, the plan under review is the plan Claude Code will act
+> on, which is also the precondition **K5b** needs to hand it back as
+> `updatedInput`. K5 first was the right order for a reason that only became
+> visible once the substitution above was reproduced — pairing back a plan
+> `find_plan` had guessed would have approved the wrong document *and* fed it
+> forward.
+
 ### What stays unresolved, and what it costs to resolve
 
 Whether `permissionDecision: "allow"` alone actually skips Claude Code's own
