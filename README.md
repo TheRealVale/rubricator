@@ -225,9 +225,18 @@ whether it was touched. Then **Copy dossier** puts the whole picture — documen
 notes, what you asked before, the files — on the clipboard for your agent.
 
 > [!IMPORTANT]
-> Session data never leaves the machine. Prompt text is scrubbed of keys, tokens, JWTs,
-> private keys, `.env` lines and connection strings at index time, and `--sessions` refuses
-> `--out` outright so it cannot be written to a shareable file.
+> Session data never leaves the machine. Both halves of a conversation — yours and
+> Claude's — are scrubbed of keys, tokens, JWTs, private keys, `.env` lines, auth headers
+> and connection strings against one shared list, and `--sessions` refuses `--out` so the
+> corpus cannot be written to a shareable file. A static workspace leaves prompts out
+> entirely rather than baking them into a page, which costs you prompt search on that page
+> and is the right trade. The index lives at `~/.cache/rubricator`, mode 0700, files 0600,
+> excluded from Time Machine, and the session index expires after seven days.
+>
+> Three of those were not true before 2026-08-26. Claude's half of a transcript was
+> assigned raw while a comment claimed otherwise; a static build wrote 8 MB of prompt text
+> to a world-readable file with no flag; and the cache was `0644` and never pruned. The
+> list is shared now rather than copied, which is how the first one drifted.
 
 ## The Claude Code loop
 

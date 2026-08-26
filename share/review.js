@@ -636,8 +636,11 @@ function hookMode(){
     var text = action === 'feedback' ? buildExport() : (action === 'approve' ? buildNotes() : '');
     done(action);
     try {
+      /* the count rides along so the hook can record what a review contained
+         without the record having to hold what you wrote (N6) */
       fetch(H.url, { method:'POST', headers:{'Content-Type':'application/json'},
-                     body: JSON.stringify({ action:action, text:text }) });
+                     body: JSON.stringify({ action:action, text:text,
+                                            items: (store.items || []).length }) });
     } catch(e){}
   }
   approveBtn.addEventListener('click', function(){ verdict('approve'); });

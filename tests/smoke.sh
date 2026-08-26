@@ -76,7 +76,21 @@ if [ "$WITH_BROWSER" = 1 ]; then
   CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   [ -x "$CHROME" ] || CHROME="$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   if [ -x "$CHROME" ]; then
+    # --use-mock-keychain is not optional. Headless Chrome on the default
+    # profile reaches into the login Keychain for "Chrome Safe Storage", and on
+    # a machine where that lookup does not go cleanly it raises a system dialog
+    # per run — one of whose buttons resets a keychain. This says: do not go
+    # near it. Observed while building phase N, ~20 runs in.
+    #
+    # The obvious fix is --user-data-dir, and it does not work here: on Chrome
+    # 151.0.7922.174, an isolated profile makes --dump-dom hang indefinitely.
+    # Measured, all against the same fixture: shared profile 2.0s; isolated
+    # minimal, isolated with networking and sync off, --headless=new, and a
+    # pre-seeded "First Run" sentinel — all >40s, no output. If a later Chrome
+    # fixes that, prefer isolation and drop this comment; until then the
+    # keychain is the harm and this removes it.
     "$CHROME" --headless --disable-gpu --virtual-time-budget=8000 \
+      --use-mock-keychain --password-store=basic --disable-background-networking \
       --dump-dom "file://$WORK/out.html" >"$WORK/dom.html" 2>/dev/null
     if grep -q 'smoke fixture heading' "$WORK/dom.html"; then
       ok "2b · the rendered DOM contains the fixture's heading"
@@ -257,6 +271,53 @@ elif grep -q 'NOURL' "$WORK/approve.log"; then
 else
   no "8 · Approve did not pair updatedInput" "$(grep -E '^(DECISION|PAIRED|RAW|UNPARSEABLE)' "$WORK/approve.log" | head -3)"
 fi
+
+# ── 9 · nothing under the cache is readable by anyone else ──────────────────
+# N1. It was 0644 across 34 of 35 files, including the plaintext of every PDF
+# indexed and every prompt ever typed, in the one cache directory macOS does
+# not exclude from Time Machine.
+export RUBRICATOR_CACHE="$WORK/cache"
+(cd "$REPO" && "$MD" -w -n --sessions . >/dev/null 2>&1) || true
+bad=$(find "$RUBRICATOR_CACHE" -type f ! -perm 600 2>/dev/null | wc -l | tr -d ' ')
+baddir=$(find "$RUBRICATOR_CACHE" -type d ! -perm 700 2>/dev/null | wc -l | tr -d ' ')
+if [ "${bad:-1}" = 0 ] && [ "${baddir:-1}" = 0 ]; then
+  ok "9 · every file under the cache is 0600, every directory 0700"
+else
+  no "9 · the cache is readable by others" "$bad files, $baddir directories"
+fi
+
+# ── 10 · a static workspace carries no prompt text ──────────────────────────
+# N2. bin/md refuses --out with --sessions because your history stays on this
+# machine; the static build wrote the same corpus to a world-readable page with
+# no flag at all. Asserts on the shape the corpus leaves behind, not on a count.
+static="$WORK/static.html"
+(cd "$REPO" && "$MD" -w -o "$static" . >/dev/null 2>&1) || true
+if [ -s "$static" ]; then
+  sids=$(grep -o '"sid"' "$static" | wc -l | tr -d ' ')
+  [ "$sids" = 0 ] && ok "10 · no prompt text in a static workspace" \
+                  || no "10 · a static page carries the prompt corpus" "\"sid\" appears $sids times"
+else
+  skip "10 · static workspace" "the page was not built"
+fi
+
+# ── 11 · a plan review leaves a record ──────────────────────────────────────
+# N6. The hook produced a decision and nothing on disk, and each fire is a fresh
+# ephemeral origin — so zero reviews and two hundred looked identical.
+export RUBRICATOR_STATE="$WORK/state"
+mkdir -p "$WORK/plans"
+printf '# recorded plan\n\nbody\n' > "$WORK/plans/rec.md"
+rp=$(python3 -c 'import json,sys; print(json.dumps({"tool_name":"ExitPlanMode","session_id":"s1","cwd":sys.argv[2],"tool_input":{"plan":"# recorded plan\n","planFilePath":sys.argv[1]}}))' \
+      "$WORK/plans/rec.md" "$WORK")
+for _ in 1 2 3; do
+  printf '%s' "$rp" | RUBRICATOR_NO_WINDOW=1 RUBRICATOR_TIMEOUT=1 "$MD" --hook plan >/dev/null 2>&1
+done
+n=$(wc -l < "$RUBRICATOR_STATE/reviews.jsonl" 2>/dev/null | tr -d ' ')
+if [ "${n:-0}" = 3 ] && [ "$(find "$RUBRICATOR_STATE" -type f ! -perm 600 | wc -l | tr -d ' ')" = 0 ]; then
+  ok "11 · three hook fires leave three records, 0600"
+else
+  no "11 · the hook left no usable record" "lines=${n:-0}"
+fi
+unset RUBRICATOR_CACHE RUBRICATOR_STATE
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

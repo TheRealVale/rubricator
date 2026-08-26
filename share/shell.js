@@ -242,10 +242,15 @@ function setNavMode(m){ navMode = m; navRail = false; nav(); save(); }
 function toggleNav(){ navRail = !navRail; nav(); save(); }
 
 /* ── the status strip ─────────────────────────────────────────────────── */
-var statLeft = '';
-function status(left){
+var statLeft = '', statTitle = '';
+function status(left, title){
   if (left != null) statLeft = left;
-  $('stat-l').innerHTML = statLeft;
+  if (title != null) statTitle = title;
+  var el = $('stat-l');
+  el.innerHTML = statLeft;
+  /* the strip is terse by design, so anything that needs a sentence gets one
+     on hover rather than a second line */
+  if (statTitle) el.title = statTitle; else el.removeAttribute('title');
   var t = active();
   var hint = t && t.surf.hint ? (t.surf.hint() || '') : '';
   if (!hint) hint = panes.length > 1
@@ -463,7 +468,13 @@ function wire(){
   document.addEventListener('keydown', function(e){
     var meta = e.metaKey || e.ctrlKey;
     if (pal.on){ if (e.key === 'Escape'){ e.preventDefault(); palette(false); } return; }
-    if (meta && !e.altKey && (e.key === 'k' || e.key === 'K')){ e.preventDefault(); return palette(true); }
+    if (meta && !e.altKey && (e.key === 'k' || e.key === 'K')){
+      e.preventDefault();
+      /* ⇧⌘K widens whatever the palette scopes — the shell does not know what
+         that is, so it asks the app and reopens */
+      if (e.shiftKey && APP.widen) APP.widen();
+      return palette(true);
+    }
     if (!meta) return;
     if (e.altKey){
       if (e.code === 'BracketLeft'){ e.preventDefault(); return step(-1); }

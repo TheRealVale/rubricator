@@ -447,6 +447,21 @@ hand back as `updatedInput`. See [`install-plan.md`](install-plan.md).
       demonstrably absent from a copy-install artefact built without
       `render.js`. **S**
 
+- [x] **K4b · The test browser stops touching your keychain.** Found by
+      hitting it: about twenty headless renders while building phase N raised a
+      *Keychain not found "Chrome"* dialog, repeatedly, on a machine with Chrome
+      already running. `--dump-dom` on the default profile makes Chrome reach
+      for its `Chrome Safe Storage` item, and one of that dialog's buttons
+      resets a keychain. The obvious answer, `--user-data-dir`, does not work:
+      on Chrome 151.0.7922.174 an isolated profile makes `--dump-dom` hang —
+      shared profile 2.0s against >40s for isolated-minimal, isolated with
+      networking and sync off, `--headless=new`, and a pre-seeded *First Run*
+      sentinel, none of which produced output. `--use-mock-keychain
+      --password-store=basic` keeps the 1.9s and never opens the keychain.
+      *Done when:* the browser test runs without raising a system dialog, and
+      the comment says why isolation was tried and abandoned so nobody spends
+      the afternoon again. **S**
+
 - [x] **K4 · Six smoke tests on the seams that already exist.**
       `RUBRICATOR_NO_WINDOW` (`hook.py:108`) was exercised live under both
       install modes; `RUBRICATOR_DRY_LAUNCH` (`actions.py:230`) is in the code
@@ -799,7 +814,33 @@ is small and it unblocks Q1 — then N1, N2, N4, N3, one commit each, and N6 las
 because it is the only item here that adds a file rather than removing an
 exposure. See [`retention-plan.md`](retention-plan.md).
 
-- [ ] **N1 · The prompt cache stops being world-readable and immortal.** Three
+> **Shipped 2026-08-26, N1–N6.** Measured on the way through: the ratio is
+> **68 of 457 readable — 389 findable but not readable, 85%**, counted from
+> `history.jsonl` directly as the item requires (it was 452 when the plan was
+> written; history grows, transcripts do not). The static workspace carried
+> **7,792 occurrences of `"sid"`** and now carries **0**, with 4,086 prompts
+> withheld and a surface that says which kind of empty it is rather than
+> returning nothing. **34 of 35 cache files were world-readable**; the root is
+> now `0700`, every file `0600`, `tmutil isexcluded` reports **Excluded**, and
+> `index/sessions*.json` expires on the seven-day schedule that
+> `-maxdepth 1 -name '*.html'` had been missing. Claude's half of a transcript
+> was assigned raw — the two scrubbers are now **one list, imported rather than
+> copied**, which is how the drift happened; re-measured after the fix, 17 of
+> 1,339 assistant blocks (1.3%) carry a redaction, against the plan's 1.5%.
+> `⌘K` was surfacing sessions from twenty directories with no scope and no
+> indication; it now shares the Sessions navigator's default, its `everywhere`
+> toggle (`⇧⌘K`) and its no-history escape hatch. And the hook leaves one line
+> per fire in `~/.local/state/rubricator/reviews.jsonl`, which `md` never reads
+> back.
+>
+> Two decisions the items did not make. **N1's mechanism** is
+> `tmutil addexclusion` rather than a move under `~/Library/Caches` — verified
+> unprivileged and reversible, and it needs no migration. And a page written to
+> a path *you typed* keeps your umask: only what lands in the cache unasked gets
+> the cache's mode, because `--out` is the one gesture that means *I intend to
+> move this*.
+
+- [x] **N1 · The prompt cache stops being world-readable and immortal.** Three
       fixes. Mode 0600 on files and 0700 on the directory — `actions.py:113` and
       `:222` already do exactly this elsewhere, and 33 of 33 files under the
       cache root are world-readable today, including the extraction cache
@@ -817,7 +858,7 @@ exposure. See [`retention-plan.md`](retention-plan.md).
       `tmutil isexcluded` on the cache root says Excluded, and a session index
       older than seven days is gone on the next run. **S**
 
-- [ ] **N2 · The prompt corpus is never baked into a file.**
+- [x] **N2 · The prompt corpus is never baked into a file.**
       `~/.cache/rubricator/workspace-*.html` is 8 MB at mode 0644 and contains
       7,792 occurrences of `sid` — the same corpus `--sessions` refuses to write
       with `--out`, by another route, reached without a flag when the local
@@ -828,7 +869,7 @@ exposure. See [`retention-plan.md`](retention-plan.md).
       `--sessions` refusal at `bin/md:149` is true of every write path rather
       than one. **S**
 
-- [ ] **N3 · The scrubber comment tells the truth.** `transcript.py:29` says
+- [x] **N3 · The scrubber comment tells the truth.** `transcript.py:29` says
       *"the same scrubbing the prompt index uses, so a conversation cannot leak
       a key"*. It is one pattern against `workspace.SECRET`'s ten, and it is
       applied to your turns only — the assistant branch at `transcript.py:200`
@@ -841,7 +882,7 @@ exposure. See [`retention-plan.md`](retention-plan.md).
       *Done when:* the comment and the code agree, and the README says which
       choice was made. **S**
 
-- [ ] **N4 · `⌘K` sessions default to this repo.** `sessionList()` defaults to
+- [x] **N4 · `⌘K` sessions default to this repo.** `sessionList()` defaults to
       `here` and filters on `inRepo` — a deliberate, good default, with an
       escape hatch at `workspace.js:1709` for a repo with no history of its own.
       `palSearch` at `:1363` iterates every session on the machine with no scope
@@ -851,7 +892,7 @@ exposure. See [`retention-plan.md`](retention-plan.md).
       *Done when:* `⌘K` in one repo does not surface another repo's prompts
       until the toggle is used, and the toggle is visible. **S**
 
-- [ ] **N5 · Say how much history has already been lost.**
+- [x] **N5 · Say how much history has already been lost.**
       `~/.claude/history.jsonl` remembers **452 sessions back to 2026-04-17**;
       `~/.claude/projects` holds 71 main transcripts, of which 68 correspond —
       **384 sessions can be found but not read.** Anthropic's documentation:
@@ -869,7 +910,7 @@ exposure. See [`retention-plan.md`](retention-plan.md).
       printed it. Not a mix, either way. The sentence appears once per install,
       and nothing under `~/.claude` is written. **S**
 
-- [ ] **N6 · The hook leaves a record.** A plan review produces a decision, a
+- [x] **N6 · The hook leaves a record.** A plan review produces a decision, a
       `systemMessage` and nothing on disk, and because every invocation is a
       fresh ephemeral origin it cannot leave a mark that survives to the next
       one. The hook has fired zero recorded reviews on this machine, and there

@@ -424,9 +424,13 @@ if [ $TO_STDOUT -eq 1 ]; then cat "$TMP/out.html"; exit 0; fi
 if [ -n "$OUT" ]; then cp "$TMP/out.html" "$OUT"; printf 'md: wrote %s\n' "$OUT"; exit 0; fi
 
 mv "$TMP/out.html" "$HTML"
+chmod 600 "$HTML" 2>/dev/null || true
 
-# prune renders older than a week
+# prune renders older than a week. `-maxdepth 1 -name '*.html'` deliberately
+# missed everything else — including index/sessions*.json, which holds every
+# prompt you have typed and was therefore the one file that never expired.
 find "$CACHE" -maxdepth 1 -name '*.html' -mtime +7 -delete 2>/dev/null || true
+find "$CACHE/index" -name 'sessions*.json' -mtime +7 -delete 2>/dev/null || true
 
 # ── open ─────────────────────────────────────────────────────────────────────
 FILEURL="file://$(urlenc "$HTML")"

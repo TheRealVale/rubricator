@@ -164,6 +164,7 @@ function count(text, q){
 /* ── the topic join ───────────────────────────────────────────────────── */
 function promptHits(q){
   if (!D.withSessions || !q) return [];
+  if (promptsWithheld()) return [];
   return D.prompts.filter(function(p){ return count(p.text, q) > 0; })
                   .sort(function(a,b){ return b.t - a.t; });
 }
@@ -229,7 +230,7 @@ function viewSearch(){
   var q = query.trim(), out = [];
   out.push('<div class="qbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>' +
     '<input id="q" placeholder="Search ' + D.docs.length + ' documents' +
-    (D.withSessions ? ' and ' + D.prompts.length + ' prompts' : '') + '…" value="' + esc(query) + '" autocomplete="off" spellcheck="false">' +
+    (promptsWithheld() ? '' : D.withSessions ? ' and ' + D.prompts.length + ' prompts' : '') + '…" value="' + esc(query) + '" autocomplete="off" spellcheck="false">' +
     '<span class="hint">/ to focus</span></div>');
   if (!q){
     out.push('<div class="empty">Type to search across every markdown file in this repo' +
@@ -486,6 +487,7 @@ function sessionHTML(sid, q, convo){
   var m = D.sessions[sid];
   if (!m) return '<div class="empty">That session is not in the index.</div>';
   q = q || '';
+  if (promptsWithheld()) return withheldNote();
   var mine = D.prompts.filter(function(p){ return p.sid === sid; })
                       .sort(function(a, b){ return a.t - b.t; });
   var docs = relatedDocs(sid);
@@ -1225,7 +1227,8 @@ function navSessions(){
   });
   return { html: h.join(''), filter: sesQuery, placeholder: 'Something you said',
            onFilter: function(v){ sesQuery = v; Shell.nav(); },
-           foot: Object.keys(D.sessions).length + ' sessions · ' + D.prompts.length + ' prompts' };
+           foot: Object.keys(D.sessions).length + ' sessions · '
+                 + (promptsWithheld() ? 'prompts not in a static page' : D.prompts.length + ' prompts') };
 }
 
 function navNotes(){
@@ -1359,17 +1362,28 @@ function palSearch(q, kind){
   }
 
   if (want('session') && D.withSessions){
-    var ss = [];
+    /* The Sessions navigator has defaulted to this repository since B4, with an
+       `everywhere` toggle and an escape hatch for a repo with no history. The
+       palette had neither, so ⌘K answered a question about *this* project with
+       prompt text from every directory on the machine — twenty of them here —
+       and said nothing about where any of it came from. Same default, same
+       toggle, same hatch (N4). */
+    var ss = [], elsewhere = 0;
     for (var sid in D.sessions){
       var m = D.sessions[sid];
-      if (!q){ ss.push({ sid:sid, m:m, s:0 }); continue; }
+      var here = sesScope !== 'here' || inRepo(m.p);
+      if (!q){ if (here) ss.push({ sid:sid, m:m, s:0 }); else elsewhere++; continue; }
       var r = sessionScore(sid, m, q);
-      if (r.s) ss.push({ sid:sid, m:m, s:r.s, best:r.best });
+      if (!r.s) continue;
+      if (here) ss.push({ sid:sid, m:m, s:r.s, best:r.best }); else elsewhere++;
     }
     ss.sort(q ? function(a, b){ return b.s - a.s || b.m.b - a.m.b; }
                : function(a, b){ return b.m.b - a.m.b; });
     total += ss.length;
-    groups.push({ label: q ? 'Sessions' : 'Recent sessions', rows: ss.slice(0, 6).map(function(x){
+    var label = (q ? 'Sessions' : 'Recent sessions')
+              + (sesScope === 'here' ? ' · this repo' : ' · everywhere');
+    if (elsewhere && sesScope === 'here') label += ' · ' + elsewhere + ' more elsewhere (⇧⌘K)';
+    groups.push({ label: label, rows: ss.slice(0, 6).map(function(x){
       return { kind:'session', title: clip(x.m.t || '(no prompt recorded)', 64),
                sub: shortRepo(x.m.p) + ' · ' + x.m.n + 'p',
                open: { kind:'session', id:x.sid, q:q, title:clip(x.m.t || x.sid, 30) } };
@@ -1487,11 +1501,34 @@ function needText(){
 }
 /* the strip says what the server is doing; how many documents there are is the
    navigator's business, and saying it twice made the window look duplicated */
+/* A static page carries no prompts: `bin/md` refuses --out with --sessions
+   because your history stays on this machine, and baking the same corpus into a
+   cached .html was the same disclosure by another route (N2). The cost is real,
+   so the surfaces that used to search prompts say which kind of empty they are
+   rather than returning nothing. */
+function promptsWithheld(){ return D.withSessions && !D.prompts.length && D.promptsWithheld > 0; }
+function withheldNote(){
+  return '<div class="empty">Prompt search needs the live workspace. This page is static, '
+       + 'so the ' + D.promptsWithheld.toLocaleString() + ' prompts behind these sessions '
+       + 'were left out of it deliberately \u2014 run <code>md --sessions</code> without '
+       + '<code>--static</code> to search them.</div>';
+}
+
 function stat(){
   var bits = [can('watch') ? 'watching for changes' : (can('live') ? 'served locally' : 'a static page')];
   bits.push('indexed in ' + D.took + 's');
   if (D.withSessions) bits.push(Object.keys(D.sessions).length + ' sessions');
-  Shell.status(bits.join(' · '));
+  /* the archive is on a thirty-day fuse and the Sessions list cannot say so on
+     its own: a row marked archived looks like rubricator lost it. The ratio is
+     counted from history.jsonl, which outlives the transcripts. */
+  var R = D.retention;
+  if (R && R.lost) bits.push(R.readable + '/' + R.known + ' readable');
+  Shell.status(bits.join(' · '),
+    R && R.lost
+      ? R.lost + ' of ' + R.known + ' sessions can be found but not read — Claude Code '
+        + 'removes transcripts after 30 days. Raise ' + R.setting + ' in '
+        + '~/.claude/settings.json to keep them longer.'
+      : '');
 }
 
 /* ── reindex, and the heartbeat that decides how long the server lives ───── */
@@ -1713,7 +1750,10 @@ if (D.withSessions){
 /* ── go ─────────────────────────────────────────────────────────────────── */
 var restored = Shell.init({
   storeKey: 'rubricator:layout:' + hash(D.root),
-  make: makeSurface, spec: specFor, nav: navFor, search: palSearch, menu: menuItems,
+  make: makeSurface, spec: specFor, nav: navFor, search: palSearch,
+    /* ⇧⌘K in the palette does what the `everywhere` button does in the
+       Sessions navigator: the two surfaces now share one scope (N4) */
+    widen: function(){ sesScope = sesScope === 'here' ? 'all' : 'here'; Shell.nav(); }, menu: menuItems,
   onFocus: function(){ Shell.nav(); }
 });
 stat();

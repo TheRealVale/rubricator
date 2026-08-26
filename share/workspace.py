@@ -296,6 +296,115 @@ def load_sessions(limit_project=None, deep=False):
     return prompts, meta, touches
 
 
+def secure_cache():
+    """The cache holds every prompt you have typed, the plaintext of every PDF
+    indexed, and — until N2 — whole rendered workspaces. It was 0644 in a
+    directory macOS does not exclude from Time Machine, which meant the corpus
+    `--sessions` refuses to write with `--out` was being backed up instead.
+
+    Two properties, asserted rather than assumed: nothing under the cache root
+    is readable by anyone else, and the root is out of Time Machine. The second
+    is `tmutil addexclusion` — unprivileged, reversible with `removeexclusion`,
+    and it needs no migration, which moving under ~/Library/Caches would."""
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        os.chmod(CACHE, 0o700)
+    except Exception:
+        return
+    for sub in CACHE.rglob("*"):
+        try:
+            os.chmod(sub, 0o700 if sub.is_dir() else 0o600)
+        except Exception:
+            pass
+    mark = CACHE / ".tm-excluded"
+    if mark.exists() or sys.platform != "darwin":
+        return
+    try:
+        r = subprocess.run(["tmutil", "isexcluded", str(CACHE)],
+                           capture_output=True, text=True, timeout=5)
+        if "[Excluded]" not in (r.stdout or ""):
+            subprocess.run(["tmutil", "addexclusion", str(CACHE)],
+                           capture_output=True, timeout=5)
+        mark.write_text("", encoding="utf-8")
+        os.chmod(mark, 0o600)
+    except Exception:
+        pass          # a backup exclusion that cannot be set must not stop an index
+
+
+def prune_cache(days=7):
+    """`bin/md:429` already expires rendered HTML after seven days, but its
+    `-maxdepth 1 -name '*.html'` misses `index/`, so the session index — the most
+    sensitive file rubricator writes — was the one thing that never expired."""
+    cut = time.time() - days * 86400
+    for f in list((CACHE / "index").glob("sessions*.json")):
+        try:
+            if f.stat().st_mtime < cut:
+                f.unlink()
+        except Exception:
+            pass
+
+
+def retention():
+    """How much of your own history can still be read, and how much only found.
+
+    Two sources, deliberately: the session ids in `history.jsonl`, which is kept
+    until you delete it, against the transcripts in `~/.claude/projects`, which
+    Claude Code sweeps after `cleanupPeriodDays` — 30 by default. The gap is not
+    a rubricator limitation and it is not recoverable, so the page says the
+    number rather than letting the Sessions list imply that a `○ archived` row
+    is a rubricator problem.
+
+    Counted from `history.jsonl` directly rather than from the built index,
+    which drops slash-command prompts and would give a different, smaller
+    denominator for the same question."""
+    hist = HOME / ".claude/history.jsonl"
+    if not hist.is_file():
+        return None
+    ids = set()
+    try:
+        with hist.open(encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    sid = json.loads(line).get("sessionId")
+                except Exception:
+                    continue
+                if sid:
+                    ids.add(sid)
+    except Exception:
+        return None
+    if not ids:
+        return None
+    live = {p.stem for p in (HOME / ".claude/projects").glob("*/*.jsonl")}
+    kept = len(ids & live)
+    return {"known": len(ids), "readable": kept, "lost": len(ids) - kept,
+            "setting": "cleanupPeriodDays"}
+
+
+def say_once_about_retention(r):
+    """One sentence, once per install, naming the setting that controls it.
+
+    Deliberately printed and not written. Raising `cleanupPeriodDays` is a
+    one-line edit to `~/.claude/settings.json`, and a markdown reader that
+    edits another tool's config is one malformed write away from breaking the
+    agent it exists to help. The marker lives in rubricator's own cache."""
+    if not r or not r.get("lost"):
+        return
+    mark = CACHE / "said-retention"
+    if mark.exists():
+        return
+    pct = round(100 * r["lost"] / r["known"])
+    sys.stderr.write(
+        f"rubricator: {r['lost']} of your {r['known']} sessions ({pct}%) can be found but "
+        f"not read — Claude Code removes transcripts after 30 days.\n"
+        f"            Raise `{r['setting']}` in ~/.claude/settings.json to keep them longer. "
+        f"Said once.\n")
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        mark.write_text(str(int(time.time())), encoding="utf-8")
+    except Exception:
+        pass
+
+
 # ── caching ──────────────────────────────────────────────────────────────────
 def _cache_read(name, stamp):
     f = CACHE / "index" / name
@@ -313,6 +422,7 @@ def _cache_write(name, stamp, data):
         tmp.write_text(json.dumps({"stamp": stamp, "data": data}, ensure_ascii=False),
                        encoding="utf-8")
         tmp.replace(CACHE / "index" / name)
+        os.chmod(CACHE / "index" / name, 0o600)
     except Exception:
         pass
 
@@ -417,6 +527,11 @@ def build(roots, with_sessions, deep=False, extract_now=False):
         data["sessions"] = sessions
         data["touches"] = touches
         data["deep"] = bool(deep)
+        data["retention"] = retention()
+        say_once_about_retention(data["retention"])
+
+    secure_cache()
+    prune_cache()
 
     load_extra_providers()
     for name, fn in PROVIDERS.items():
@@ -808,6 +923,16 @@ def main():
         return 0
 
     data = build(roots, with_sessions, deep, extract_now=True)   # a static page carries it all
+    # …except your prompts. `bin/md:165` refuses `--out` with `--sessions` on the
+    # principle that your history stays on this machine, and then this path wrote
+    # the same corpus into ~/.cache/rubricator/workspace-<hash>.html — 8 MB of it,
+    # reached with no flag whenever the local server does not come up. A refusal
+    # that guards one write path and not the other is not a refusal. The cost is
+    # real and is the right cost: a static workspace loses prompt search, and
+    # says so rather than returning nothing.
+    if data.get("prompts"):
+        data["promptsWithheld"] = len(data["prompts"])
+        data["prompts"] = []
     # a document to open straight away — bare `md` passes the README this way
     want = os.environ.get("RUBRICATOR_OPEN") or ""
     if want:
@@ -825,6 +950,16 @@ def main():
     page = emit_html(data, share)
     if out:
         Path(out).write_text(page, encoding="utf-8")
+        # A page that lands in the cache was never asked for and carries every
+        # document body in the repository, so it gets the cache's mode. A path
+        # the human typed keeps their umask: `--out` is the one gesture that
+        # means *I intend to move this*, and surprising them with 0600 there
+        # would be a different kind of dishonesty.
+        try:
+            if Path(out).resolve().is_relative_to(CACHE.resolve()):
+                os.chmod(out, 0o600)
+        except Exception:
+            pass
         sys.stdout.write(out + "\n")
     else:
         sys.stdout.write(page)

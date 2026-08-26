@@ -26,12 +26,23 @@ MAX_TURNS = 800          # a runaway session still has to render
 MAX_TEXT = 40_000        # per message; nothing real comes close
 BRIEF = 150              # one line of what a tool was asked to do
 
-# the same scrubbing the prompt index uses, so a conversation cannot leak a key
-SCRUB = [
-    (re.compile(r"\b(sk-[A-Za-z0-9_-]{16,}|[sprk]k_(?:live|test)_[A-Za-z0-9]{10,}"
-                r"|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}"
-                r"|AKIA[0-9A-Z]{12,}|AIza[0-9A-Za-z_-]{20,})"), "[key]"),
-]
+# The same scrubbing the prompt index uses — literally the same list, imported
+# rather than copied, because this comment used to claim that and it was not
+# true: one provider-token pattern against the index's ten, applied to your
+# turns only while the assistant branch assigned its text raw. Measured before
+# the fix: 118 of 7,830 assistant text blocks (1.5%) matched the index's
+# patterns — 51 emails, 30 opaque blobs, 25 credential assignments, 8
+# authorization headers, 3 env lines, 1 connection string — and none was caught.
+# A second copy of a security list is a second thing to forget to update, which
+# is how the drift happened; there is now one list and one import.
+try:
+    from workspace import SECRET as SCRUB          # noqa: F401  (one list, not two)
+except Exception:                                  # standalone, without the index
+    SCRUB = [
+        (re.compile(r"\b(sk-[A-Za-z0-9_-]{16,}|[sprk]k_(?:live|test)_[A-Za-z0-9]{10,}"
+                    r"|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}"
+                    r"|AKIA[0-9A-Z]{12,}|AIza[0-9A-Za-z_-]{20,})"), "[key]"),
+    ]
 
 
 def scrub(s):
@@ -197,7 +208,8 @@ def read(sid, path=None):
                             close()
                             cur = {"who": "claude", "t": stamp(d), "text": "", "thinking": 0,
                                    "tools": [], "wrote": [], "edited": []}
-                        cur["text"] = chunk[:MAX_TEXT]
+                        # scrubbed like your half: this branch used to assign raw
+                        cur["text"] = scrub(chunk[:MAX_TEXT])
                     elif bt == "thinking":
                         cur["thinking"] += 1
                     elif bt == "tool_use":

@@ -6,6 +6,30 @@ status: plan — 2026-08-24
 
 # What the tool keeps, and what it must not
 
+> **Shipped 2026-08-26.** All six items are in; the register carries the
+> numbers. Three things this document did not decide and the commits did.
+>
+> **The mechanism for N1** is `tmutil addexclusion` on the existing cache root,
+> not a move under `~/Library/Caches`. Both reach the property this document
+> asks for and only one needs a migration; the exclusion was verified
+> unprivileged and reversible (`tmutil removeexclusion`) against a directory
+> under `$HOME`, since a test under `/var/folders` reports `[Excluded]` before
+> you do anything and proves nothing.
+>
+> **Mode follows intent, not content.** A page that lands in the cache unasked
+> gets `0600`; a page written to a path you typed keeps your umask. `--out` is
+> the one gesture that means *I intend to move this*, and quietly making that
+> file private would be a different kind of surprise from the one N1 fixes.
+>
+> **N3 chose to scrub rather than to confess.** The item allowed either — apply
+> the index's patterns to Claude's turns, or delete the comment and say the
+> reader shows what is on disk. Scrubbing won because the claim was cheap to
+> make true, and because the cause of the drift was that there were *two*
+> lists: `transcript.py` now imports `workspace.SECRET` instead of carrying a
+> shrunken copy of it, so there is nothing left to forget to update. The
+> standalone fallback stays for a `transcript.py` run without the index beside
+> it, and is the only copy that remains.
+
 Rubricator makes one hard promise. `README.md:228` says *"Session data never
 leaves the machine. Prompt text is scrubbed of keys, tokens, JWTs, private keys,
 `.env` lines and connection strings at index time, and `--sessions` refuses

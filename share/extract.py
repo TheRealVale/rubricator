@@ -53,11 +53,13 @@ def cached(path):
 def _store(path, data):
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
+        os.chmod(CACHE, 0o700)
         data["stamp"] = _stamp(path)
         f = _cache_path(path)
         tmp = f.with_suffix(".part")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         tmp.replace(f)
+        os.chmod(f, 0o600)      # this is the plaintext of the document
     except Exception:
         pass
     return data

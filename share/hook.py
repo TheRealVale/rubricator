@@ -187,6 +187,39 @@ def read_plan(path):
         return None            # better an unpaired allow than a wedged session
 
 
+def note_review(payload, path, action, items, label):
+    """One line per plan review, appended to ~/.local/state/rubricator/reviews.jsonl.
+
+    The hook produces a decision, a systemMessage and nothing on disk, and every
+    invocation is a fresh ephemeral origin — so it cannot leave a mark that
+    survives to the next one. Zero recorded reviews and two hundred look
+    identical from here, which makes the flagship loop the one thing rubricator
+    cannot tell you anything about.
+
+    Everything written is already in hand: no new read, no new permission, no
+    UI. Grep-readable, `rm`-deletable, and `md` never reads it back — this is a
+    record, not an index. The approved plan *text* is the other half of N6 and
+    lands with M6, which decides what `.rubricator/` is on disk."""
+    d = Path(os.environ.get("RUBRICATOR_STATE",
+                            str(HOME / ".local/state/rubricator")))
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        os.chmod(d, 0o700)
+        f = d / "reviews.jsonl"
+        with f.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "at": int(time.time()),
+                "decision": action,
+                "plan": os.path.basename(path or ""),
+                "items": items,
+                "session": payload.get("session_id") or "",
+                "repo": os.path.basename(payload.get("cwd") or os.getcwd()),
+            }) + "\n")
+        os.chmod(f, 0o600)
+    except Exception:
+        pass          # a review that cannot be recorded is still a review
+
+
 def note_route(payload, path, how):
     """Standing rule 12: do not scope a design on a documented-but-unfired
     platform feature. This is the firing. One line per hook run, appended to
@@ -314,6 +347,7 @@ def main():
     close_window(port)
 
     if is_hook:
+        note_review(payload, path, action, RESULT.get("items", 0), label)
         emit(hook_decision(action, text, label, plan_text=read_plan(path)))
     else:
         if action == "feedback" and text.strip():
