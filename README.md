@@ -28,11 +28,14 @@ repository you have since renamed.
 *A rubricator was the scribe who went through a finished manuscript adding the red marks —
 the headings, the corrections, the notes in the margin. Same job, different century.*
 
-![The review tray after the document was rewritten: two marks attached, one whose text is gone](docs/anchors.png)
+![The review tray on a plan an agent has rewritten: an Expand and a Change still on their text, a Question tagged "moved" showing both what was marked and what the document says there now, and an Approve tagged "text gone" and greyed out. The tray header reads "3 · 1 moved · 1 gone" above the line "1 of your 1 approval was altered", and the foot reads "5 of 15 blocks marked".](docs/anchors.png)
 
-*Three marks on a document an agent has since rewritten. Two are still on their text. The
-third is tagged **text gone** — the tray says `2 · 1 gone`, the status strip says `1 lost
-its text`, and nothing anywhere calls it resolved.*
+*Four marks on a plan an agent has since rewritten. Two are still on their text. The
+Question **moved** — its opening sentence was rewritten, its longest line survived — and the
+tray shows both what was marked and what is there now. The Approve's text is **gone**, which
+is not the same as resolved: it is counted in its own line at the top, because an approval
+you did not actually give is the expensive one. The status strip says the same thing before
+you scroll.*
 
 ```bash
 md                    # the workspace for this directory, README already open
@@ -93,7 +96,7 @@ Uninstall with `./uninstall.sh` — it removes what it added and leaves your doc
 
 ## Reading
 
-![the reader](docs/reader.png)
+![The reader on a plan: an outline down the left, front matter in a card, syntax-highlighted SQL and a rendered table.](docs/reader.png)
 
 - dark by default, `t` toggles; the choice is remembered
 - `/` or `⌘F` searches the document — every hit highlighted, `⏎` steps through, with a count
@@ -105,7 +108,7 @@ Uninstall with `./uninstall.sh` — it removes what it added and leaves your doc
 
 ## Reviewing
 
-![the review layer on a single file](docs/review.png)
+![The same plan with the feedback panel open: three marks — Expand on the table, Change on the Authentication section, Approve on the open questions — each with its line range and note, above the Apply/Questions/Raw templates and a Copy feedback button.](docs/review.png)
 
 Select any text for the verb popover, or hover a block and press a key:
 
@@ -178,7 +181,11 @@ The quote you marked is never overwritten. What's left is your open-items list.
 A bare `md` points rubricator at a whole repo instead of one file. `-w` does the same
 thing explicitly, which is what you want in a script.
 
-![the workspace: navigator, document, and the marks that came back with it](docs/workspace.png)
+![The workspace with the navigator's sort-and-filter row open — facets for has notes, behind its code, untracked and 14 days, and a "says" row built from front matter: delivered, draft, living, plan — beside the Notes surface listing every mark in the repository grouped by verb.](docs/workspace.png)
+
+*Every mark in the repository, and the filters that narrow those 19 documents down. `says`
+is built from `status:` in front matter, so "everything that still calls itself a plan" is
+one click.*
 
 ```bash
 md                       # index this repo and open it
