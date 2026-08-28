@@ -379,6 +379,29 @@ Source: moat.so, fetched 2026-08-23, verbatim.
 this project's own candidate positioning, so the distinguishing word has to be
 the one about rewriting, not the one about review layers.
 
+### G14 — the projects the README names, and their scale
+Every figure from that project's own GitHub API, fetched **2026-08-27**. The
+README names these projects and describes what distinguishes each; it carries no
+figures, because a star count in a front page rots without anyone noticing. This
+is where they live.
+
+| project | stars | created | licence |
+|---|---:|---|---|
+| [plannotator](https://github.com/backnotprop/plannotator) | 8,145 | 2025-12-28 | Apache-2.0 |
+| [PlanBridge](https://github.com/contextbridge/planbridge) | 27 | 2026-04-29 | MIT |
+| [Imark](https://github.com/migsilva89/imark) | 49 | 2026-08-05 | MIT |
+| [md-annotator](https://github.com/konradmichalik/md-annotator) | 5 | 2026-01-28 | MIT |
+| [recensa](https://github.com/S40911120/recensa) | 70 | 2026-07-12 | MIT |
+| [universal-session-viewer](https://github.com/tad-hq/universal-session-viewer) | 18 | 2025-12-23 | AGPL-3.0 |
+| [cc_transcript_viewer](https://github.com/tim-hua-01/cc_transcript_viewer) | 12 | 2026-06-01 | MIT |
+| [kortex](https://github.com/chicongst/kortex) | 7 | 2026-07-07 | none |
+
+**Moat** is hosted and has no repository to count.
+
+**Must accompany:** plannotator was created seven months before this repository
+and is two orders of magnitude larger by stars. Any sentence comparing the two
+has to survive that being true.
+
 ---
 
 ## Do not cite
