@@ -247,12 +247,58 @@ pre.dossier{
 /* ── the navigator is narrow: one row of controls, the knobs behind a
       toggle, and a tree that gets the rest of the width ─────────────────── */
 .nvctl{margin:0 0 6px}
-.nvctl .r{display:flex;align-items:center;gap:5px;margin-bottom:5px}
+.nvctl .r{display:flex;align-items:center;gap:5px}
 .nvctl .seg button{padding:4px 8px;font-size:11px}
-.nvctl .sp{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--fg-dim)}
+.nvctl .sp{margin-left:auto}
 .nvctl .opt{all:unset;cursor:pointer;font-size:11px;color:var(--fg-dim);padding:4px 7px;border-radius:7px}
 .nvctl .opt:hover{color:var(--fg)}
 .nvctl .opt.on{color:var(--fg);background:var(--bg-elev)}
+.nvctl .opt.disc{display:flex;align-items:center;gap:5px}
+.nvctl .opt.disc svg{width:12px;height:12px;flex:none}
+.nvctl .badge{min-width:14px;height:14px;border-radius:20px;background:var(--accent);
+  color:var(--bg);font-size:9.5px;font-weight:700;display:flex;align-items:center;
+  justify-content:center;padding:0 3px;font-family:var(--font)}
+
+/* The state of the list, in words, whether or not the drawer is open — a bare
+   count at the end of a control row said neither what it counted nor that
+   anything was narrowing it. */
+.nvctl .sum{display:flex;align-items:baseline;gap:5px;margin-top:7px;
+  font-family:var(--mono);font-size:10.5px;color:var(--fg-dim)}
+.nvctl .sum .hit{color:var(--accent)}
+.nvctl .sum .dot{opacity:.55}
+.nvctl .lnk{all:unset;cursor:pointer;margin-left:auto;color:var(--fg-muted);font-size:10.5px}
+.nvctl .lnk:hover{color:var(--fg)}
+.empty .lnk{all:unset;cursor:pointer;color:var(--accent);text-decoration:underline;
+  text-underline-offset:2px;font-size:12px}
+
+/* A 38px label gutter, so a group name never shares a line with the controls it
+   names. The navigator is 252px wide: four text chips cannot sit on one row at
+   that width, which is why the on/off facets are rows rather than chips. */
+.nvctl .drw{margin-top:8px;padding:9px 10px 10px;background:var(--bg-soft);
+  border:1px solid var(--border-soft);border-radius:10px;
+  display:flex;flex-direction:column;gap:9px}
+/* not `.grp` — that is the surface-section heading, and inheriting its
+   uppercase and 26px margins is what a shared name buys you */
+.nvctl .drw .fgrp{display:flex;gap:8px}
+.nvctl .drw .lbl{width:38px;flex:none;line-height:20px;align-self:flex-start;margin-right:0}
+.nvctl .drw .opts{flex:1;display:flex;flex-wrap:wrap;gap:4px;min-width:0}
+.nvctl .drw .opts.col{flex-direction:column;flex-wrap:nowrap;gap:3px}
+.nvctl .drw .sep{height:1px;background:var(--border-soft)}
+.nvctl .drw .chip{padding:2px 8px;border:0;border-radius:6px;font-size:10.5px;
+  background:var(--bg-elev);color:var(--fg-muted)}
+.nvctl .drw .chip.mono{font-family:var(--mono);font-size:10px}
+.nvctl .drw .chip.on{background:var(--accent-soft);color:var(--fg)}
+.nvctl .ck{all:unset;cursor:pointer;display:flex;align-items:center;gap:7px;
+  padding:3px 5px;border-radius:6px}
+.nvctl .ck:hover{background:var(--bg-elev)}
+.nvctl .ck.on{background:var(--accent-soft)}
+.nvctl .ck .box{width:11px;height:11px;border-radius:3px;border:1px solid var(--border);
+  flex:none;display:flex;align-items:center;justify-content:center;color:var(--bg)}
+.nvctl .ck.on .box{border-color:var(--accent);background:var(--accent)}
+.nvctl .ck .box svg{width:8px;height:8px}
+.nvctl .ck .t{flex:1;font-size:11.5px;color:var(--fg-muted);text-align:left}
+.nvctl .ck.on .t{color:var(--fg)}
+.nvctl .ck .n{font-family:var(--mono);font-size:10px;color:var(--fg-dim)}
 .nvb .chip{font-size:10.5px;padding:3px 8px}
 .nvb .grp{margin:14px 0 5px;font-size:9.5px}
 .nvb .empty{padding:22px 6px;font-size:12px}

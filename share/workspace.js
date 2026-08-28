@@ -548,17 +548,46 @@ var LIBSORT = {
   size:   function(a,b){ return b.words - a.words; },
   title:  function(a,b){ return a.rel.localeCompare(b.rel); }
 };
-function libDocs(){
-  var out = D.docs.slice();
-  if (libFacet.notes) out = out.filter(function(d){ return noteCount(d) > 0; });
-  if (libFacet.stale) out = out.filter(function(d){ return !!staleRow(d); });
-  if (libFacet.untracked) out = out.filter(function(d){ return !!d.untracked; });
-  if (libFacet.recent) out = out.filter(function(d){ return now - d.mtime < 14 * DAY; });
+/* One name per idea. The sort key `stale` reads as *activity* wherever a human
+   sees it, because the facet over the same signal is called *behind its code* —
+   two words for one thing is how a panel stops being legible. */
+var SORTS = [['recent','recent'], ['stale','activity'], ['notes','notes'],
+             ['size','size'], ['title','name']];
+function sortLabel(k){
+  for (var i = 0; i < SORTS.length; i++) if (SORTS[i][0] === k) return SORTS[i][1];
+  return k;
+}
+/* The facets, once. The list and the counts beside each filter read the same
+   table, so the number on a row is always the number of rows that row produces.
+   Two copies of this drifted apart the moment one of them gained a predicate. */
+var LIBFACETS = [
+  { k:'notes',     label:'has notes',      test: function(d){ return noteCount(d) > 0; } },
+  { k:'stale',     label:'behind its code', test: function(d){ return !!staleRow(d); } },
+  { k:'untracked', label:'untracked',      test: function(d){ return !!d.untracked; } },
+  { k:'recent',    label:'last 14 days',   test: function(d){ return now - d.mtime < 14 * DAY; } }
+];
+function libPass(d, on, status){
+  for (var i = 0; i < LIBFACETS.length; i++){
+    var f = LIBFACETS[i];
+    if (on[f.k] && !f.test(d)) return false;
+  }
   /* Q2 · a document that still says `planned` while the code shipped is a
      falsifiable claim about itself, which a churn count is not. Filter to one,
      sort by age, and the stale claims are in front of you. */
-  if (libStatus) out = out.filter(function(d){ return statusKey(d) === libStatus; });
+  if (status && statusKey(d) !== status) return false;
+  return true;
+}
+function libDocs(){
+  var out = D.docs.filter(function(d){ return libPass(d, libFacet, libStatus); });
   return out.sort(LIBSORT[libSort] || LIBSORT.recent);
+}
+/* how many documents survive if this facet is on, combined with whatever else
+   is already on — so a row reading 0 tells you not to spend the click */
+function libCount(key, statusKey_){
+  var on = {}; for (var k in libFacet) on[k] = libFacet[k];
+  if (key) on[key] = true;
+  var st = statusKey_ === undefined ? libStatus : statusKey_;
+  return D.docs.filter(function(d){ return libPass(d, on, st); }).length;
 }
 function fileRow(d){
   var n = noteCount(d), st = D.stale[d.rel] || {};
@@ -1487,11 +1516,16 @@ function navDocs(){
       return hits(d.rel, navQ) || hits(d.title || '', navQ);
     });
   }
-  var sorts = [['recent','recent'],['stale','stale'],['notes','notes'],['size','size'],['title','name']];
-  var facets = [['notes','has notes'],['stale','behind its code'],
-                ['untracked','untracked'],['recent','14 days']];
+  var sorts = SORTS;
   var sks = statusKeys(D.docs);
+  var onCount = LIBFACETS.filter(function(f){ return libFacet[f.k]; }).length + (libStatus ? 1 : 0);
   var narrowed = docs.length !== D.docs.length;
+  var TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" ' +
+             'stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"/></svg>';
+
+  /* Row one is what the panel *is*: a shape, and a way in to how it is narrowed.
+     The count moved out of it — a bare number floating at the end of a control
+     row says neither what it counts nor that anything is filtering it. */
   var h = ['<div class="nvctl"><div class="r">' +
     '<div class="seg">' +
       '<button data-lmode="tree" class="' + (libFlat ? '' : 'on') + '">tree</button>' +
@@ -1504,29 +1538,62 @@ function navDocs(){
       '<button class="opt ico" data-tree="shut" title="Collapse every folder">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
         'stroke-linecap="round" stroke-linejoin="round"><path d="M7 14l5-5 5 5"/></svg></button>') +
-    '<button class="opt' + (navOpts ? ' on' : '') + '" data-navopts="1" title="Sorting and filters">' +
-      'sort &amp; filter</button>' +
-    '<span class="sp">' + (narrowed ? docs.length + ' of ' + D.docs.length : docs.length) + '</span>' +
-    '</div>'];
+    '<span class="sp"></span>' +
+    '<button class="opt disc' + (navOpts ? ' on' : '') + '" data-navopts="1" ' +
+      'title="Sorting and filters">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' +
+      'sort &amp; filter' +
+      (onCount ? '<span class="badge">' + onCount + '</span>' : '') +
+    '</button></div>'];
+
+  /* …and one line that says the state in words whether the drawer is open or
+     not, so you can tell at a glance that a filter is on. */
+  h.push('<div class="sum">' +
+    '<span class="' + (narrowed ? 'hit' : '') + '">' +
+      (narrowed ? docs.length + ' of ' + D.docs.length : D.docs.length + ' documents') +
+    '</span><span class="dot">·</span><span>by ' + esc(sortLabel(libSort)) + '</span>' +
+    (onCount ? '<button class="lnk" data-lclear="1">clear</button>' : '') +
+    '</div>');
+
   if (navOpts){
-    h.push('<div class="r"><div class="seg">' +
-      sorts.map(function(x){ return '<button data-lsort="' + x[0] + '" class="' +
-        (libSort === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div></div>');
-    h.push('<div class="r">' + facets.map(function(f){
-      return '<button class="chip' + (libFacet[f[0]] ? ' on' : '') + '" data-lfacet="' + f[0] + '">' +
-             f[1] + '</button>'; }).join('') + '</div>');
-    if (sks.length) h.push('<div class="r">' +
-      '<span class="lbl">says</span>' +
-      sks.map(function(k){
-        return '<button class="chip' + (libStatus === k ? ' on' : '') +
-               '" data-lstatus="' + esc(k) + '" title="Documents whose front matter says ' +
-               esc(k) + '">' + esc(k) + '</button>';
-      }).join('') + '</div>');
+    /* A label gutter, so a group name never shares a line with the controls it
+       names and nothing wraps raggedly. The navigator is 252px: four text chips
+       cannot share a row at that width, which is why the facets are rows. */
+    h.push('<div class="drw">');
+
+    h.push('<div class="fgrp"><span class="lbl">sort</span><div class="opts">' +
+      sorts.map(function(x){
+        return '<button class="chip' + (libSort === x[0] ? ' on' : '') +
+               '" data-lsort="' + x[0] + '">' + x[1] + '</button>';
+      }).join('') + '</div></div>');
+
+    h.push('<div class="sep"></div>');
+    h.push('<div class="fgrp"><span class="lbl">show</span><div class="opts col">' +
+      LIBFACETS.map(function(f){
+        var on = !!libFacet[f.k], n = libCount(f.k);
+        return '<button class="ck' + (on ? ' on' : '') + '" data-lfacet="' + f.k + '">' +
+          '<span class="box">' + (on ? TICK : '') + '</span>' +
+          '<span class="t">' + f.label + '</span>' +
+          '<span class="n">' + n + '</span></button>';
+      }).join('') + '</div></div>');
+
+    if (sks.length){
+      h.push('<div class="sep"></div>');
+      h.push('<div class="fgrp"><span class="lbl">says</span><div class="opts">' +
+        sks.map(function(k){
+          return '<button class="chip mono' + (libStatus === k ? ' on' : '') +
+                 '" data-lstatus="' + esc(k) + '" title="' + libCount(null, k) +
+                 ' documents whose front matter says ' + esc(k) + '">' + esc(k) + '</button>';
+        }).join('') + '</div></div>');
+    }
+    h.push('</div>');
   }
   h.push('</div>');
   h.push(docs.length
     ? '<div class="tree">' + ((libFlat || navQ) ? docs.map(fileRow).join('') : libTree(docs)) + '</div>'
-    : '<div class="empty">Nothing matches those filters.</div>');
+    : '<div class="empty">Nothing matches those filters.<br><br>' +
+      '<button class="lnk" data-lclear="1">Clear them</button></div>');
   var kinds = { pdf:0, word:0 };
   D.docs.forEach(function(d){ if (kinds[d.kind] != null) kinds[d.kind]++; });
   var foot = [D.docs.length + ' documents'];
@@ -2074,6 +2141,7 @@ document.addEventListener('click', function(e){
     if (d.lsort)  libSort = d.lsort;
     if (d.lfacet) libFacet[d.lfacet] = !libFacet[d.lfacet];
     if (d.lstatus) libStatus = libStatus === d.lstatus ? '' : d.lstatus;
+    if (d.lclear){ libFacet = {}; libStatus = ''; }
     if (d.sscope) sesScope = d.sscope;
     if (d.slive)  sesLive = !sesLive;
     return Shell.nav();
