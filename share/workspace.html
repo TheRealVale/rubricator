@@ -117,6 +117,11 @@ pre.dossier{
 .saved .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-dim)}
 .nvctl .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;
   color:var(--fg-dim);align-self:center;margin-right:2px}
+/* the session id, click to copy — every other tool wants it, and it used to be
+   reachable only inside a longer command */
+.who .sid{font-family:var(--mono);font-size:10px;color:var(--fg-dim);cursor:pointer;
+  border:1px solid var(--border-soft);border-radius:5px;padding:0 5px;line-height:16px}
+.who .sid:hover{color:var(--fg);border-color:var(--border)}
 .docnote{font-size:12px;color:var(--yellow);border:1px solid color-mix(in srgb,var(--yellow) 35%,transparent);
   padding:9px 13px;margin-bottom:22px}
 

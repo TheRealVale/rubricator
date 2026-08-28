@@ -342,12 +342,29 @@ if [ ! -s "$static" ]; then
 elif [ "${live:-0}" -lt 1 ]; then
   no "10 · the test has no corpus to withhold" "load_sessions() returned ${live:-0} prompts — the assertion below is vacuous"
 else
-  sids=$(grep -o '"sid"' "$static" | wc -l | tr -d ' ')
-  held=$(grep -c 'promptsWithheld' "$static" || true)
-  if [ "$sids" = 0 ] && [ "$held" -ge 1 ]; then
+  # Assert on the payload, not on the page text. `grep '"sid"'` was a proxy for
+  # "a prompt record reached the page", and it collides with any markup that
+  # happens to carry class="sid" — a false red that says nothing about prompts.
+  # The payload is the thing that must not carry them, so read it.
+  python3 - "$static" <<'PYEOF' > "$WORK/st.txt" 2>&1
+import json, re, sys
+s = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r'id="wsdata" type="application/json">(.*?)</script>', s, re.S)
+if not m:
+    print("XX no payload in the page"); sys.exit(1)
+d = json.loads(m.group(1).replace("<\\/", "</"))
+checks = {
+  "the prompts array is empty":      not d.get("prompts"),
+  "and it says how many it held":    int(d.get("promptsWithheld") or 0) > 0,
+  "no prompt record survives":       not any("sid" in x for x in (d.get("prompts") or [])),
+}
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+  if [ $? = 0 ]; then
     ok "10 · no prompt text in a static workspace ($live indexed, 0 written, and it says so)"
   else
-    no "10 · a static page carries the prompt corpus" "\"sid\" x$sids, promptsWithheld x$held"
+    no "10 · a static page carries the prompt corpus" "$(grep '^XX' "$WORK/st.txt" | tr '\n' ' ')"
   fi
 fi
 

@@ -1169,6 +1169,15 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                 if not d:
                     return S.J({"error": "no such document"}, 400)
                 return S.J(A.reveal(d["abs"]) if verb == "reveal" else A.edit(d["abs"]))
+            if verb == "reveal-session":
+                # The page sends a session id, never a path — the directory is
+                # looked up here, in the index the server already holds, for the
+                # same reason every other verb resolves its own target.
+                m = (state["data"].get("sessions") or {}).get(ident)
+                cwd = (m or {}).get("p") or ""
+                if not m or not cwd or not os.path.isdir(cwd):
+                    return S.J({"error": "that session's directory is not on this machine"}, 400)
+                return S.J(A.reveal(cwd))
         except Exception as e:
             return S.J({"error": str(e)}, 500)
         return S.J({"error": "unknown verb"}, 400)

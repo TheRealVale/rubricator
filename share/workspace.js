@@ -818,7 +818,12 @@ function sessionHTML(sid, q, convo){
         (m.live ? 'resumable' : 'archived — transcript gone') + '</span>' +
       '<span>' + esc((m.p || 'unknown project').replace(/^\/Users\/[^/]+/, '~')) + '</span>' +
       '<span>' + m.n + ' prompts</span><span>' + span(m) + '</span>' +
-      '<span>last active ' + ago(m.b) + ' ago</span></div>'];
+      '<span>last active ' + ago(m.b) + ' ago</span>' +
+      /* the id is what every other tool wants from you, and it used to be
+         available only inside a longer command */
+      '<span class="sid" data-copy="' + esc(sid) + '" title="' + esc(sid) +
+        ' — click to copy">' + esc(sid.slice(0, 8)) + '</span>' +
+      '</div>'];
 
   if (m.live && can('launch')){
     out.push('<div class="grp">Pick it up</div>',
@@ -1297,6 +1302,7 @@ function docSurface(rel, q, jump){
       if (!text) text = 'Read ' + d.rel + ' and tell me what you make of it.';
       act('launch', d.rel, text, 'session opening in a new terminal window');
     }});
+    if (can('reveal')) a.push({ label:'edit', fn:function(){ act('edit', d.rel, '', 'opened in your editor'); }});
     if (can('reveal')) a.push({ label:'reveal', fn:function(){ act('reveal', d.rel, '', 'revealed in Finder'); }});
     a.push({ label:'copy path', fn:function(){ copy(d.abs); toast('path copied'); }});
     return a;
@@ -1377,6 +1383,27 @@ function sessionSurface(sid, q){
   S.label = function(){
     var m = D.sessions[sid] || {};
     return { title: clip(m.t || sid.slice(0, 8), 30), tip: m.t || sid, kd:'SES' };
+  };
+  /* A document tab carries Send to Claude, reveal and copy path; a session tab
+     carried nothing, so picking a conversation back up meant opening it,
+     scrolling past the transcript and finding the buttons in the body. These
+     are the same actions, one click from wherever you found the session. */
+  S.actions = function(){
+    var m = D.sessions[sid] || {}, a = [];
+    var cwd = m.p || D.root;
+    if (m.live && can('launch')){
+      a.push({ label:'Resume', cls:'go', fn:function(){
+        act('resume', sid, '', 'resuming in a new terminal window'); }});
+      a.push({ label:'fork', fn:function(){
+        act('fork', sid, '', 'forked into a new terminal window'); }});
+    }
+    a.push({ label:'copy id', fn:function(){ copy(sid); toast('session id copied'); }});
+    if (m.live) a.push({ label:'copy command', fn:function(){
+      copy('cd ' + cwd + ' && claude -r ' + sid);
+      toast('resume command copied'); }});
+    if (can('reveal') && m.p) a.push({ label:'reveal', fn:function(){
+      act('reveal-session', sid, '', 'revealed in Finder'); }});
+    return a;
   };
   S.hint = function(){
     var m = D.sessions[sid] || {};
