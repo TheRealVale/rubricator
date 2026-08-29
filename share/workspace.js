@@ -1872,7 +1872,7 @@ var KEYS = [
     ['/', 'filter the navigator, in whichever mode it is in'],
     ['⌘ 1-9', 'jump to a tab'], ['⌘ ⌥ [ ]', 'previous / next tab'],
     ['⌘ W', 'close the tab'], ['⌘ \\', 'split the pane'], ['⌘ B', 'the navigator'],
-    ['⌘ E', 'the tab strip']
+    ['⌘ E', 'cycle the navigator modes']
   ]],
   ['Marking', [
     ['j / k', 'move between blocks'], ['c', 'change'], ['?', 'question'],
@@ -2261,9 +2261,12 @@ if (D.withSessions){
 var restored = Shell.init({
   storeKey: 'rubricator:layout:' + hash(D.root),
   make: makeSurface, spec: specFor, nav: navFor, search: palSearch,
-    /* ⇧⌘K in the palette does what the `everywhere` button does in the
-       Sessions navigator: the two surfaces now share one scope (N4) */
-    widen: function(){ sesScope = sesScope === 'here' ? 'all' : 'here'; Shell.nav(); }, menu: menuItems,
+    /* ⇧⌘K in the palette presses the `everywhere` button in the Sessions
+       navigator: one scope behind both surfaces (N4). It only ever widens —
+       the key is called widen, the row that advertises it says "search
+       everywhere", and narrowing again is one click on a control that is
+       always on screen. */
+    widen: function(){ sesScope = 'all'; Shell.nav(); }, menu: menuItems,
   onFocus: function(){ Shell.nav(); }
 });
 stat();
