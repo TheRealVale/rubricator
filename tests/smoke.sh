@@ -830,5 +830,124 @@ else
   skip "20 · navigator geometry" "needs --browser and Chrome"
 fi
 
+# ── 21 · the history preference, and the doors it does not open ─────────────
+# `{"sessions": true}` makes a bare `md` index your Claude Code history. That is
+# every conversation on the machine, not only this project's, so the setting is
+# deliberately weaker than the flag: it never reaches a page that becomes a file
+# (-o, --static), and it never changes the shape of --json, which is a contract a
+# script depends on. The index is also deferred — the window opens on its
+# documents and the page asks for history once — so the page has to say that
+# history is coming and the route has to be the thing that waits.
+python3 - "$MD" "$WORK" >"$WORK/pref.txt" 2>&1 <<'PYEOF'
+import json, os, re, socket, subprocess, sys, time, urllib.request
+md, work = sys.argv[1], sys.argv[2]
+cfg = os.path.join(work, "pref.json")
+repo = os.path.join(work, "prefrepo"); os.makedirs(repo, exist_ok=True)
+open(os.path.join(repo, "README.md"), "w").write("# pref\n\ntext\n")
+env0 = dict(os.environ, RUBRICATOR_CONFIG=cfg)
+
+def run(args, **kw):
+    return subprocess.run([md] + args, capture_output=True, text=True, cwd=repo, **kw)
+
+def with_sessions(path):
+    m = re.search(r'"withSessions":\s*([a-z0-9]+)', open(path, encoding="utf-8").read())
+    return m.group(1) if m else "?"
+
+checks = {}
+# the setting on, and nothing else
+open(cfg, "w").write(json.dumps({"sessions": True}))
+
+out1 = os.path.join(work, "pref-o.html")
+run(["-w", "-o", out1], env=env0)
+checks["-o ignores the setting"] = os.path.isfile(out1) and with_sessions(out1) == "false"
+
+r = run(["-w", "--sessions", "-o", os.path.join(work, "pref-o2.html")], env=env0)
+checks["-o still refuses the flag"] = r.returncode != 0 and "refusing --out" in (r.stdout + r.stderr)
+
+r = run(["--json", "."], env=env0)
+checks["--json stays explicit"] = r.returncode == 0 and "sessions" not in json.loads(r.stdout)
+
+r = run(["--json", "--sessions", "."], env=env0)
+checks["--json --sessions still works"] = r.returncode == 0 and "sessions" in json.loads(r.stdout)
+
+# the served tier: history is promised at once and delivered later
+def free_port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+def serve(extra):
+    port = free_port()
+    env = dict(env0, RUBRICATOR_NO_WINDOW="1", RUBRICATOR_DEBUG="1", RUBRICATOR_NO_WATCH="1")
+    p = subprocess.Popen([md, "serve", "--port", str(port)] + extra + [repo],
+                         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    url = None
+    for _ in range(200):
+        time.sleep(0.1)
+        try:
+            got = urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=1).read()
+        except Exception:
+            continue
+        break
+    # the token is in the URL the server printed; read it off the process output
+    os.set_blocking(p.stdout.fileno(), False)
+    seen = ""
+    for _ in range(50):
+        seen += p.stdout.read() or ""
+        m = re.search(r"(http://127\.0\.0\.1:%d/[A-Za-z0-9_-]+/)" % port, seen)
+        if m:
+            url = m.group(1); break
+        time.sleep(0.1)
+    return p, url
+
+def get(url, data=None):
+    req = urllib.request.Request(url, data=data,
+                                 headers={"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req, timeout=120).read())
+
+proc, url = serve([])
+try:
+    if not url:
+        checks["the server came up"] = False
+    else:
+        checks["the server came up"] = True
+        page = urllib.request.urlopen(url, timeout=20).read().decode("utf-8", "replace")
+        m = re.search(r'"withSessions":\s*([a-z0-9]+)', page)
+        checks["the setting reaches the window"] = bool(m) and m.group(1) in ("true", "1")
+        # the page carries the flag the client waits on. Whether it is still
+        # true by the time a test can read it is a race the fixture cannot win
+        # — a corpus of two transcripts indexes faster than a socket accepts —
+        # so this pins the channel, and the 1.9s figure is a measurement.
+        checks["and says whether it is still coming"] = '"sessionsPending"' in page
+        j = get(url + "sessions")
+        checks["the route delivers it"] = j.get("withSessions") is True and j.get("pending") is False
+finally:
+    proc.kill()
+
+# and --no-sessions turns the setting off for one run
+proc, url = serve(["--no-sessions"])
+try:
+    if url:
+        page = urllib.request.urlopen(url, timeout=20).read().decode("utf-8", "replace")
+        m = re.search(r'"withSessions":\s*([a-z0-9]+)', page)
+        checks["--no-sessions overrides it"] = bool(m) and m.group(1) in ("false", "0")
+        j = get(url + "sessions")
+        checks["and the route agrees"] = j.get("withSessions") is False
+        # the page may still ask for it, and asking is what turns it on
+        j = get(url + "sessions", data=b"{}")
+        checks["asking for it indexes it"] = j.get("withSessions") is True
+    else:
+        checks["--no-sessions overrides it"] = False
+finally:
+    proc.kill()
+
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "21 · the history setting reaches the window and no further"
+else
+  no "21 · the history setting is not honoured where it should be" \
+     "$(grep '^XX' "$WORK/pref.txt" | tr '\n' ' ')$(tail -2 "$WORK/pref.txt")"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

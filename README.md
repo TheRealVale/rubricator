@@ -186,7 +186,16 @@ moved on, and its `status:` if it declares one. Sorting and filters live behind 
 filter*, because most of the time you are looking for a name.
 
 **Sessions** is your own agent history as something you can walk through: every session,
-newest first, scoped to this repository by default. Each shows what you asked, which files
+newest first, scoped to this repository by default — with **everywhere** beside it, because
+the repository you are standing in is often not the one you said it in. `⇧⌘K` opens
+find-anything already widened.
+
+Indexing it reads every conversation on the machine, not only this project's, so it is off
+until you ask: `md --sessions` for one run, or the switch the empty Sessions list offers,
+which is the same switch as Settings → Indexing and stays on for future windows.
+`--no-sessions` is the way back for a run. Documents are indexed in a tenth of a second and
+transcripts in about two, so the window opens on its documents and history arrives while you
+are looking at them. Each shows what you asked, which files
 it changed, and which documents it bears on — worked out from the overlap between the files
 a session touched and the files each document names. Opening one renders the conversation as
 what it was: your turns on the right, Claude's on the left, thinking collapsed to a count,
@@ -386,8 +395,9 @@ status`, because you cannot commit what you do not know is there.
 Nothing leaves the machine. There is no account, no telemetry and no network call after the
 one-time library fetch. Both halves of an indexed conversation are scrubbed of keys, tokens,
 JWTs, private keys, `.env` lines, auth headers and connection strings; the session index
-expires after seven days and is excluded from Time Machine; and `--sessions` refuses `--out`
-so the corpus cannot be written to a shareable file.
+expires after seven days and is excluded from Time Machine; and history never reaches a page
+that becomes a file — `--sessions` refuses `--out`, and a page built to be moved takes
+history only when that flag asks for it, never from the setting.
 
 ## How it works
 

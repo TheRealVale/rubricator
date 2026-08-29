@@ -59,6 +59,10 @@ SETTABLE = {
     "allow_launch": lambda v: isinstance(v, bool),
     "editor":       lambda v: v == "" or _is_program(v),
     "deep":         lambda v: isinstance(v, bool),
+    # whether a bare `md` indexes your Claude Code history. Off on a fresh
+    # install: turning it on loads every conversation on the machine into the
+    # page, which is a thing you decide once rather than discover.
+    "sessions":     lambda v: isinstance(v, bool),
     "idle":         lambda v: isinstance(v, int) and 30 <= v <= 86400,
     "theme":        lambda v: v in THEMES,
     # Q3 · a saved search is {name, query} and nothing else. Standing rule 4:
@@ -87,7 +91,7 @@ THEMES = ("rubric", "slate", "bone")
 # subagents otherwise looks like it touched nothing, for a fifth of a second.
 # The setting survives so it can be turned off.
 DEFAULTS = {"terminal": "", "allow_launch": False, "editor": "", "deep": True,
-            "idle": 120, "theme": "rubric", "searches": []}
+            "sessions": False, "idle": 120, "theme": "rubric", "searches": []}
 
 
 def _is_program(v):
@@ -110,6 +114,11 @@ def settings():
     forced = {}
     if os.environ.get("RUBRICATOR_ALLOW_LAUNCH") == "1" and not out["allow_launch"]:
         forced["allow_launch"] = "enabled for this window by --allow-launch"
+    ses = os.environ.get("RUBRICATOR_SESSIONS")
+    if ses == "1" and not out["sessions"]:
+        forced["sessions"] = "on for this window by --sessions"
+    elif ses == "0" and out["sessions"]:
+        forced["sessions"] = "off for this window by --no-sessions"
     return {"values": out, "forced": forced, "path": str(CONFIG),
             "terminal_effective": terminal(),
             "terminals": sorted(a for a in APP_PATHS if installed(a))}

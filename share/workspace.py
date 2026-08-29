@@ -6,7 +6,7 @@ Claude Code history, and emits one self-contained page.
 Everything here is recomputed on every run: at ~0.6s for 500 MB there is nothing
 worth caching, and nothing to invalidate.
 """
-import html, json, os, re, subprocess, sys, time
+import html, json, os, re, subprocess, sys, threading, time
 from pathlib import Path
 
 HOME = Path.home()
@@ -588,6 +588,17 @@ def first_contact(roots):
             f"  For one of them:  md {kids[0]}\n")
 
 
+def session_payload(deep=False):
+    """The keys `build` fills when history is indexed, on their own — the server
+    fills them after the window is already up, because a cold scan of 79
+    transcripts is two seconds and a window is worth more than that."""
+    prompts, sessions, touches = cached_sessions(deep)
+    keep = retention()
+    say_once_about_retention(keep)
+    return {"prompts": prompts, "sessions": sessions, "touches": touches,
+            "deep": bool(deep), "retention": keep}
+
+
 def build(roots, with_sessions, deep=False, extract_now=False):
     """roots may be one directory or several; the first is the one the page is
     named after and the one relative paths are shown against."""
@@ -635,13 +646,7 @@ def build(roots, with_sessions, deep=False, extract_now=False):
         "sessions": {}, "prompts": [], "touches": {}, "withSessions": with_sessions,
     }
     if with_sessions:
-        prompts, sessions, touches = cached_sessions(deep)
-        data["prompts"] = prompts
-        data["sessions"] = sessions
-        data["touches"] = touches
-        data["deep"] = bool(deep)
-        data["retention"] = retention()
-        say_once_about_retention(data["retention"])
+        data.update(session_payload(deep))
 
     secure_cache()
     prune_cache()
@@ -1018,8 +1023,37 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
     import actions as A
     root = Path(roots[0]) if isinstance(roots, list) else Path(roots)
     A.remember_project(root)        # opening it is what makes it recent
-    state = {"data": build(roots, with_sessions, deep)}
+
+    # ── history arrives after the window does ────────────────────────────────
+    # A cold scan of the transcripts is ~2s and its cache is invalidated by any
+    # live Claude Code session, so it would be paid on most launches. The page
+    # opens on its documents and asks for `sessions` once; that request is what
+    # waits. `want` is a list because the page may turn history on from the
+    # empty state, and `reindex` has to see the new answer.
+    want = [bool(with_sessions)]
+    ready = threading.Event()
+    started = [False]
+    state = {"data": build(roots, False, deep)}
     state["data"]["open"] = open_rel or ""
+    state["data"]["withSessions"] = want[0]
+    state["data"]["sessionsPending"] = want[0]
+
+    def fill():
+        try:
+            state["data"].update(session_payload(deep))
+        except Exception as e:
+            sys.stderr.write(f"rubricator: indexing history failed: {e}\n")
+        state["data"]["sessionsPending"] = False
+        ready.set()
+
+    def start_fill():
+        if started[0]:
+            return
+        started[0] = True
+        threading.Thread(target=fill, daemon=True).start()
+
+    if want[0]:
+        start_fill()
 
     def page(method, query, body):
         data = dict(state["data"])
@@ -1103,7 +1137,7 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         return 200, ctype, f.read_bytes()
 
     def reindex(method, query, body):
-        state["data"] = build(roots, with_sessions, deep)
+        state["data"] = build(roots, want[0], deep)
         d = dict(state["data"])
         d["docs"] = [{k: x for k, x in doc.items() if k != "text"} for doc in d["docs"]]
         d["notes"] = read_notes(root)
@@ -1231,9 +1265,31 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                     "caps": {"launch": 1 if A.enabled() else 0,
                              "reveal": 1 if A.enabled() else 0}})
 
+    def sessions_route(method, query, body):
+        """The page asking for history. A GET waits for an index that is already
+        being built; a POST starts one that was not asked for at launch, which is
+        the button in the Sessions navigator's empty state."""
+        if method == "POST":
+            if not want[0]:
+                want[0] = True
+                state["data"]["withSessions"] = True
+                state["data"]["sessionsPending"] = True
+                start_fill()
+        if not want[0]:
+            return S.J({"withSessions": False})
+        ready.wait(300)
+        d = state["data"]
+        return S.J({"withSessions": True,
+                    "pending": bool(d.get("sessionsPending")),
+                    "sessions": d.get("sessions") or {},
+                    "prompts": d.get("prompts") or [],
+                    "touches": d.get("touches") or {},
+                    "retention": d.get("retention"),
+                    "deep": d.get("deep")})
+
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
               "notes": notes, "act": act, "events": events, "settings": settings,
-              "session": session}
+              "session": session, "sessions": sessions_route}
     srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
     if port:
         srv.httpd.server_close()

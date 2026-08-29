@@ -70,7 +70,14 @@ WORKSPACE
   its own to mark it.
       --sessions          also index your own Claude Code history, so a topic resolves
                           to the sessions that discussed it and the files they changed.
-                          Local only — cannot be combined with --out.
+                          It reads every conversation on this machine, not only this
+                          project's, so it is off until you ask. Turn it on for good
+                          under Settings, or with {"sessions": true} in
+                          ~/.config/rubricator/config.json; --no-sessions is the way
+                          back for one run. The index arrives after the window does.
+                          Local only — cannot be combined with --out, and a page built
+                          to be moved (--static, -o) takes history only when this flag
+                          asks for it, never from the setting.
       --static            skip the local server: build one self-contained page instead.
                           You lose reindexing and notes on disk; you gain a file you
                           can move. -o and -n always imply this.
@@ -196,10 +203,17 @@ ws_run() {
   shift 4
   local dirs=("$@")
   local dir="${dirs[0]}"
+  [ "$SESSIONS_EXPLICIT" = 1 ] || sessions="$(sessions_pref)"
   local PY abs file url
   PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
   [ -x "$PY" ] || die "python3 is required for the workspace (try: md README.md)"
   local d; for d in "${dirs[@]}"; do [ -d "$d" ] || die "not a directory: $d"; done
+  # A static page is the tier you can move, so history is asked for there or not
+  # at all — the remembered preference does not follow a page into a file.
+  if [ -n "$sessions" ] && [ "$SESSIONS_EXPLICIT" != 1 ] \
+     && { [ -n "$out" ] || [ "${WS_STATIC:-0}" = 1 ]; }; then
+    sessions=""
+  fi
   if [ -n "$out" ] && [ -n "$sessions" ]; then
     die "refusing --out with --sessions: your history stays on this machine"
   fi
@@ -217,6 +231,7 @@ ws_run() {
     urlfile="$(mktemp "$CACHE/.serve.XXXXXX")"
     RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OPEN="$opendoc" \
       RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
+      RUBRICATOR_SESSIONS="$([ "$SESSIONS_EXPLICIT" = 1 ] && { [ -n "$sessions" ] && echo 1 || echo 0; })" \
       nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${SHALLOW:+--shallow} --serve >"$urlfile" 2>/dev/null &
     local i=0 url=""
     while [ $i -lt 100 ]; do
@@ -256,6 +271,28 @@ THEME="$( { sed -n 's/.*"theme"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' \
   "${RUBRICATOR_CONFIG:-$HOME/.config/rubricator/config.json}" 2>/dev/null || true; } | head -1 )"
 case "$THEME" in rubric|slate|bone) ;; *) THEME="rubric" ;; esac
 
+# Whether a bare `md` indexes your Claude Code history. Off until you say so:
+# turning it on loads every conversation on this machine into the page. The flag
+# beats the file in both directions, and SESSIONS_EXPLICIT records which of the
+# two spoke — the doors that write a shareable file honour the flag and ignore
+# the preference.
+#
+# Read with python rather than sed, and only on the paths that open a workspace:
+# THEME above can be a one-line regex because a theme is a bare word, but this is
+# a JSON boolean and BSD sed has no alternation to match one with.
+SESSIONS_EXPLICIT=0
+sessions_pref() {
+  local py
+  py="$(command -v python3 2>/dev/null || true)"; [ -x "$py" ] || py=/usr/bin/python3
+  [ -x "$py" ] || return 0
+  "$py" -c 'import json,os,sys
+p = os.environ.get("RUBRICATOR_CONFIG") or os.path.expanduser("~/.config/rubricator/config.json")
+try:
+    sys.stdout.write("--sessions" if json.load(open(p)).get("sessions") is True else "")
+except Exception:
+    pass' 2>/dev/null
+}
+
 # review modes hand off to the python runner (they block on a browser round-trip)
 case "${1:-}" in
   --json)
@@ -267,7 +304,10 @@ case "${1:-}" in
     J_DIRS=(); J_SESSIONS=""
     while [ $# -gt 0 ]; do
       case "$1" in
+        # explicit only, preference or no preference: the shape of this output
+        # is a contract, and a toggle in a window must not change it
         --sessions) J_SESSIONS="--sessions" ;;
+        --no-sessions) J_SESSIONS="" ;;
         --deep)     J_SESSIONS="--sessions" ;;          # default now; kept so scripts do not break
         --shallow)  SHALLOW=1 ;;
         -*)         die "unknown --json option: $1" ;;
@@ -287,8 +327,9 @@ case "${1:-}" in
     WS_DIRS=(); WS_SESSIONS=""; WS_OUT=""; WS_OPEN=1
     while [ $# -gt 0 ]; do
       case "$1" in
-        --sessions)   WS_SESSIONS="--sessions" ;;
-        --deep)       WS_SESSIONS="--sessions" ;;
+        --sessions)   WS_SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
+        --no-sessions) WS_SESSIONS=""; SESSIONS_EXPLICIT=1 ;;
+        --deep)       WS_SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
         --shallow)    SHALLOW=1 ;;
         --static)     WS_STATIC=1 ;;
         --allow-launch) ALLOW_LAUNCH=1 ;;
@@ -307,11 +348,12 @@ case "${1:-}" in
     shift
     PY="$(command -v python3 2>/dev/null || true)"; [ -x "$PY" ] || PY=/usr/bin/python3
     [ -x "$PY" ] || die "python3 is required for the workspace"
-    SV_DIRS=(); SV_ARGS=(--serve --stay); SV_PORT=""
+    SV_DIRS=(); SV_ARGS=(--serve --stay); SV_PORT=""; SV_SESSIONS=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --sessions)     SV_ARGS+=(--sessions) ;;
-        --deep)         SV_ARGS+=(--sessions) ;;
+        --sessions)     SV_SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
+        --no-sessions)  SV_SESSIONS=""; SESSIONS_EXPLICIT=1 ;;
+        --deep)         SV_SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
         --shallow)      SV_ARGS+=(--shallow) ;;
         --allow-launch) ALLOW_LAUNCH=1 ;;
         --port)         shift; SV_PORT="${1:?--port needs a number}" ;;
@@ -323,10 +365,13 @@ case "${1:-}" in
     done
     [ ${#SV_DIRS[@]} -gt 0 ] || SV_DIRS=(".")
     [ -n "$SV_PORT" ] && SV_ARGS+=("--port=$SV_PORT")
+    [ "$SESSIONS_EXPLICIT" = 1 ] || SV_SESSIONS="$(sessions_pref)"
+    [ -n "$SV_SESSIONS" ] && SV_ARGS+=("$SV_SESSIONS")
     ensure_vendor
     printf 'rubricator: serving %s — ctrl-c to stop\n' "${SV_DIRS[*]}" >&2
     exec env RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_TERM="${TERM_PROGRAM:-}" \
       RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
+      RUBRICATOR_SESSIONS="$([ "$SESSIONS_EXPLICIT" = 1 ] && { [ -n "$SV_SESSIONS" ] && echo 1 || echo 0; })" \
       "$PY" "$SHARE/workspace.py" "${SV_DIRS[@]}" "${SV_ARGS[@]}" ;;
   --hook|--review)
     # hooks do not source your shell profile, so PATH may be bare
@@ -364,8 +409,9 @@ while [ $# -gt 0 ]; do
     --light)               THEME="bone" ;;
     --theme)               shift; THEME="${1:?--theme needs rubric, slate or bone}"
                            case "$THEME" in rubric|slate|bone) ;; *) die "unknown theme: $THEME" ;; esac ;;
-    --sessions)            SESSIONS="--sessions" ;;
-    --deep)                SESSIONS="--sessions" ;;
+    --sessions)            SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
+    --no-sessions)         SESSIONS=""; SESSIONS_EXPLICIT=1 ;;
+    --deep)                SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
     --shallow)             SHALLOW=1 ;;
     --static)              WS_STATIC=1 ;;
     --allow-launch)        ALLOW_LAUNCH=1 ;;
@@ -397,7 +443,8 @@ if [ -z "${FILE:-}" ] && [ "${VENDOR_FORCE:-0}" != 1 ] && [ "${RUBRICATOR_BARE:-
   ws_run "$OUT" "$WS_OPEN" "$SESSIONS" "$OPENDOC" "."
   exit 0
 fi
-[ -z "$SESSIONS" ] || die "--sessions applies to the workspace, not to a single file"
+[ "$SESSIONS_EXPLICIT" != 1 ] || [ -z "$SESSIONS" ] \
+  || die "--sessions applies to the workspace, not to a single file"
 
 ensure_vendor
 if [ "${VENDOR_FORCE:-0}" = 1 ] && [ -z "${FILE:-}" ]; then exit 0; fi

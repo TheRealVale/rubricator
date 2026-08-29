@@ -915,7 +915,7 @@ function promptList(mine, q){
 }
 
 var SET = D.settings || null;
-function setOne(key, value, note){
+function setOne(key, value, note, done){
   var o = {}; o[key] = value;
   api('settings', { set: o }, function(j){
     if (j.error) return toast(j.error);
@@ -923,6 +923,7 @@ function setOne(key, value, note){
     if (j.caps){ for (var k in j.caps) CAPS[k] = j.caps[k]; }
     refreshAll();
     toast(note || 'saved');
+    done && done();
   }, function(){ toast('could not save that'); });
 }
 function viewSettings(){
@@ -981,6 +982,16 @@ function viewSettings(){
     'before it is stored, and it is passed as an argument — never through a shell.</div>');
 
   out.push('<div class="grp">Indexing</div>');
+  out.push('<div class="ctl"><button class="chip' + (v.sessions ? ' on' : '') +
+    '" data-set="sessions" data-val="' + (v.sessions ? '0' : '1') + '">' +
+    (v.sessions ? 'history is indexed' : 'history is not indexed') + '</button>' +
+    (forced.sessions ? '<span class="sp">' + esc(forced.sessions) + '</span>' : '') + '</div>');
+  out.push('<div class="qnote">With this on, a bare <span class="f">md</span> indexes your ' +
+    'Claude Code history, so a topic resolves to the sessions that discussed it and the files ' +
+    'they changed. It reads every conversation on this machine, not only this project\u2019s, ' +
+    'which is why it is off until you ask. A page that becomes a file \u2014 ' +
+    '<span class="f">-o</span> or <span class="f">--static</span> \u2014 never picks it up from ' +
+    'here; ask for it there with <span class="f">--sessions</span> or not at all.</div>');
   out.push('<div class="ctl"><button class="chip' + (v.deep ? ' on' : '') +
     '" data-set="deep" data-val="' + (v.deep ? '0' : '1') + '">count subagent work</button>' +
     '<span class="sp">applies the next time you open a workspace</span></div>');
@@ -1605,8 +1616,9 @@ function navDocs(){
 
 function navSessions(){
   marks();
-  if (!D.withSessions) return { html:'<div class="empty">Session data was not indexed.<br><br>' +
-    'Re-run with <span class="f">md --sessions</span> to include your own history.</div>', foot:'' };
+  if (!D.withSessions) return { html: sessionsOff(), foot:'' };
+  if (D.sessionsPending) return { html:'<div class="empty">Reading your history…<br><br>' +
+    'Every transcript on this machine, once. The documents are already here.</div>', foot:'' };
   var q = sesQuery.trim(), all = sessionList(), live = 0, sel = curSid();
   all.forEach(function(x){ if (x.m.live) live++; });
   var h = ['<div class="ctl">' +
@@ -1670,6 +1682,22 @@ function navNotes(){
     });
   });
   return { html: h.join(''), foot: items.length + ' open · across ' + order.length + ' documents' };
+}
+
+/* Two ways to have no history, and only one of them is a dead end. A served
+   page can index it here and now; a static page carries what it was built with
+   and cannot go and read anything. */
+function sessionsOff(){
+  if (!can('live'))
+    return '<div class="empty">This page was built without your history.<br><br>' +
+      'A static page carries only what it was given. Open the workspace with ' +
+      '<span class="f">md --sessions</span> to search what you have said.</div>';
+  return '<div class="empty">Your Claude Code history is not indexed.<br><br>' +
+    'Index it and a topic resolves to the sessions that discussed it and the files ' +
+    'they changed — every project on this machine, not only this one.<br><br>' +
+    '<button class="lnk" data-wantsessions="1">index it now</button><br><br>' +
+    '<span class="f">Reading it takes a couple of seconds and nothing leaves the ' +
+    'machine. It stays on for future windows; Settings turns it back off.</span></div>';
 }
 
 /* ── All ─────────────────────────────────────────────────────────────────
@@ -2002,7 +2030,8 @@ function noteTrouble(name, why){
 function stat(){
   var bits = [can('watch') ? 'watching for changes' : (can('live') ? 'served locally' : 'a static page')];
   bits.push('indexed in ' + D.took + 's');
-  if (D.withSessions) bits.push(Object.keys(D.sessions).length + ' sessions');
+  if (D.sessionsPending) bits.push('<span class="busy">reading your history…</span>');
+  else if (D.withSessions) bits.push(Object.keys(D.sessions).length + ' sessions');
   /* the archive is on a thirty-day fuse and the Sessions list cannot say so on
      its own: a row marked archived looks like rubricator lost it. The ratio is
      counted from history.jsonl, which outlives the transcripts. */
@@ -2061,6 +2090,43 @@ if (can('live')){
   addEventListener('pagehide', function(){
     try { navigator.sendBeacon(BASE + '/bye', new Blob(['{}'], {type:'application/json'})); } catch(e){}
   });
+}
+
+/* ── history arrives after the window ──────────────────────────────────────
+   The documents are indexed in a tenth of a second and the transcripts in two,
+   so the window opens on the documents and this is the one request that waits.
+   `ask` is the empty state's button: the server was started without history and
+   is being told to go and read it. */
+function indexSessions(ask){
+  if (!can('live')) return;
+  if (ask){ D.withSessions = 1; D.sessionsPending = 1; Shell.nav(); }
+  api('sessions', ask ? {} : undefined, function(j){
+    if (!j || !j.withSessions){ D.withSessions = 0; D.sessionsPending = 0; return refreshAll(); }
+    D.sessions = j.sessions || {};
+    D.prompts = j.prompts || [];
+    D.touches = j.touches || {};
+    if (j.retention !== undefined) D.retention = j.retention;
+    if (j.deep !== undefined) D.deep = j.deep;
+    D.withSessions = 1;
+    D.sessionsPending = j.pending ? 1 : 0;
+    byS = null;
+    scopeToWhatExists();
+    Shell.nav(); refreshAll();
+    if (ask) toast(Object.keys(D.sessions).length + ' sessions indexed');
+  }, function(){
+    D.sessionsPending = 0;
+    toast('could not read your history');
+    Shell.nav();
+  });
+}
+
+/* Default to `everywhere` in a repository with no history of its own — with
+   `this repo` it would open on a list of nothing. Runs again when a deferred
+   index lands, because at first paint there is nothing to count. */
+function scopeToWhatExists(){
+  if (!D.withSessions) return;
+  for (var k in D.sessions){ if (inRepo(D.sessions[k].p)) return; }
+  sesScope = 'all';
 }
 
 /* ── E1 · watch: the server tells us when a document changed on disk ─────── */
@@ -2146,6 +2212,11 @@ document.addEventListener('click', function(e){
     if (d.slive)  sesLive = !sesLive;
     return Shell.nav();
   }
+  /* the same move as the Settings toggle, because the empty state promises the
+     same thing: on now, and on the next time you open a window */
+  if (e.target.closest('[data-wantsessions]'))
+    return setOne('sessions', true, 'indexing your history…',
+                  function(){ indexSessions(true); });
   if (e.target.closest('#wname')) return projectMenu();
   var rp = e.target.closest('[data-recent]');
   if (rp) return openProject(rp.dataset.recent);
@@ -2156,9 +2227,16 @@ document.addEventListener('click', function(e){
   if (sb){
     var key = sb.dataset.set, raw = sb.dataset.val;
     var val = (key === 'terminal') ? raw : raw === '1';
-    return setOne(key, val, key === 'terminal'
-      ? 'sessions will open in ' + (raw ? raw.replace('.app','') : 'whatever ran md')
-      : null);
+    var note = null, then = null;
+    if (key === 'terminal')
+      note = 'sessions will open in ' + (raw ? raw.replace('.app','') : 'whatever ran md');
+    /* turning history on is not a promise about the next window: this one goes
+       and reads it. Turning it off leaves this window as it is — throwing away
+       an index you are looking at would be a strange way to store a preference */
+    if (key === 'sessions')
+      if (val){ note = 'indexing your history…'; then = function(){ indexSessions(true); }; }
+      else note = 'off from the next window on';
+    return setOne(key, val, note, then);
   }
   if (e.target.closest('[data-seteditor]')){
     var f = $('s-editor');
@@ -2241,11 +2319,8 @@ function pickTheme(name){
 MD.restoreTheme(SET && SET.values ? SET.values.theme : '');
 marked.setOptions({ gfm:true });
 
-if (D.withSessions){
-  var anyHere = false;
-  for (var k in D.sessions){ if (inRepo(D.sessions[k].p)){ anyHere = true; break; } }
-  if (!anyHere) sesScope = 'all';        // this repo has no history of its own yet
-}
+scopeToWhatExists();
+if (D.sessionsPending) indexSessions(false);
 
 /* ── go ─────────────────────────────────────────────────────────────────── */
 /* the sheet's own controls */
