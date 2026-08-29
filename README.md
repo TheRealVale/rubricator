@@ -166,7 +166,9 @@ those it is. `⏎` opens it here, `⌘⏎` in a split, `⇥` filters by kind.
 
 `⌘B` collapses the navigator · `⌘E` cycles its modes · `⌘1`–`⌘9` focus a pane · `⌘W` closes
 a tab · `⌘⌥[` and `⌘⌥]` step through them · `/` filters the navigator · `?` lists the lot.
-Every divider is draggable.
+Every divider is draggable. Drag the navigator below the width its labels need and it
+answers in kind: the modes become the icons the collapsed rail shows them as, group names
+move above what they name, and a row spends what is left on the filename.
 
 `⌘F` is deliberately unbound here. It falls through to the browser's own find bar, which
 already has a hit count, next and previous, and wrap-around — and searches the page you are

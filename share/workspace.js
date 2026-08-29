@@ -1543,7 +1543,7 @@ function navDocs(){
       'title="Sorting and filters">' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
       'stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' +
-      'sort &amp; filter' +
+      '<span class="l">sort &amp; filter</span>' +
       (onCount ? '<span class="badge">' + onCount + '</span>' : '') +
     '</button></div>'];
 
@@ -1552,7 +1552,7 @@ function navDocs(){
   h.push('<div class="sum">' +
     '<span class="' + (narrowed ? 'hit' : '') + '">' +
       (narrowed ? docs.length + ' of ' + D.docs.length : D.docs.length + ' documents') +
-    '</span><span class="dot">·</span><span>by ' + esc(sortLabel(libSort)) + '</span>' +
+    '</span><span class="by">by ' + esc(sortLabel(libSort)) + '</span>' +
     (onCount ? '<button class="lnk" data-lclear="1">clear</button>' : '') +
     '</div>');
 

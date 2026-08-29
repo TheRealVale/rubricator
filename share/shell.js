@@ -219,11 +219,15 @@ function nav(){
   var n = $('nav');
   n.classList.toggle('rail', navRail);
   n.style.width = navRail ? '' : navW + 'px';
+  /* Both forms, every time: the four labels need 244px and the navigator can be
+     dragged to 168, so which one shows is a question about the width the button
+     finds itself in — which CSS can answer and this cannot. */
   $('nvmodes').innerHTML = NAVMODES.map(function(m){
-    return '<button data-nm="' + m.id + '" class="' + (navMode === m.id ? 'on' : '') + '" title="' +
-      m.label + '">' + (navRail ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-      'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + m.icon + '</svg>' : m.label) +
-      '</button>';
+    return '<button data-nm="' + m.id + '" class="' + (navMode === m.id ? 'on' : '') +
+      '" title="' + m.label + '" aria-label="' + m.label + '">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' + m.icon + '</svg>' +
+      '<span class="l">' + m.label + '</span></button>';
   }).join('');
   if (navRail) return;
   var out = APP.nav ? (APP.nav(navMode) || {}) : {};

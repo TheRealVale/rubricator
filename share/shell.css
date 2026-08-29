@@ -40,15 +40,29 @@ body.tray-open{padding-right:0}
 .mid{flex:1;display:flex;min-height:0;min-width:0}
 
 /* ── the navigator ───────────────────────────────────────────────────────
-   Three modes and one job: get you to a thing. Documents nests because
-   directories are how you remember where a file is; the other two are flat. */
+   Four modes and one job: get you to a thing. Documents nests because
+   directories are how you remember where a file is; the other three are flat.
+   The panel is a size container: the divider drags it between 168px and 480px,
+   and what fits at one end of that range does not fit at the other. */
 #nav{width:252px;flex:none;display:flex;flex-direction:column;min-height:0;
-  background:var(--bg-soft);border-right:1px solid var(--border-soft)}
+  background:var(--bg-soft);border-right:1px solid var(--border-soft);
+  container:nav / inline-size}
 .nvh{display:flex;gap:2px;padding:8px 8px 7px;flex:none}
 .nvh button{all:unset;cursor:pointer;font-size:11.5px;padding:5px 9px;border-radius:7px;
-  color:var(--fg-dim)}
+  color:var(--fg-dim);display:flex;align-items:center;white-space:nowrap}
+.nvh button svg{width:15px;height:15px;flex:none;display:none}
 .nvh button:hover{color:var(--fg)}
 .nvh button.on{background:var(--bg-elev);color:var(--fg)}
+/* Four labels are 244px of text, which is all a 252px panel has, so a labelled
+   row is what a wide panel buys. Narrower, the modes are the icons the rail
+   shows them as: four buttons that fit, rather than a row that runs off the
+   edge and takes Notes with it. */
+@container nav (max-width:243px){
+  .nvh{gap:3px;justify-content:space-between;padding:8px 6px 7px}
+  .nvh button{padding:5px 7px}
+  .nvh button svg{display:block}
+  .nvh button .l{display:none}
+}
 .nvq{flex:none;padding:0 10px 8px}
 .nvq input{all:unset;box-sizing:border-box;width:100%;font-family:var(--font);font-size:12px;
   color:var(--fg);padding:5px 9px;border:1px solid var(--border-soft);border-radius:7px;
@@ -64,9 +78,9 @@ body.tray-open{padding-right:0}
 /* collapsed: the modes survive as a rail, so the navigator is never gone */
 #nav.rail{width:42px}
 #nav.rail .nvh{flex-direction:column;align-items:center;gap:4px;padding:9px 0}
-#nav.rail .nvh button{width:28px;height:28px;display:flex;align-items:center;justify-content:center;
-  padding:0;font-size:0}
-#nav.rail .nvh button svg{width:15px;height:15px}
+#nav.rail .nvh button{width:28px;height:28px;justify-content:center;padding:0}
+#nav.rail .nvh button svg{display:block}
+#nav.rail .nvh button .l{display:none}
 #nav.rail .nvq,#nav.rail .nvb,#nav.rail .nvf{display:none}
 
 /* ── the divider is the control (F5, applied to the shell) ─────────────── */

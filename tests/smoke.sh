@@ -742,5 +742,93 @@ else
   no "19 · the machine-readable door is wrong" "$(grep '^XX' "$WORK/m.txt" | tr '\n' ' ')$(head -2 "$WORK/m.err")"
 fi
 
+# ── 20 · the navigator holds its shape at both ends of the divider ──────────
+# The divider drags the panel between 168px and 480px, so every control in it
+# has two widths to survive. Three ways it fails, all of them silent: a mode
+# button runs past the panel edge and the tab strip paints over it, so a whole
+# navigator mode becomes unreachable; a filename gives up its width to a fixed
+# badge until it reads `w.`; an <svg> in a button that `all:unset` stripped lays
+# out at 0x0, leaving a control you can click and cannot see. All three are
+# geometry, so this measures them in a browser rather than reading the CSS.
+if [ "$WITH_BROWSER" = 1 ]; then
+  CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  [ -x "$CHROME" ] || CHROME="$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+fi
+if [ "$WITH_BROWSER" = 1 ] && [ -x "$CHROME" ]; then
+  (cd "$REPO" && "$MD" -w -o "$WORK/nav.html" . >/dev/null 2>&1) || true
+  for px in 252 168; do
+    python3 - "$WORK/nav.html" "$WORK/nav-$px.html" "$px" <<'PYEOF'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+# the panel opens at its stored width; there is no drag to simulate headless
+assert src.count("navW = 252;") == 1, "shell.js no longer defaults navW to 252"
+probe = """<script>window.addEventListener('load',function(){setTimeout(function(){
+function R(e){return e.getBoundingClientRect();}
+function seen(e){return e.offsetWidth>0||e.offsetHeight>0;}
+var nav=R(document.getElementById('nav')), out={};
+var modes=[].map.call(document.querySelectorAll('.nvh button'),R);
+out.modes=modes.length;
+out.modesShown=modes.filter(function(r){return r.width>6&&r.right<=nav.right+0.5;}).length;
+var h=document.querySelector('.nvh');
+out.modeOverflow=h.scrollWidth-h.clientWidth;
+out.glyphs=[].filter.call(document.querySelectorAll('.nvctl .opt'),seen)
+  .map(function(b){var s=b.querySelector('svg');return s?Math.round(R(s).width):0;});
+var rows=[].filter.call(document.querySelectorAll('.nvb .tfile'),function(t){
+  return t.querySelector('.nm');});
+out.names=rows.length; out.narrowestName=99999; out.nameLosesTo='';
+rows.forEach(function(t){
+  var w=R(t.querySelector('.nm')).width;
+  if(w<out.narrowestName) out.narrowestName=Math.round(w);
+  [].forEach.call(t.children,function(c){
+    if(!c.classList.contains('nm')&&R(c).width>w&&!out.nameLosesTo)
+      out.nameLosesTo=(c.className||'?')+' on '+t.textContent.slice(0,20);});});
+if(!rows.length) out.narrowestName=0;
+var d=document.createElement('div'); d.id='probe';
+d.textContent=JSON.stringify(out); document.body.appendChild(d);
+},700);});</script>"""
+src = src.replace("navW = 252;", "navW = %s;" % sys.argv[3])
+i = src.rindex("</body>")
+open(sys.argv[2], "w", encoding="utf-8").write(src[:i] + probe + src[i:])
+PYEOF
+    "$CHROME" --headless --disable-gpu --virtual-time-budget=12000 \
+      --use-mock-keychain --password-store=basic --disable-background-networking \
+      --window-size=1280,900 --dump-dom "file://$WORK/nav-$px.html" \
+      >"$WORK/nav-$px.dom" 2>/dev/null
+  done
+  python3 - "$WORK/nav-252.dom" "$WORK/nav-168.dom" >"$WORK/nav.txt" 2>&1 <<'PYEOF'
+import json, re, sys
+def probe(path):
+    dom = open(path, encoding="utf-8", errors="replace").read()
+    m = re.search(r'<div id="probe">(.*?)</div>', dom, re.S)
+    if not m: return None
+    return json.loads(m.group(1))
+wide, narrow = probe(sys.argv[1]), probe(sys.argv[2])
+if not wide or not narrow:
+    print("XX the page never reached the probe"); sys.exit(1)
+checks = {
+  "four modes, both widths":     wide["modes"] == 4 and wide["modesShown"] == 4
+                                 and narrow["modes"] == 4 and narrow["modesShown"] == 4,
+  "the mode row never overflows": wide["modeOverflow"] <= 0 and narrow["modeOverflow"] <= 0,
+  "every icon button drawn":     len(wide["glyphs"]) == 3 and all(w >= 8 for w in wide["glyphs"])
+                                 and all(w >= 8 for w in narrow["glyphs"]),
+  # the invariant is not a pixel count, it is what the row spends its width on
+  "the name outweighs its badges": narrow["names"] > 0 and not narrow["nameLosesTo"]
+                                   and not wide["nameLosesTo"]
+                                   and narrow["narrowestName"] >= 40,
+}
+for k, v in checks.items():
+    print(("ok " if v else "XX ") + k + "  252:" + json.dumps(wide) + " 168:" + json.dumps(narrow))
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+  if [ $? = 0 ]; then
+    ok "20 · at 168px and at 252px every mode, control and filename holds its ground"
+  else
+    no "20 · the navigator loses something at one of its widths" \
+       "$(grep '^XX' "$WORK/nav.txt" | head -2 | cut -c1-220 | tr '\n' ' ')"
+  fi
+else
+  skip "20 · navigator geometry" "needs --browser and Chrome"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

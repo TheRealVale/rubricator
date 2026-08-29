@@ -60,14 +60,15 @@ html[data-mode="light"] .act button{color:#fff}
 /* ── the navigator's own furniture ─────────────────────── */
 .ctl{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 16px}
 .seg{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
-.seg button{all:unset;cursor:pointer;padding:6px 11px;font-size:12px;color:var(--fg-dim)}
+.seg button{all:unset;cursor:pointer;padding:6px 11px;font-size:12px;color:var(--fg-dim);
+  white-space:nowrap}
 .seg button:hover{color:var(--fg)}
 .seg button.on{background:var(--bg-elev);color:var(--fg)}
 .chip{all:unset;cursor:pointer;font-size:11.5px;padding:5px 11px;border:1px solid var(--border);
   border-radius:20px;color:var(--fg-dim)}
 .chip:hover{color:var(--fg)}
 .chip.on{border-color:var(--accent);color:var(--fg);background:var(--accent-soft)}
-.ctl .sp{margin-left:auto;font-size:11.5px;color:var(--fg-dim)}
+.ctl .sp{margin-left:auto;font-size:11.5px;color:var(--fg-dim);white-space:nowrap}
 .tree{font-size:13px}
 .tdir{display:flex;align-items:center;gap:7px;padding:7px 6px;cursor:pointer;color:var(--fg-muted);
   font-weight:640;font-size:11.5px;letter-spacing:.01em}
@@ -250,11 +251,16 @@ pre.dossier{
 .nvctl .r{display:flex;align-items:center;gap:5px}
 .nvctl .seg button{padding:4px 8px;font-size:11px}
 .nvctl .sp{margin-left:auto}
-.nvctl .opt{all:unset;cursor:pointer;font-size:11px;color:var(--fg-dim);padding:4px 7px;border-radius:7px}
+.nvctl .opt{all:unset;cursor:pointer;font-size:11px;color:var(--fg-dim);padding:4px 7px;
+  border-radius:7px;white-space:nowrap}
 .nvctl .opt:hover{color:var(--fg)}
 .nvctl .opt.on{color:var(--fg);background:var(--bg-elev)}
+.nvctl .opt.ico{display:flex;align-items:center;padding:4px 6px}
 .nvctl .opt.disc{display:flex;align-items:center;gap:5px}
-.nvctl .opt.disc svg{width:12px;height:12px;flex:none}
+/* every icon button in the row, not only the disclosure: an unsized <svg> in a
+   button that `all:unset` stripped lays out at 0x0, which is a control you can
+   click and cannot see */
+.nvctl .opt svg{width:12px;height:12px;flex:none;display:block}
 .nvctl .badge{min-width:14px;height:14px;border-radius:20px;background:var(--accent);
   color:var(--bg);font-size:9.5px;font-weight:700;display:flex;align-items:center;
   justify-content:center;padding:0 3px;font-family:var(--font)}
@@ -262,18 +268,25 @@ pre.dossier{
 /* The state of the list, in words, whether or not the drawer is open — a bare
    count at the end of a control row said neither what it counted nor that
    anything was narrowing it. */
-.nvctl .sum{display:flex;align-items:baseline;gap:5px;margin-top:7px;
+.nvctl .sum{display:flex;align-items:baseline;flex-wrap:wrap;gap:0 5px;margin-top:7px;
   font-family:var(--mono);font-size:10.5px;color:var(--fg-dim)}
+/* the line may run to two rows in a narrow panel, but it breaks between its
+   phrases and never inside one */
+.nvctl .sum > *{white-space:nowrap}
 .nvctl .sum .hit{color:var(--accent)}
-.nvctl .sum .dot{opacity:.55}
+/* the separator belongs to the phrase it introduces, so a line that wraps does
+   not end on a dangling dot */
+.nvctl .sum .by::before{content:"· ";opacity:.55}
 .nvctl .lnk{all:unset;cursor:pointer;margin-left:auto;color:var(--fg-muted);font-size:10.5px}
 .nvctl .lnk:hover{color:var(--fg)}
 .empty .lnk{all:unset;cursor:pointer;color:var(--accent);text-decoration:underline;
   text-underline-offset:2px;font-size:12px}
 
 /* A 38px label gutter, so a group name never shares a line with the controls it
-   names. The navigator is 252px wide: four text chips cannot sit on one row at
-   that width, which is why the on/off facets are rows rather than chips. */
+   names. The navigator opens at 252px: four text chips cannot sit on one row at
+   that width, which is why the on/off facets are rows rather than chips. Below
+   243px the gutter itself is too expensive and the labels go above — see the
+   narrow-panel block further down. */
 .nvctl .drw{margin-top:8px;padding:9px 10px 10px;background:var(--bg-soft);
   border:1px solid var(--border-soft);border-radius:10px;
   display:flex;flex-direction:column;gap:9px}
@@ -308,6 +321,41 @@ pre.dossier{
 .nvnote button{all:unset;cursor:pointer;color:var(--accent)}
 .nvb .tfile{font-size:12.5px;padding:5px 8px 5px 0;gap:8px}
 .nvb .srow{font-size:12.5px;padding:6px 8px 6px 0;gap:9px}
+
+/* ── a narrow panel spends its width on names ──────────────────────────────
+   The divider drags the navigator down to 168px. Everything on a row but the
+   name has a fixed size, so the name is the only thing that can give, and it
+   gives all the way to `w.` before a badge gives anything. Below the width
+   where both fit, the badge goes: the filename is what the row is for, and
+   what a document says about itself is a filter in the drawer as well. */
+@container nav (max-width:243px){
+  .nvctl .opt.disc .l{display:none}
+  .nvctl .opt.disc{gap:4px;padding:4px 6px}
+  /* expand-all and collapse-all are the row's least load-bearing controls, and
+     `flat` two buttons to their left answers the same question in one click */
+  .nvctl .opt.ico{display:none}
+  /* the label gutter is 46px of a 151px panel, so the group names go above
+     what they name and the options get the width back */
+  .nvctl .drw .fgrp{flex-direction:column;gap:4px}
+  .nvctl .drw .lbl{width:auto;line-height:1.4}
+  .nvb .tfile{gap:6px}
+  .nvb .tfile .kind.st{display:none}
+  .tkids{margin-left:7px;padding-left:7px}
+  /* the scope switch is the widest control in the Sessions navigator and the
+     most important one in it, so it takes a row of its own rather than
+     squeezing the two words it holds */
+  .nvb .ctl{gap:6px 7px;margin:0 0 11px}
+  .nvb .ctl .seg{flex:1 0 100%}
+  .nvb .ctl .seg button{flex:1;text-align:center;padding:4px 7px;font-size:11px}
+  .nvb .ctl .chip{padding:3px 7px;font-size:10.5px}
+  .nvb .ctl .sp{font-size:10px}
+  /* a session row goes to two lines: the prompt count goes entirely, and the
+     repository — which in `everywhere` scope is half the answer — moves under
+     the title instead of eating it */
+  .nvb .srow{gap:1px 7px;flex-wrap:wrap}
+  .nvb .srow .sub{flex:0 0 100%;margin-left:29px;font-size:10.5px}
+  .nvb .srow .sub:last-child{display:none}
+}
 
 #reidx.busy svg{animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
