@@ -1166,5 +1166,58 @@ else
   skip "25 · stem eliding" "no node"
 fi
 
+# ── 26 · every verb the page emits can be clicked ───────────────────────────
+# The failure this closes: `data-lstatus` and `data-lclear` were read in the body
+# of the click dispatcher while the selector that has to match first was left
+# alone, so the navigator's status chips and both Clear buttons were inert from
+# the day they were written — and nothing threw, so nothing here noticed. Verbs
+# registered through RB.table derive their own selector and cannot drift; this
+# is the net under the selectors still written by hand.
+if command -v node >/dev/null; then
+  { cat <<'JSEOF'
+var fs = require('fs');
+var src = fs.readFileSync(process.argv[2], 'utf8');
+function dash(k){ return k.replace(/[A-Z]/g, function(c){ return '-' + c.toLowerCase(); }); }
+
+/* an attribute that carries a value for some handler to read, rather than
+   naming the thing to do — `data-doc="…" data-line="12"` is one verb, one
+   payload. A new one belongs here only if nothing is meant to click it. */
+var PAYLOAD = ['copy-note','f','fg','id','line','n','q','sid','t','val'];
+
+var emitted = {}, handled = {}, m;
+var reEmit = /data-([a-z][a-z-]*)="/g;
+while ((m = reEmit.exec(src))) emitted[m[1]] = 1;
+var reSel = /\[data-([a-z][a-z-]*)\]/g;
+while ((m = reSel.exec(src))) handled[m[1]] = 1;
+
+/* the keys of every RB.table({…}) spec, found by matching braces so a handler
+   body that closes with `},` does not end the search early */
+var i = 0;
+while ((i = src.indexOf('RB.table({', i)) !== -1){
+  var j = src.indexOf('{', i), depth = 0, start = j;
+  for (; j < src.length; j++){
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}' && !--depth) break;
+  }
+  var spec = src.slice(start, j + 1), km, reKey = /^\s+([a-zA-Z][a-zA-Z0-9]*)\s*:/gm;
+  while ((km = reKey.exec(spec))) handled[dash(km[1])] = 1;
+  i = j;
+}
+
+var dead = Object.keys(emitted).filter(function(a){
+  return !handled[a] && PAYLOAD.indexOf(a) < 0;
+}).sort();
+console.log(dead.length ? 'XX ' + dead.join(' ') : 'ok');
+JSEOF
+  } > "$WORK/verbs.js"
+  res=$(node "$WORK/verbs.js" "$REPO/share/workspace.js" 2>&1)
+  case "$res" in
+    ok*) ok "26 · every data- verb the page emits has a handler" ;;
+    *)   no "26 · the page emits a button nothing listens for" "$res" ;;
+  esac
+else
+  skip "26 · verb reachability" "no node"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

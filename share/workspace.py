@@ -712,6 +712,7 @@ def emit_html(data, share, base=None, nonce=""):
         "__SHELLCSS__": sh("shell.css"),
         "__REVIEWCSS__": sh("review.css"),
         "__LIBS__": libs_html,
+        "__RBJS__": sh("rb.js"),
         "__RENDERJS__": sh("render.js"),
         "__REVIEWJS__": sh("review.js"),
         "__SHELLJS__": sh("shell.js"),

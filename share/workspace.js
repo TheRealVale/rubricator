@@ -207,8 +207,11 @@ function anchorOf(i){
 function isLive(i){ return anchorOf(i) !== 'orphaned'; }
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
-function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
-  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+/* the kit, under short names: `esc` is what it always was and reads the same at
+   the several hundred call sites below, `html` is the escaping template tag the
+   surfaces are moving to, and `fuse` turns whatever a surface built — a template,
+   an array of them, a plain string — into the markup a host expects. */
+var esc = RB.esc, html = RB.html, trust = RB.trust, fuse = RB.fuse;
 function ago(ts){
   if (!ts) return '—';
   var d = Math.round((now - ts) / DAY);
@@ -1201,11 +1204,28 @@ function viewSettings(){
 
 /* ── E7 · views you wrote yourself ───────────────────────────────────────── */
 var USER_VIEWS = [];
-window.RB = {
-  view: function(v){ if (v && v.id && v.render) USER_VIEWS.push(v); },
-  data: D, esc: esc, ago: ago, shortPath: shortPath, toast: toast, copy: copy,
-  open: function(rel){ openDoc(rel, {}); }
+
+/* Verbs a view of its own registers, in the same kind of table the navigator
+   uses. It is consulted last, so a view cannot shadow a built-in verb, and a
+   view that says `RB.action('mine', fn)` and renders a `data-mine` of its own gets a
+   button that works without needing to know that every click on this page is
+   heard once, at the top of the document. */
+var VIEWVERBS = RB.table({});
+
+/* rb.js opened this object with the rendering half — html, trust, esc, fuse,
+   table. Here it gains the half that needs the index. */
+RB.view    = function(v){ if (v && v.id && v.render) USER_VIEWS.push(v); };
+RB.action  = function(name, fn){
+  if (name && typeof fn === 'function') VIEWVERBS.on(name, fn);
+  return RB;
 };
+RB.data    = D;
+RB.ago     = ago;
+RB.shortPath = shortPath;
+RB.toast   = toast;
+RB.copy    = copy;
+RB.open    = function(rel){ openDoc(rel, {}); };
+RB.refresh = function(){ Shell.refresh(); };
 (D.views || []).forEach(function(v){
   try { (new Function(v.src)).call(window); }
   catch(e){ console.error('rubricator: view ' + v.name + ' failed:', e); }
@@ -2084,85 +2104,78 @@ function navDocs(){
   var sks = statusKeys(D.docs);
   var onCount = LIBFACETS.filter(function(f){ return libFacet[f.k]; }).length + (libStatus ? 1 : 0);
   var narrowed = docs.length !== D.docs.length;
-  var TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" ' +
-             'stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"/></svg>';
+  var TICK = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"/></svg>`;
+  function icon(d){
+    return html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+  }
+
+  /* A label gutter, so a group name never shares a line with the controls it
+     names and nothing wraps raggedly. The navigator is 252px: four text chips
+     cannot share a row at that width, which is why the facets are rows. */
+  var drawer = html`<div class="drw">
+    <div class="fgrp"><span class="lbl">sort</span><div class="opts">${
+      sorts.map(function(x){
+        return html`<button class="chip${libSort === x[0] ? ' on' : ''}" data-lsort="${x[0]}">${x[1]}</button>`;
+      })
+    }</div></div>
+    <div class="sep"></div>
+    <div class="fgrp"><span class="lbl">show</span><div class="opts col">${
+      LIBFACETS.map(function(f){
+        var on = !!libFacet[f.k];
+        return html`<button class="ck${on ? ' on' : ''}" data-lfacet="${f.k}"><span class="box">${on ? TICK : ''}</span><span class="t">${f.label}</span><span class="n">${libCount(f.k)}</span></button>`;
+      })
+    }</div></div>
+    ${!sks.length ? '' : html`<div class="sep"></div>
+    <div class="fgrp"><span class="lbl">says</span><div class="opts">${
+      sks.map(function(k){
+        return html`<button class="chip mono${libStatus === k ? ' on' : ''}" data-lstatus="${k}" title="${libCount(null, k)} documents whose front matter says ${k}">${k}</button>`;
+      })
+    }</div></div>`}
+  </div>`;
 
   /* Row one is what the panel *is*: a shape, and a way in to how it is narrowed.
      The count moved out of it — a bare number floating at the end of a control
-     row says neither what it counts nor that anything is filtering it. */
-  var h = ['<div class="nvctl"><div class="r">' +
-    '<div class="seg">' +
-      '<button data-lmode="tree" class="' + (libFlat ? '' : 'on') + '">tree</button>' +
-      '<button data-lmode="flat" class="' + (libFlat ? 'on' : '') + '">flat</button>' +
-    '</div>' +
-    (libFlat ? '' :
-      '<button class="opt ico" data-tree="open" title="Expand every folder">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
-        'stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg></button>' +
-      '<button class="opt ico" data-tree="shut" title="Collapse every folder">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
-        'stroke-linecap="round" stroke-linejoin="round"><path d="M7 14l5-5 5 5"/></svg></button>') +
-    '<span class="sp"></span>' +
-    '<button class="opt disc' + (navOpts ? ' on' : '') + '" data-navopts="1" ' +
-      'title="Sorting and filters">' +
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
-      'stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' +
-      '<span class="l">sort &amp; filter</span>' +
-      (onCount ? '<span class="badge">' + onCount + '</span>' : '') +
-    '</button></div>'];
+     row says neither what it counts nor that anything is filtering it. Row two
+     says the state in words whether the drawer is open or not, so you can tell
+     at a glance that a filter is on. */
+  var ctl = html`<div class="nvctl">
+    <div class="r">
+      <div class="seg">
+        <button data-lmode="tree" class="${libFlat ? '' : 'on'}">tree</button>
+        <button data-lmode="flat" class="${libFlat ? 'on' : ''}">flat</button>
+      </div>
+      ${libFlat ? '' : html`
+        <button class="opt ico" data-tree="open" title="Expand every folder">${icon('M7 10l5 5 5-5')}</button>
+        <button class="opt ico" data-tree="shut" title="Collapse every folder">${icon('M7 14l5-5 5 5')}</button>`}
+      <span class="sp"></span>
+      <button class="opt disc${navOpts ? ' on' : ''}" data-navopts="1" title="Sorting and filters">
+        ${icon('M4 6h16M7 12h10M10 18h4')}
+        <span class="l">sort &amp; filter</span>
+        ${onCount ? html`<span class="badge">${onCount}</span>` : ''}
+      </button>
+    </div>
+    <div class="sum">
+      <span class="${narrowed ? 'hit' : ''}">${narrowed ? docs.length + ' of ' + D.docs.length
+                                                        : D.docs.length + ' documents'}</span>
+      <span class="by">by ${sortLabel(libSort)}</span>
+      ${onCount ? html`<button class="lnk" data-lclear="1">clear</button>` : ''}
+    </div>
+    ${navOpts ? drawer : ''}
+  </div>`;
 
-  /* …and one line that says the state in words whether the drawer is open or
-     not, so you can tell at a glance that a filter is on. */
-  h.push('<div class="sum">' +
-    '<span class="' + (narrowed ? 'hit' : '') + '">' +
-      (narrowed ? docs.length + ' of ' + D.docs.length : D.docs.length + ' documents') +
-    '</span><span class="by">by ' + esc(sortLabel(libSort)) + '</span>' +
-    (onCount ? '<button class="lnk" data-lclear="1">clear</button>' : '') +
-    '</div>');
+  /* `fileRow` and `libTree` still build their markup by hand and hand back a
+     string, so the boundary is marked rather than assumed: `trust` is the only
+     way raw HTML enters a template, which makes the list of places it can enter
+     a grep away. */
+  var body = docs.length
+    ? html`<div class="tree">${trust((libFlat || navQ) ? docs.map(fileRow).join('') : libTree(docs))}</div>`
+    : html`<div class="empty">Nothing matches those filters.<br><br><button class="lnk" data-lclear="1">Clear them</button></div>`;
 
-  if (navOpts){
-    /* A label gutter, so a group name never shares a line with the controls it
-       names and nothing wraps raggedly. The navigator is 252px: four text chips
-       cannot share a row at that width, which is why the facets are rows. */
-    h.push('<div class="drw">');
-
-    h.push('<div class="fgrp"><span class="lbl">sort</span><div class="opts">' +
-      sorts.map(function(x){
-        return '<button class="chip' + (libSort === x[0] ? ' on' : '') +
-               '" data-lsort="' + x[0] + '">' + x[1] + '</button>';
-      }).join('') + '</div></div>');
-
-    h.push('<div class="sep"></div>');
-    h.push('<div class="fgrp"><span class="lbl">show</span><div class="opts col">' +
-      LIBFACETS.map(function(f){
-        var on = !!libFacet[f.k], n = libCount(f.k);
-        return '<button class="ck' + (on ? ' on' : '') + '" data-lfacet="' + f.k + '">' +
-          '<span class="box">' + (on ? TICK : '') + '</span>' +
-          '<span class="t">' + f.label + '</span>' +
-          '<span class="n">' + n + '</span></button>';
-      }).join('') + '</div></div>');
-
-    if (sks.length){
-      h.push('<div class="sep"></div>');
-      h.push('<div class="fgrp"><span class="lbl">says</span><div class="opts">' +
-        sks.map(function(k){
-          return '<button class="chip mono' + (libStatus === k ? ' on' : '') +
-                 '" data-lstatus="' + esc(k) + '" title="' + libCount(null, k) +
-                 ' documents whose front matter says ' + esc(k) + '">' + esc(k) + '</button>';
-        }).join('') + '</div></div>');
-    }
-    h.push('</div>');
-  }
-  h.push('</div>');
-  h.push(docs.length
-    ? '<div class="tree">' + ((libFlat || navQ) ? docs.map(fileRow).join('') : libTree(docs)) + '</div>'
-    : '<div class="empty">Nothing matches those filters.<br><br>' +
-      '<button class="lnk" data-lclear="1">Clear them</button></div>');
   var kinds = { pdf:0, word:0 };
   D.docs.forEach(function(d){ if (kinds[d.kind] != null) kinds[d.kind]++; });
   var foot = [D.docs.length + ' documents'];
   if (kinds.pdf || kinds.word) foot.push((kinds.pdf + kinds.word) + ' not markdown');
-  return { html: h.join(''), filter: navQ, placeholder: 'Filter by name',
+  return { html: fuse([ctl, body]), filter: navQ, placeholder: 'Filter by name',
            onFilter: function(v){ navQ = v; Shell.nav(); },
            foot: foot.join(' · ') };
 }
@@ -2753,6 +2766,21 @@ function openProject(id){
 $('wname').textContent = D.name;
 $('wpath').textContent = D.root.replace(/^\/Users\/[^/]+/, '~');
 
+/* The navigator's controls: what each verb does, and nothing about how it is
+   found. `RB.table` builds the selector out of these keys, so the two cannot
+   disagree — which is the whole point, because they did. `lstatus` and `lclear`
+   were handled here and missing from the selector, and the status chips and
+   both Clear buttons had been inert since the day they were written. */
+var NAVVERBS = RB.table({
+  lmode:   function(v){ libFlat = v === 'flat'; },
+  lsort:   function(v){ libSort = v; },
+  lfacet:  function(v){ libFacet[v] = !libFacet[v]; },
+  lstatus: function(v){ libStatus = libStatus === v ? '' : v; },
+  lclear:  function(){ libFacet = {}; libStatus = ''; },
+  sscope:  function(v){ sesScope = v; },
+  slive:   function(){ sesLive = !sesLive; }
+}, function(){ Shell.nav(); });
+
 /* ── everything you can click ───────────────────────────────────────────── */
 document.addEventListener('click', function(e){
   var uf = e.target.closest('.unfold');
@@ -2761,18 +2789,7 @@ document.addEventListener('click', function(e){
     if (body) body.classList.contains('open') ? refold(body) : unfold(body);
     return;
   }
-  var seg = e.target.closest('[data-lmode],[data-lsort],[data-lfacet],[data-sscope],[data-slive]');
-  if (seg){
-    var d = seg.dataset;
-    if (d.lmode)  libFlat = d.lmode === 'flat';
-    if (d.lsort)  libSort = d.lsort;
-    if (d.lfacet) libFacet[d.lfacet] = !libFacet[d.lfacet];
-    if (d.lstatus) libStatus = libStatus === d.lstatus ? '' : d.lstatus;
-    if (d.lclear){ libFacet = {}; libStatus = ''; }
-    if (d.sscope) sesScope = d.sscope;
-    if (d.slive)  sesLive = !sesLive;
-    return Shell.nav();
-  }
+  if (NAVVERBS(e)) return;
   /* the same move as the Settings toggle, because the empty state promises the
      same thing: on now, and on the next time you open a window */
   if (e.target.closest('[data-wantsessions]'))
@@ -2865,6 +2882,7 @@ document.addEventListener('click', function(e){
     return openDoc(row.dataset.doc, { q: row.dataset.q || '', where: where,
                                       jump: +(row.dataset.line || 0) });
   }
+  VIEWVERBS(e);
 });
 
 document.addEventListener('keydown', function(e){
