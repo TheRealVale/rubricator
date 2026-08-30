@@ -152,13 +152,72 @@ pre.dossier{
 .sdet h3{font-size:15.5px;margin:0 0 5px;letter-spacing:-.01em;line-height:1.45}
 .sdet .who{font-size:11.5px;color:var(--fg-dim);margin-bottom:16px;display:flex;gap:11px;flex-wrap:wrap}
 .plist{display:flex;flex-direction:column;gap:7px}
-.pitem.hit{border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
-.pitem mark{background:var(--accent-soft);color:var(--fg);padding:0 2px;border-radius:3px}
+.pitem:has(mark.hit:not(.off)){border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
 .pitem{font-size:12.5px;line-height:1.6;padding:9px 12px;border:1px solid var(--border-soft);
   border-radius:9px;background:var(--bg-elev);white-space:pre-wrap;overflow-wrap:anywhere}
 .pitem .when{font-size:10.5px;color:var(--fg-dim);display:block;margin-bottom:4px}
-.flist{font-family:var(--mono);font-size:11.5px;line-height:1.95}
-.flist div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pitem .tx{display:block}
+/* ── the files a session changed ────────────────────────────────────────
+   The kinds first, as a bar that is also the filter; then folders in path
+   order, each eliding the stem it shares with the row above. Collapsing is
+   CSS and nothing else: every row stays in the DOM, so the find bar finds
+   what it says it finds and the folder holding a hit opens itself. */
+.kbar{display:flex;height:4px;border-radius:3px;overflow:hidden;margin:0 0 11px}
+.kbar i{display:block;transition:opacity .12s}
+.kchips{display:flex;flex-wrap:wrap;gap:5px}
+.kchip{all:unset;cursor:pointer;font-family:var(--mono);font-size:10px;padding:3px 9px;
+  border:1px solid var(--border);border-radius:20px;color:var(--fg-dim);
+  display:inline-flex;gap:7px;align-items:baseline}
+.kchip:hover{border-color:var(--fg-dim);color:var(--fg-muted)}
+.kchip.on{border-color:var(--accent);color:var(--fg);background:var(--accent-soft)}
+.kchip b{font-weight:400;color:var(--fg-muted)}
+.kchip.on b{color:var(--fg)}
+.fsum{font-size:11.5px;color:var(--fg-dim);margin:10px 0 4px 3px;display:flex;gap:7px;
+  align-items:baseline}
+.fsum .hit{color:var(--accent)}
+.fsum .sp{margin-left:auto;display:flex;gap:3px}
+.fsum button{all:unset;cursor:pointer;color:var(--fg-muted);font-size:11px;padding:2px 7px;
+  border-radius:6px}
+.fsum button:hover{color:var(--fg);background:var(--bg-elev)}
+.fdir .dhd{display:flex;align-items:baseline;gap:8px;padding:6px 8px;cursor:pointer;
+  border-radius:7px;font-family:var(--mono);font-size:11.5px}
+.fdir .dhd:hover{background:var(--bg-soft)}
+.fdir .caret{font-size:9px;color:var(--fg-dim);width:9px;flex:none;align-self:center;
+  display:inline-block;transition:transform .14s}
+.fdir.on .caret,.fdir:has(mark.hit:not(.off)) .caret{transform:rotate(90deg)}
+.fdir .pth{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the part shared with the folder above: present, so the path stays whole and
+   stays copyable, but never the thing the eye lands on */
+.fdir .stem{color:var(--fg-dim);opacity:.5}
+.fdir .leaf{color:var(--fg-muted);font-weight:640}
+.fdir .dhd:hover .leaf{color:var(--fg)}
+.fdir .mix{display:flex;gap:2px;flex:none;align-self:center}
+.fdir .mix i{width:3px;height:3px;border-radius:50%;display:block}
+.fdir .n{margin-left:auto;color:var(--fg-dim);font-size:11px;flex:none;
+  font-variant-numeric:tabular-nums}
+.fdir .dkids{display:none;margin-left:12px;border-left:1px solid var(--border-soft);
+  padding-left:11px;margin-bottom:3px}
+.fdir.on .dkids,.fdir:has(mark.hit:not(.off)) .dkids{display:block}
+.frow{display:flex;align-items:baseline;gap:10px;padding:4px 9px;border-radius:7px}
+.frow:hover{background:var(--bg-soft)}
+.frow .nm{font-family:var(--mono);font-size:11.5px;color:var(--fg-muted);flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow:hover .nm{color:var(--fg)}
+.frow .isdoc{font-family:var(--mono);font-size:8.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--accent);border:1px solid var(--accent-soft);
+  padding:0 4px;line-height:14px;flex:none}
+.frow .df{font-size:10px;color:var(--fg-dim);flex:none;font-variant-numeric:tabular-nums}
+.frow .df.only{opacity:.6}
+/* the actions appear on the row you are pointing at, and stay for the keyboard */
+.frow .facts{display:flex;gap:2px;flex:none;opacity:0}
+.frow:hover .facts,.frow:focus-within .facts{opacity:1}
+.frow .facts button{all:unset;cursor:pointer;width:22px;height:20px;border-radius:5px;
+  display:flex;align-items:center;justify-content:center;color:var(--fg-dim)}
+.frow .facts button:hover{background:var(--bg-elev);color:var(--fg)}
+.frow .facts svg{width:13px;height:13px}
+/* a match inside a one-line name takes the room it needs, as elsewhere */
+.frow:has(mark.hit:not(.off)) .nm{white-space:normal;overflow:visible;
+  text-overflow:clip;overflow-wrap:anywhere}
 .thc{border:1px solid var(--border);padding:12px 13px 13px;cursor:pointer;background:var(--bg-elev)}
 .thc:hover{border-color:var(--fg-dim)}
 .thc.on{border-color:var(--accent)}
@@ -238,32 +297,34 @@ pre.dossier{
 /* ── searching inside one session ────────────────────────────────────────
    Pinned to the top of the surface, because what you are looking for is
    almost never what you are looking at. */
-.find{position:sticky;top:0;z-index:6;background:var(--bg);
+.sfind{position:sticky;top:0;z-index:6;background:var(--bg);
   border-bottom:1px solid var(--border-soft);padding:11px 26px 10px}
-.find[hidden]{display:none}
-.find .fr,.find .fs{max-width:1000px;margin:0 auto;display:flex;align-items:center;gap:8px}
-.find .fq{all:unset;flex:1;min-width:0;font-family:var(--font);font-size:12.5px;color:var(--fg);
+.sfind[hidden]{display:none}
+.sfind .fr,.sfind .fs{max-width:1000px;margin:0 auto;display:flex;align-items:center;gap:8px}
+.sfind .fq{all:unset;flex:1;min-width:0;font-family:var(--font);font-size:12.5px;color:var(--fg);
   padding:6px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev)}
-.find .fq:focus{border-color:var(--accent)}
-.find .fq::placeholder{color:var(--fg-dim)}
-.find .n{flex:none;min-width:52px;text-align:right;font-family:var(--mono);font-size:11px;
+.sfind .fq:focus{border-color:var(--accent)}
+.sfind .fq::placeholder{color:var(--fg-dim)}
+.sfind .n{flex:none;min-width:52px;text-align:right;font-family:var(--mono);font-size:11px;
   color:var(--fg-dim);font-variant-numeric:tabular-nums}
-.find.none .n{color:var(--yellow)}
-.find .st{all:unset;cursor:pointer;flex:none;width:23px;height:23px;border-radius:6px;
+.sfind.none .n{color:var(--yellow)}
+.sfind .st{all:unset;cursor:pointer;flex:none;width:23px;height:23px;border-radius:6px;
   text-align:center;line-height:23px;font-size:13px;color:var(--fg-dim)}
-.find .st:hover{color:var(--fg);background:var(--bg-elev)}
-.find .fs{margin-top:8px;flex-wrap:wrap;gap:6px}
-.find .fs .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-dim)}
-.find .fs .chip{font-size:11px;padding:3px 9px;display:inline-flex;align-items:baseline;gap:6px}
+.sfind .st:hover{color:var(--fg);background:var(--bg-elev)}
+.sfind .fs{margin-top:8px;flex-wrap:wrap;gap:6px}
+.sfind .fs .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-dim)}
+.sfind .fs .chip{font-size:11px;padding:3px 9px;display:inline-flex;align-items:baseline;gap:6px}
 /* the count of what is in a scope you are not searching: the whole reason the
    chips are worth having is that they can point at where you should look */
-.find .fs .chip i{font-style:normal;font-family:var(--mono);font-size:10px;
+.sfind .fs .chip i{font-style:normal;font-family:var(--mono);font-size:10px;
   color:var(--fg-dim);font-variant-numeric:tabular-nums}
-.find .fs .chip i:empty{display:none}
-.find .fs .chip.nil{opacity:.4}
-.find .fs .chip.only{margin-left:auto}
-.find .fs .chip:disabled{opacity:.32;cursor:default}
-.surf mark.hit.off{background:none;color:inherit;border-radius:0}
+.sfind .fs .chip i:empty{display:none}
+.sfind .fs .chip.nil{opacity:.4}
+.sfind .fs .chip.only{margin-left:auto}
+.sfind .fs .chip:disabled{opacity:.32;cursor:default}
+/* a match outside the scope you are searching is still counted on its chip,
+   but it must not draw: padding included, or the text jumps as you toggle */
+.surf mark.hit.off{background:none;color:inherit;border-radius:0;padding:0}
 .surf mark.hit.now{background:var(--accent);color:#fff}
 /* .turn and its kin are flex, which outranks what `hidden` means by default */
 .sdet [hidden]{display:none !important}
@@ -280,8 +341,13 @@ button.unfold{all:unset;cursor:pointer;display:flex;align-items:baseline;gap:8px
 button.unfold .t{font-weight:640;color:var(--accent)}
 button.unfold .h{font-variant-numeric:tabular-nums}
 button.unfold:hover .h{color:var(--fg-muted)}
-.flist.clamp{margin-bottom:0}
-.flist + button.unfold{margin-top:6px}
+/* a path, a title and a tool's arguments are each cut to one line, so a match
+   in the part that was cut off would be a highlight nobody can read: the row
+   that matched takes the space it needs, and only that row */
+.tfile:has(mark.hit:not(.off)) .nm,
+.tfile:has(mark.hit:not(.off)) .sub,
+.did .tool:has(mark.hit:not(.off)) .b{white-space:normal;overflow:visible;
+  text-overflow:clip;overflow-wrap:anywhere}
 
 /* ── a document's history on one axis ───────────────────────────────────── */
 .tl{position:relative;height:26px;margin:0 0 18px;font-size:10px;color:var(--fg-dim)}
@@ -399,7 +465,11 @@ button.unfold:hover .h{color:var(--fg-muted)}
   .nvctl .drw .fgrp{flex-direction:column;gap:4px}
   .nvctl .drw .lbl{width:auto;line-height:1.4}
   .nvb .tfile{gap:6px}
-  .nvb .tfile .kind.st{display:none}
+  /* every badge but the one naming the repository: PDF/DOC repeats the
+     extension already in the name, and NEW and the status chip are both facets
+     in the drawer. Which repository a row is from is not recoverable anywhere,
+     and it carries whether the row can be marked at all. */
+  .nvb .tfile .kind:not(.repo){display:none}
   .tkids{margin-left:7px;padding-left:7px}
   /* the scope switch is the widest control in the Sessions navigator and the
      most important one in it, so it takes a row of its own rather than

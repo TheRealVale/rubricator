@@ -1203,6 +1203,26 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                 if not d:
                     return S.J({"error": "no such document"}, 400)
                 return S.J(A.reveal(d["abs"]) if verb == "reveal" else A.edit(d["abs"]))
+            if verb in ("reveal-file", "edit-file"):
+                # A session touches hundreds of files and almost none of them
+                # are documents, so `reveal`/`edit` above — which resolve their
+                # target through the document index — cannot reach them. This
+                # takes a session id and an ORDINAL into the file list the
+                # server already holds for it: the page still never sends a
+                # path, and nothing outside what the index already knew about
+                # can be named.
+                m = (state["data"].get("sessions") or {}).get(ident)
+                files = (m or {}).get("files") or []
+                try:
+                    i = int(b.get("n"))
+                except (TypeError, ValueError):
+                    i = -1
+                if not m or not 0 <= i < len(files):
+                    return S.J({"error": "that file is not in this session's list"}, 400)
+                target = files[i]
+                if not os.path.isfile(target):
+                    return S.J({"error": "that file is no longer on disk"}, 400)
+                return S.J(A.reveal(target) if verb == "reveal-file" else A.edit(target))
             if verb == "reveal-session":
                 # The page sends a session id, never a path — the directory is
                 # looked up here, in the index the server already holds, for the

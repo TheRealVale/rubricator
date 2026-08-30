@@ -175,9 +175,10 @@ Every divider is draggable. Drag the navigator below the width its labels need a
 answers in kind: the modes become the icons the collapsed rail shows them as, group names
 move above what they name, and a row spends what is left on the filename.
 
-`⌘F` is deliberately unbound here. It falls through to the browser's own find bar, which
-already has a hit count, next and previous, and wrap-around — and searches the page you are
-actually looking at.
+`⌘F` belongs to whichever surface is in front of you. A session takes it, because a session
+is not a flat page and the browser's find treats it as one; everywhere else it falls through
+to the browser's own find bar, which already has a hit count, next and previous, and
+wrap-around.
 
 ### The four navigator modes
 
@@ -202,10 +203,32 @@ which is the same switch as Settings → Indexing and stays on for future window
 transcripts in about two, so the window opens on its documents and history arrives while you
 are looking at them. Each shows what you asked, which files
 it changed, and which documents it bears on — worked out from the overlap between the files
-a session touched and the files each document names. Opening one renders the conversation as
+a session touched and the files each document names.
+
+A working session touches hundreds of files across a hundred folders, so its file list leads
+with the shape of the change: a bar of the kinds it touched, which is also the filter that
+narrows the list to one of them. Under it the folders sit in path order, each drawn quiet
+where it repeats the head of the folder above — `src/app/event/event-editor/features/` is
+carried by the first row that needs it, and the rest name only their tail. A folder carries a
+dot per kind it holds and the count of what it holds, and opens to rows that can be opened
+here if they are documents, revealed, opened in your editor, or copied as a path. Collapsing
+is only ever visual: every row stays where `⌘F` can find it, and the folder holding a match
+opens itself.
+
+Opening one renders the conversation as
 what it was: your turns on the right, Claude's on the left, thinking collapsed to a count,
 tool calls behind a disclosure, files it wrote as chips you can open. Compactions,
-interruptions and pasted images are marked where they happened.
+interruptions and pasted images are marked where they happened. Anything longer than a
+screenful folds to a fixed height and says how many lines it is holding back; opening one
+grows it over a duration set by how far it has to travel.
+
+`⌘F` searches the session. Every match is counted in each of the parts a session has — what
+you said, what Claude said, the files it touched, the tools it ran, and the session's own
+details — and the chips narrow the search to any of them, so *was it me or Claude who said
+that* and *which file was it* are separate questions again. The counts stay true for the
+parts you are not searching, because *nothing here* is only worth reading next to *four over
+there*. `⏎` and `⇧⏎` step through; *only matches* thins the surface to what matched; and a
+match inside a fold, a closed disclosure or a collapsed folder opens it on the way.
 
 A session is **resumable** while its transcript is on disk and **archived** once it is gone.
 Prompts outlive transcripts, so most of your history can be read and searched but not picked
@@ -349,7 +372,8 @@ Off by default. With `md --allow-launch` — or `{"allow_launch": true}` in
 - **Send to Claude** on an open document: a new session at the repository root, with the
   marks you just took as its first prompt.
 - **Resume** or **fork** a past session, offered only where a transcript still exists.
-- **Reveal** a file in Finder, or open it in your editor.
+- **Reveal** a file in Finder, or open it in your editor — any file a session touched, not
+  only the documents this window can read.
 
 Sessions open in **iTerm** if you have it, otherwise Terminal — or whichever terminal you
 pick under Settings. The launcher is a `.command` file handed to that application through
@@ -367,7 +391,9 @@ written by the same hand.
 
 What crosses the wire is a verb and an id. The page never sends a path and never sends a
 command: every path is resolved on the server against the index it already holds, and every
-argument goes into `argv` directly. The one thing the page may hand over is the prompt text
+argument goes into `argv` directly. A file a session changed is named by that session's id
+and its position in the list the server holds for it, so even the actions that reach past the
+document index reach only what the index already knew about. The one thing the page may hand over is the prompt text
 for a new session, written to a file and read back as a single argument, so a prompt
 containing `$(…)`, backticks or `;` arrives as literal text. The server is loopback-only,
 token-gated per run, refuses anything cross-site, and exits when the window closes.

@@ -1017,5 +1017,154 @@ else
   skip "22 · file ranking" "no node"
 fi
 
+# ── 24 · a session's files can be reached, and only those ───────────────────
+# `reveal` and `edit` resolve their target through the document index, so they
+# reach the markdown in a repository and nothing else — while a session touches
+# hundreds of files that are not documents. `reveal-file`/`edit-file` take a
+# session id and an ORDINAL into the file list the server already holds, so the
+# page still never sends a path. This checks that the ordinal is the only key
+# that works, and that everything else is refused.
+#
+# The session index is seeded through the code's own cache writer rather than
+# from a transcript: workspace.py drops anything under /var/folders as scratch
+# (SCRATCH), and every path a test can write to is scratch. Using the real
+# writer means a change to that format fails this test loudly instead of
+# quietly seeding nothing.
+python3 - "$MD" "$WORK" "$REPO" >"$WORK/files.txt" 2>&1 <<'PYEOF'
+import json, os, re, socket, subprocess, sys, time, urllib.error, urllib.request
+md, work, repo_root = sys.argv[1], sys.argv[2], sys.argv[3]
+repo = os.path.join(work, "filerepo"); os.makedirs(repo, exist_ok=True)
+open(os.path.join(repo, "README.md"), "w").write("# files\n\nbody\n")
+real = os.path.join(repo, "README.md")
+gone = os.path.join(repo, "deleted.md")
+sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+sys.path.insert(0, os.path.join(repo_root, "share"))
+import workspace as W
+W._cache_write("sessions-deep.json", W.session_stamp(True), {
+    "prompts": [{"sid": sid, "t": 1785000000, "text": "touch two files", "project": repo}],
+    "sessions": {sid: {"p": repo, "t": "touch two files", "n": 1,
+                       "a": 1785000000, "b": 1785000000, "live": 1,
+                       "files": [real, gone]}},
+    "touches": {real: [sid], gone: [sid]},
+})
+
+def free_port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+def serve(extra, env_extra):
+    port = free_port()
+    env = dict(os.environ, RUBRICATOR_NO_WINDOW="1", RUBRICATOR_DEBUG="1",
+               RUBRICATOR_NO_WATCH="1", **env_extra)
+    p = subprocess.Popen([md, "serve", "--port", str(port), "--sessions"] + extra + [repo],
+                         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    os.set_blocking(p.stdout.fileno(), False)
+    seen, url = "", None
+    for _ in range(200):
+        time.sleep(0.1)
+        seen += p.stdout.read() or ""
+        m = re.search(r"(http://127\.0\.0\.1:%d/[A-Za-z0-9_-]+/)" % port, seen)
+        if m: url = m.group(1); break
+    return p, url
+
+def post(url, body):
+    r = urllib.request.Request(url + "act", data=json.dumps(body).encode(),
+                               headers={"Content-Type": "application/json"})
+    try: return json.load(urllib.request.urlopen(r, timeout=30)), 200
+    except urllib.error.HTTPError as e: return json.load(e), e.code
+
+checks = {}
+p, url = serve(["--allow-launch"], {"RUBRICATOR_DRY_LAUNCH": "1"})
+try:
+    checks["the server came up"] = bool(url)
+    if url:
+        j = json.load(urllib.request.urlopen(url + "sessions", timeout=180))
+        m = (j.get("sessions") or {}).get(sid) or {}
+        checks["the seeded session reached the page"] = m.get("files") == [real, gone]
+        i = 0 if m.get("files") and m["files"][0] == real else -1
+        checks["an ordinal reveals the file"] = post(url, {"verb": "reveal-file", "id": sid, "n": i})[0].get("ok") is True
+        checks["and opens it in an editor"] = post(url, {"verb": "edit-file", "id": sid, "n": i})[0].get("ok") is True
+        # the refusal has to be the RANGE refusal, not whatever the runtime
+        # happened to raise: an unchecked files[99] throws IndexError and an
+        # unchecked files[-1] quietly resolves to the last file, and both would
+        # satisfy a test that only asked whether something went wrong
+        NOTINLIST = "not in this session's list"
+        for label, n in [("past the end", 99), ("negative", -1),
+                         ("a path instead of an ordinal", "../../../etc/passwd"),
+                         ("no ordinal at all", None)]:
+            body = {"verb": "reveal-file", "id": sid}
+            if n is not None: body["n"] = n
+            got, code = post(url, body)
+            checks["refused: " + label] = code == 400 and NOTINLIST in got.get("error", "")
+        got, code = post(url, {"verb": "reveal-file", "id": "nope", "n": 0})
+        checks["refused: an unknown session"] = code == 400 and NOTINLIST in got.get("error", "")
+        got, code = post(url, {"verb": "reveal-file", "id": sid, "n": 1})
+        checks["refused: a file that is gone"] = code == 400 and "no longer on disk" in got.get("error", "")
+        # a path in the body is not a key: the ordinal decides, or nothing does
+        got, _ = post(url, {"verb": "reveal-file", "id": sid, "n": i,
+                            "path": os.path.join(work, "does-not-exist.md"),
+                            "file": os.path.join(work, "does-not-exist.md")})
+        checks["a path in the body is ignored"] = got.get("ok") is True
+finally:
+    p.kill()
+
+# and with actions off, none of it is reachable at all
+q, url2 = serve([], {})
+try:
+    if url2:
+        got, code = post(url2, {"verb": "reveal-file", "id": sid, "n": 0})
+        checks["without --allow-launch it is 403"] = code == 403 and "actions are off" in got.get("error", "")
+    else:
+        checks["without --allow-launch it is 403"] = False
+finally:
+    q.kill()
+
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "24 · a session's files open by ordinal, and by nothing else"
+else
+  no "24 · the file verbs are wrong" "$(grep '^XX' "$WORK/files.txt" | tr '\n' ' ')$(tail -2 "$WORK/files.txt")"
+fi
+
+# ── 25 · the repeated path stem is elided, and only whole segments ──────────
+# A session's folders are listed in path order so the row above can carry the
+# head the next one repeats. Getting this wrong by a character means `docs/` and
+# `docsets/` share a stem, and the row names a folder that does not exist.
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+i = src.index("function elideStem(dir, prev)")
+open(sys.argv[2], "w").write(src[i:src.index("\nfunction sesFileGroup", i)])' \
+    "$REPO/share/workspace.js" "$WORK/stem.js"
+  { cat "$WORK/stem.js"
+    cat <<'JSEOF'
+var fail = [];
+function is(dir, prev, want, why){
+  var got = elideStem(dir, prev);
+  if (got !== want) fail.push(why + ' — got "' + got + '", wanted "' + want + '"');
+  /* whatever is elided, the row still spells the whole path */
+  if (dir.indexOf(got) !== 0) fail.push(why + ' — the stem is not a prefix of the path');
+  if (got && dir.slice(got.length) === '') fail.push(why + ' — nothing left to name the folder');
+}
+is('src/app/', '', '', 'nothing above it');
+is('src/app/', 'src/lib/', 'src/', 'one shared segment');
+is('a/b/c/d/', 'a/b/c/x/', 'a/b/c/', 'three shared segments');
+is('docs/', 'docsets/', '', 'a shared prefix that is not a shared segment');
+is('docsets/', 'docs/', '', 'and the same the other way round');
+is('e2e/', 'docs/plans/', '', 'nothing in common');
+is('supabase/functions/_shared/', 'supabase/migrations/', 'supabase/', 'siblings under one root');
+is('src/app/b/', 'src/app/', 'src/app/', 'a folder below the one above it');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/stem-run.js"
+  res=$(node "$WORK/stem-run.js" 2>&1)
+  case "$res" in ok*) ok "25 · folder rows elide the stem above them, by segment" ;;
+                 *)   no "25 · the stem eliding is wrong" "$res" ;; esac
+else
+  skip "25 · stem eliding" "no node"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

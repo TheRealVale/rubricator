@@ -68,9 +68,11 @@ function absorb(j){
 
 /* A verb and an id — never a path, never a command. The server resolves the
    rest against the index it already holds. */
-function act(verb, id, text, ok){
+function act(verb, id, text, ok, extra){
   if (!can('launch')) return toast('actions are off — start with md --allow-launch');
-  api('act', { verb: verb, id: id, text: text || '' }, function(j){
+  var body = { verb: verb, id: id, text: text || '' };
+  if (extra) for (var k in extra) body[k] = extra[k];
+  api('act', body, function(j){
     if (j && j.error) return toast(j.error);
     toast((ok || 'done') + (j && j.terminal ? ' — ' + j.terminal : ''));
   }, function(){ toast(verb + ' failed'); });
@@ -863,8 +865,12 @@ function sessionHTML(sid, convo){
                       .sort(function(a, b){ return a.t - b.t; });
   var docs = relatedDocs(sid);
   var pre = D.root + '/';
-  var here = (m.files || []).filter(function(f){ return f.indexOf(pre) === 0; });
-  var away = (m.files || []).filter(function(f){ return f.indexOf(pre) !== 0; });
+  /* the ordinal travels with the row: it is what the reveal and edit verbs
+     take, so that the page names a position in the server's own list rather
+     than a path of its own choosing */
+  var all = (m.files || []).map(function(f, i){ return { abs: f, n: i }; });
+  var here = all.filter(function(x){ return x.abs.indexOf(pre) === 0; });
+  var away = all.filter(function(x){ return x.abs.indexOf(pre) !== 0; });
 
   var out = ['<section class="fsec sabout" data-f="about">',
     '<h3>' + esc(m.t || '(no prompt recorded)') + '</h3>',
@@ -917,24 +923,180 @@ function sessionHTML(sid, convo){
       }).join('') + '</section>');
   }
   /* the whole list, not the first forty: a truncation you cannot open is a
-     file the find bar swears is not there. Long lists fold like long
-     messages do, and a search opens the fold it lands in. */
-  if (here.length){
-    out.push('<section class="fsec" data-f="files">' +
-      '<div class="grp">Files it changed here <span class="c">' + here.length + '</span></div>' +
-      '<div class="flist">' + here.map(function(f){
-        return '<div>' + esc(f.slice(pre.length)) + '</div>'; }).join('') + '</div></section>');
-  }
-  if (away.length){
-    out.push('<section class="fsec" data-f="files">' +
-      '<div class="grp">Elsewhere <span class="c">' + away.length + '</span></div>' +
-      '<div class="flist">' + away.map(function(f){
-        return '<div>' + esc(shortPath(f)) + '</div>'; }).join('') + '</div></section>');
-  }
+     file the find bar swears is not there. Every row is in the DOM even when
+     its folder is shut — collapsing is CSS, so ⌘F still finds what it says
+     it finds and the folder holding the hit opens itself. */
+  out.push(sesFileGroup(sid, here, 'here', 'Files it changed here', pre));
+  out.push(sesFileGroup(sid, away, 'away', 'Elsewhere', ''));
   out.push('<section class="fsec" data-f="convo"><div class="convo">' +
     (convo || promptList(mine)) + '</div></section>');
   return out.join('');
 }
+/* ── the files a session changed ──────────────────────────────────────────
+   A session in a working repository touches hundreds of files across a hundred
+   folders. As a flat list of paths that is neither readable nor usable: nothing
+   can be opened, and the one part you recognise — the filename — sits at the
+   end of the longest string on the row.
+
+   So the kinds come first, as a bar that is also the filter, because "204
+   TypeScript files and four plans" is the question you have before any single
+   row. Then folders in path order, each eliding the stem it shares with the row
+   above it: these paths repeat `src/app/event/event-editor/features/` eight
+   times over and only the tail ever differs. */
+var sesKind = {}, sesOpen = {};
+
+function extOf(p){
+  var b = p.split('/').pop(), i = b.lastIndexOf('.');
+  return i > 0 ? b.slice(i + 1).toLowerCase() : '';
+}
+/* five buckets, because the palette has five colours and a legend nobody can
+   hold in their head is decoration. The chips still name the real extension. */
+function kindColour(ext){
+  if (/^(md|markdown|mdx|mdc)$/.test(ext)) return 'var(--accent)';
+  if (/^(ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|swift|php|sh|zsh)$/.test(ext)) return 'var(--purple)';
+  if (/^(sql|prisma|graphql)$/.test(ext)) return 'var(--green)';
+  if (/^(html|htm|css|scss|sass|less|vue|svelte)$/.test(ext)) return 'var(--yellow)';
+  return 'var(--fg-dim)';
+}
+var KINDMAX = 6;                        // chips beyond this collapse into `other`
+
+/* The segments a folder shares with the one above it. These paths repeat
+   `src/app/event/event-editor/features/` eight times over and only the tail
+   ever differs, so the head is drawn quiet: the row still carries the whole
+   path, and still copies the whole path, it just stops shouting the part you
+   already read. Only whole segments count — `docs/` and `docsets/` share no
+   stem. */
+function elideStem(dir, prev){
+  var a = dir.split('/'), b = (prev || '').split('/'), i = 0;
+  while (i < a.length - 1 && a[i] === b[i]) i++;
+  return i ? a.slice(0, i).join('/') + '/' : '';
+}
+
+function sesFileGroup(sid, items, gid, label, pre){
+  if (!items.length) return '';
+  var key = sid + ':' + gid;
+  var picked = sesKind[key] || '';
+  var open = sesOpen[key] || {};
+
+  items.forEach(function(x){
+    x.rel = pre && x.abs.indexOf(pre) === 0 ? x.abs.slice(pre.length) : shortPath(x.abs);
+    x.dir = x.rel.indexOf('/') < 0 ? '' : x.rel.replace(/\/[^/]*$/, '/');
+    x.name = x.rel.split('/').pop();
+    x.ext = extOf(x.rel);
+    x.doc = pre ? !!docBy(x.rel) : false;
+    x.df = (D.touches[x.abs] || []).length;
+  });
+
+  /* the kind bar counts the whole group, never the filtered view: a chip that
+     changed its own number when you pressed it could not be pressed again */
+  var tally = {};
+  items.forEach(function(x){ var e = x.ext || 'none'; tally[e] = (tally[e] || 0) + 1; });
+  var ranked = Object.keys(tally).sort(function(a, b){ return tally[b] - tally[a]; });
+  var top = ranked.slice(0, KINDMAX);
+  var rest = ranked.slice(KINDMAX).reduce(function(a, e){ return a + tally[e]; }, 0);
+  var kinds = top.map(function(e){
+    return { ext: e, n: tally[e], col: kindColour(e), on: picked === e };
+  });
+  if (rest) kinds.push({ ext: 'other', n: rest, col: 'var(--border)', on: picked === 'other' });
+
+  function inPick(x){
+    if (!picked) return true;
+    if (picked === 'other') return top.indexOf(x.ext || 'none') < 0;
+    return (x.ext || 'none') === picked;
+  }
+  var live = items.filter(inPick);
+
+  /* path order, so what belongs together sits together and a stem can be
+     elided against the row above */
+  var byDir = {}, order = [];
+  live.forEach(function(x){
+    if (!byDir[x.dir]){ byDir[x.dir] = []; order.push(x.dir); }
+    byDir[x.dir].push(x);
+  });
+  order.sort();
+
+  var h = ['<section class="fsec" data-f="files"><div class="grp">' + esc(label) +
+    ' <span class="c">' + items.length + (pre ? '' : ' outside this repository') + '</span></div>'];
+
+  h.push('<div class="kbar">' + kinds.map(function(k){
+    return '<i style="width:' + (k.n / items.length * 100).toFixed(2) + '%;background:' + k.col +
+           (picked && !k.on ? ';opacity:.22' : '') + '"></i>';
+  }).join('') + '</div>');
+  h.push('<div class="kchips">' + kinds.map(function(k){
+    return '<button class="kchip' + (k.on ? ' on' : '') + '" data-fkind="' + esc(k.ext) +
+      '" data-fg="' + esc(key) + '">' + esc(k.ext) + ' <b>' + k.n + '</b></button>';
+  }).join('') + '</div>');
+
+  h.push('<div class="fsum"><span' + (picked ? ' class="hit"' : '') + '>' +
+    (picked ? live.length + ' of ' + items.length + ' · .' + esc(picked) + ' only · in ' +
+              order.length + ' folder' + (order.length === 1 ? '' : 's')
+            : items.length + ' file' + (items.length === 1 ? '' : 's') + ' across ' +
+              order.length + ' folder' + (order.length === 1 ? '' : 's')) +
+    '</span><span class="sp">' +
+    '<button data-fall="1" data-fg="' + esc(key) + '">expand all</button>' +
+    '<button data-fnone="1" data-fg="' + esc(key) + '">collapse</button>' +
+    '</span></div>');
+
+  var prev = '';
+  order.forEach(function(dir){
+    var fs = byDir[dir];
+    var stem = elideStem(dir, prev);
+    prev = dir;
+
+    var seen = {}, dots = [];
+    fs.forEach(function(x){
+      var c = kindColour(x.ext);
+      if (seen[c]) return;
+      seen[c] = 1; dots.push(c);
+    });
+    /* a filter that leaves three folders standing should not leave them shut */
+    var on = picked ? true : !!open[dir];
+
+    h.push('<div class="fdir' + (on ? ' on' : '') + '">' +
+      '<div class="dhd" data-fdir="' + esc(dir) + '" data-fg="' + esc(key) + '">' +
+        '<span class="caret">▸</span>' +
+        '<span class="pth"><span class="stem">' + esc(stem) + '</span>' +
+          '<span class="leaf">' + esc(dir.slice(stem.length) || './') + '</span></span>' +
+        '<span class="mix">' + dots.slice(0, 4).map(function(c){
+          return '<i style="background:' + c + '"></i>'; }).join('') + '</span>' +
+        '<span class="n">' + fs.length + '</span></div>' +
+      '<div class="dkids">' + fs.map(function(x){
+        return sesFileRow(sid, x);
+      }).join('') + '</div></div>');
+  });
+
+  h.push('</section>');
+  return h.join('');
+}
+
+/* `sesFileRow`, not `fileRow`: the navigator has owned that name since F6 and
+   a second definition of it silently replaces the first */
+function sesFileRow(sid, x){
+  var acts = [];
+  if (x.doc) acts.push(['open', 'Open it here', 'M4 4h9l5 5v11H4z|M13 4v5h5', 'data-doc="' + esc(x.rel) + '"']);
+  if (can('reveal'))
+    acts.push(['reveal', 'Reveal in Finder', 'M3 7h6l2 2h10v10H3z',
+               'data-fact="reveal-file" data-sid="' + esc(sid) + '" data-n="' + x.n + '"']);
+  if (can('launch'))
+    acts.push(['edit', 'Open in your editor', 'M4 20h16|M14 5l5 5-9 9H5v-5z',
+               'data-fact="edit-file" data-sid="' + esc(sid) + '" data-n="' + x.n + '"']);
+  acts.push(['copy', 'Copy the path', 'M9 9h11v11H9z|M15 9V4H4v11h5',
+             'data-copy="' + esc(x.abs) + '" data-copy-note="path copied"']);
+
+  return '<div class="frow">' +
+    '<span class="nm">' + esc(x.name) + '</span>' +
+    (x.doc ? '<span class="isdoc">doc</span>' : '') +
+    (x.df > 1 ? '<span class="df">' + x.df + ' sessions</span>'
+              : '<span class="df only">only here</span>') +
+    '<span class="facts">' + acts.map(function(a){
+      return '<button ' + a[3] + ' title="' + esc(a[1]) + '" aria-label="' + esc(a[1]) + '">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+        'stroke-linecap="round" stroke-linejoin="round">' +
+        a[2].split('|').map(function(d){ return '<path d="' + d + '"/>'; }).join('') +
+        '</svg></button>';
+    }).join('') + '</span></div>';
+}
+
 /* what survives when the transcript is gone: your half, out of history.jsonl */
 function promptList(mine){
   if (!mine.length) return '';
@@ -1172,10 +1334,15 @@ function docSessions(d){
     }).join('') + '</div>';
 }
 
-/* returns the marks it made, in document order — a finder steps through that
-   list, and the same call that highlights is the one that counts */
-function markHits(root, q){
+/* Returns the marks it made, in document order — a finder steps through that
+   list, and the same call that highlights is the one that counts.
+
+   `cap` is a mark budget. Without one, a single letter against a transcript of
+   several hundred turns asks for tens of thousands of elements and takes the
+   tab with it; the finder passes what it has left and stops when it runs out. */
+function markHits(root, q, cap){
   var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], n, made = [];
+  cap = cap == null ? Infinity : cap;
   while ((n = w.nextNode())) nodes.push(n);
   /* every term, longest first, so `auth flow` highlights both words rather than
      nothing — the same AND the matcher uses. Longest first stops a short term
@@ -1183,6 +1350,7 @@ function markHits(root, q){
   var ts = terms(q).sort(function(a, b){ return b.length - a.length; });
   if (!ts.length) return made;
   nodes.forEach(function(node){
+    if (made.length >= cap) return;
     var text = node.nodeValue, lt = text.toLowerCase();
     if (!node.parentNode) return;
     var spans = [];
@@ -1207,15 +1375,18 @@ function markHits(root, q){
   });
   return made;
 }
-/* the inverse, so a query can be replaced rather than layered */
+/* the inverse, so a query can be replaced rather than layered. `normalize`
+   walks every child of the node it is called on, so calling it per mark is
+   quadratic in the marks sharing a paragraph — once per parent, at the end. */
 function clearMarks(root){
-  var ms = root.querySelectorAll('mark.hit');
+  var ms = root.querySelectorAll('mark.hit'), parents = [];
   for (var i = 0; i < ms.length; i++){
     var m = ms[i], p = m.parentNode;
     if (!p) continue;
     p.replaceChild(document.createTextNode(m.textContent), m);
-    p.normalize();
+    if (!p.__nm){ p.__nm = 1; parents.push(p); }
   }
+  parents.forEach(function(p){ p.__nm = 0; p.normalize(); });
 }
 
 /* ── surfaces ──────────────────────────────────────────────────────────────
@@ -1449,7 +1620,9 @@ function mountReview(S){
    it existed. */
 var FOLD_AT = 340, FOLD_TO = 216;
 var CALM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-var FOLDABLE = '.turn .bub > .md, .plist .pitem > .tx, .sdet .flist';
+/* a session's file list used to fold as one long block; it collapses by folder
+   now, which is the same job done by the thing you were going to click anyway */
+var FOLDABLE = '.turn .bub > .md, .plist .pitem > .tx';
 
 function foldLong(root){
   var want = [].filter.call(root.querySelectorAll(FOLDABLE), function(el){ return !el.dataset.fold; });
@@ -1555,13 +1728,16 @@ function refold(el){
 var FSCOPES = [
   { k:'you',    label:'you',     sel:'.turn.you .md, .plist .pitem .tx' },
   { k:'claude', label:'Claude',  sel:'.turn.claude .md' },
-  { k:'files',  label:'files',   sel:'.flist, .tfile, .did .wrote' },
+  { k:'files',  label:'files',   sel:'.frow, .tfile, .did .wrote' },
   { k:'tools',  label:'tools',   sel:'.did .tool, .cmark span' },
   { k:'about',  label:'about',   sel:'.sabout' }
 ];
 var FSEL = FSCOPES.map(function(s){ return s.sel; }).join(', ');
+/* how many matches are worth drawing. Past a few thousand you are not stepping
+   through them, you are narrowing the query — and the bar says so. */
+var FMAX = 4000;
 /* the rows "only matches" thins out, once a section has survived */
-var FROW = '.turn, .cmark, .plist .pitem, .flist > div, .tfile, .did .tool';
+var FROW = '.turn, .cmark, .plist .pitem, .frow, .tfile, .did .tool';
 
 function scopeOf(el){
   for (var i = 0; i < FSCOPES.length; i++) if (el.matches(FSCOPES[i].sel)) return FSCOPES[i].k;
@@ -1579,7 +1755,7 @@ function reveal(el){
 function makeFind(surf){
   var F = { on:false, q:'', only:false, scopes:{}, list:[], at:-1, counts:{}, tmr:0 };
   function inner(){ return surf.host && surf.host.querySelector('.inner'); }
-  function bar(){ return surf.host && surf.host.querySelector('.find'); }
+  function bar(){ return surf.host && surf.host.querySelector('.sfind'); }
   function narrowed(){ return FSCOPES.some(function(s){ return F.scopes[s.k]; }); }
   function within(k){ return !narrowed() || !!F.scopes[k]; }
 
@@ -1609,15 +1785,19 @@ function makeFind(surf){
     var was = F.at;
     clearMarks(root);
     F.list = []; F.at = -1; F.counts = {};
-    var q = F.q.trim();
+    var q = F.q.trim(), left = FMAX;
+    F.capped = false;
     if (q){
-      [].forEach.call(root.querySelectorAll(FSEL), function(el){
-        var k = scopeOf(el), got = markHits(el, q);
-        if (!got.length) return;
+      var els = root.querySelectorAll(FSEL);
+      for (var i = 0; i < els.length; i++){
+        if (left <= 0){ F.capped = true; break; }
+        var el = els[i], k = scopeOf(el), got = markHits(el, q, left);
+        if (!got.length) continue;
+        left -= got.length;
         F.counts[k] = (F.counts[k] || 0) + got.length;
-        if (within(k)) F.list = F.list.concat(got);
+        if (within(k)) F.list.push.apply(F.list, got);   // concat here is quadratic
         else got.forEach(function(m){ m.classList.add('off'); });
-      });
+      }
     }
     F.thin();
     foldSync(root);
@@ -1699,14 +1879,16 @@ function makeFind(surf){
   F.sync = function(){
     var b = bar();
     if (!b || !b.dataset.built) return;
-    var q = F.q.trim(), n = F.list.length;
-    b.querySelector('.n').textContent = !q ? '' : n ? (F.at + 1) + ' / ' + n : 'none';
+    var q = F.q.trim(), n = F.list.length, more = F.capped ? '+' : '';
+    b.querySelector('.n').textContent = !q ? '' : n ? (F.at + 1) + ' / ' + n + more : 'none';
     b.classList.toggle('none', !!q && !n);
+    b.querySelector('.fq').title = F.capped
+      ? 'More than ' + FMAX + ' matches — only the first are marked. Type more of it.' : '';
     [].forEach.call(b.querySelectorAll('[data-fscope]'), function(el){
       var c = F.counts[el.dataset.fscope] || 0;
       el.classList.toggle('on', !!F.scopes[el.dataset.fscope]);
       el.classList.toggle('nil', !!q && !c);
-      el.querySelector('i').textContent = q ? String(c) : '';
+      el.querySelector('i').textContent = q ? c + more : '';
     });
     var o = b.querySelector('[data-fonly]');
     o.classList.toggle('on', F.only);
@@ -1723,6 +1905,7 @@ function makeFind(surf){
     if (!F.on || !F.q.trim()) return '';
     var on = FSCOPES.filter(function(s){ return F.scopes[s.k]; })
                     .map(function(s){ return s.label; });
+    if (F.capped) return 'more than ' + FMAX + ' matches — type more of it';
     return F.list.length + (F.list.length === 1 ? ' match' : ' matches') +
            (on.length ? ' in ' + on.join(' + ') : '');
   };
@@ -1737,10 +1920,12 @@ function sessionSurface(sid, q){
     S.host = host;
     /* the find bar is a sibling of the body, not part of it: the body is
        rebuilt whenever the index moves and the query must survive that */
-    host.innerHTML = '<div class="find" hidden></div><div class="inner sdet"></div>';
+    host.innerHTML = '<div class="sfind" hidden></div><div class="inner sdet"></div>';
     S.refresh(host);
     S.load();
-    if (S.q) F.q = S.q, F.on = true;
+    /* a session opened out of a search arrives with the query already in the
+       bar, so the thing you were looking for is the thing you land on */
+    if (S.q){ F.q = S.q; F.on = true; }
     /* nothing can be measured or scrolled until the pane is shown */
     setTimeout(function(){ S.fold(); F.after(); }, 0);
   };
@@ -1775,7 +1960,7 @@ function sessionSurface(sid, q){
   S.refresh = function(host){
     S.host = host;
     if (!host.querySelector('.inner'))
-      host.innerHTML = '<div class="find" hidden></div><div class="inner sdet"></div>';
+      host.innerHTML = '<div class="sfind" hidden></div><div class="inner sdet"></div>';
     var box = host.querySelector('.inner'), y = host.scrollTop;
     box.innerHTML = sessionHTML(sid, S.slot());
     S.fold();                              // before the scroll is restored: folding moves everything
@@ -2634,8 +2819,42 @@ document.addEventListener('click', function(e){
   if (ab) return act(ab.dataset.act, ab.dataset.id, '',
                      ab.dataset.act === 'fork' ? 'forking in a new terminal window'
                                                : 'resuming in a new terminal window');
+  /* ── the files a session changed ─────────────────────────────────────── */
+  var kb = e.target.closest('[data-fkind]');
+  if (kb){
+    var kk = kb.dataset.fg;
+    sesKind[kk] = sesKind[kk] === kb.dataset.fkind ? '' : kb.dataset.fkind;
+    return Shell.refresh();
+  }
+  var fd = e.target.closest('[data-fdir]');
+  if (fd){
+    var fk = fd.dataset.fg;
+    if (!sesOpen[fk]) sesOpen[fk] = {};
+    sesOpen[fk][fd.dataset.fdir] = !sesOpen[fk][fd.dataset.fdir];
+    return Shell.refresh();
+  }
+  var fa = e.target.closest('[data-fall],[data-fnone]');
+  if (fa){
+    var ak = fa.dataset.fg, want = !!fa.dataset.fall, o = {};
+    if (want){
+      /* the folder names are in the DOM already; asking it beats threading the
+         list through a data attribute on every button */
+      [].forEach.call(document.querySelectorAll('[data-fdir][data-fg="' + ak + '"]'),
+                      function(el){ o[el.dataset.fdir] = true; });
+    }
+    sesOpen[ak] = o;
+    if (!want) sesKind[ak] = '';
+    return Shell.refresh();
+  }
+  var fx = e.target.closest('[data-fact]');
+  if (fx) return act(fx.dataset.fact, fx.dataset.sid, '',
+                     fx.dataset.fact === 'reveal-file' ? 'revealed in Finder'
+                                                       : 'opened in your editor',
+                     { n: +fx.dataset.n });
+
   var cmd = e.target.closest('[data-copy]');
-  if (cmd){ copy(cmd.dataset.copy); return toast('copied — paste it into a terminal'); }
+  if (cmd){ copy(cmd.dataset.copy);
+    return toast(cmd.dataset.copyNote || 'copied — paste it into a terminal'); }
 
   var where = (e.metaKey || e.ctrlKey) ? 'split' : 'here';
   var ses = e.target.closest('[data-ses]');
