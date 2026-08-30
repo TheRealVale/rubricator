@@ -316,16 +316,18 @@ function fileRank(sids, weights, q){
   var set = {}, out = [], ql = (q || '').toLowerCase();
   sids.forEach(function(s){ set[s] = 1; });
   for (var k in D.touches){
-    var df = D.touches[k].length, hits = 0, weight = 0;
+    /* `inThese`, not `hits`: a local of that name shadows the matcher two
+       functions up, and the call below is the only line that needs both */
+    var df = D.touches[k].length, inThese = 0, weight = 0;
     D.touches[k].forEach(function(s){
       if (!set[s]) return;
-      hits++;
+      inThese++;
       weight += (weights && weights[s]) || 1;   // a session that asked 12 times counts more than one that asked once
     });
-    if (!hits) continue;
-    var score = (weight * hits) / df;
+    if (!inThese) continue;
+    var score = (weight * inThese) / df;
     if (ql && hits(k, ql)) score *= 4;                        // the name itself is evidence
-    out.push({ file: k, hits: hits, df: df, s: score, here: k.indexOf(D.root + '/') === 0 });
+    out.push({ file: k, hits: inThese, df: df, s: score, here: k.indexOf(D.root + '/') === 0 });
   }
   out.sort(function(a,b){ return b.s - a.s || b.hits - a.hits; });
   return out;
@@ -391,12 +393,29 @@ function shortPath(p){
   return p.replace(/^\/Users\/[^/]+/, '~');
 }
 
+/* Two things can still be arriving while you type: the document bodies, which
+   are left on disk until the first search asks for them, and the session index.
+   Until they land the counts are a floor rather than an answer, so the surface
+   says which one it is waiting for and never claims nothing matched. */
+function pendingWork(){
+  var w = [];
+  if (searching()) w.push('reading the documents');
+  if (D.sessionsPending) w.push('reading your history');
+  return w;
+}
+
 function viewSearch(){
-  var q = query.trim(), out = [];
-  out.push('<div class="qbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>' +
-    '<input id="q" placeholder="Search ' + D.docs.length + ' documents' +
-    (promptsWithheld() ? '' : D.withSessions ? ' and ' + D.prompts.length + ' prompts' : '') + '…" value="' + esc(query) + '" autocomplete="off" spellcheck="false">' +
-    '<span class="hint">/ to focus</span></div>');
+  var q = query.trim(), out = [], waiting = q ? pendingWork() : [];
+  var corpus = D.docs.length + ' documents' +
+    (promptsWithheld() ? '' : !D.withSessions ? ''
+      : D.sessionsPending ? ' and your history'
+      : ' and ' + D.prompts.length + ' prompts');
+  out.push('<div class="qbox' + (waiting.length ? ' busy' : '') + '">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">' +
+    '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>' +
+    '<input id="q" placeholder="Search ' + corpus + '…" value="' + esc(query) +
+    '" autocomplete="off" spellcheck="false">' +
+    '<span class="hint">' + (waiting.length ? 'searching…' : '/ to focus') + '</span></div>');
   out.push(savedRow());
   if (!q){
     out.push('<div class="empty">Type to search across every markdown file in this repo' +
@@ -414,8 +433,8 @@ function viewSearch(){
   var elsewhere = ranked.filter(function(f){ return !f.here; }).slice(0, 6);
   var projects = {}; prompts.forEach(function(p){ projects[p.project.split('/').pop() || '?'] = 1; });
 
-  if (searching()) out.push('<div class="qnote">Searching titles and headings — ' +
-    'fetching the full text…</div>');
+  if (waiting.length) out.push('<div class="qnote wait">' + waiting.join(' and ') +
+    ' — matching on names and headings so far, and these numbers will grow</div>');
   out.push('<div class="qnote">' + docs.length + ' documents · ' + prompts.length + ' prompts · ' +
     Object.keys(sids).length + ' sessions' +
     (Object.keys(projects).length > 1 ? ' · <b>' + Object.keys(projects).length + ' repos</b>' : '') + '</div>');
@@ -456,7 +475,10 @@ function viewSearch(){
   }
   fileTable(files, 'Code those sessions changed', 'in this repo · ranked by how specific it is to this topic');
   fileTable(elsewhere, 'Solved elsewhere before', 'other repos · same topic');
-  if (!docs.length && !prompts.length) out.push('<div class="empty">Nothing matched.</div>');
+  /* "Nothing matched" is a claim about the whole corpus, and it is not one this
+     surface can make until the whole corpus is here */
+  if (!docs.length && !prompts.length)
+    out.push('<div class="empty">' + (waiting.length ? 'Searching…' : 'Nothing matched.') + '</div>');
   else out.push('<div class="act"><button id="dossier">Copy dossier for your agent</button>' +
     '<button class="ghost" id="dossier-open">read it first</button>' +
     (can('settings') ? '<button class="ghost" id="search-save">save this search</button>' : '') +
@@ -828,11 +850,14 @@ function relatedDocs(sid){
 }
 
 /* the body of a session surface: what it was, how to pick it up, what it
-   touched, and everything you said in it */
-function sessionHTML(sid, q, convo){
+   touched, and everything you said in it.
+
+   Every block is a `.fsec` carrying the name of what it holds, because the
+   find bar has to be able to say *where* it is looking — and hiding a whole
+   section that matched nothing is one attribute, not a tree walk. */
+function sessionHTML(sid, convo){
   var m = D.sessions[sid];
   if (!m) return '<div class="empty">That session is not in the index.</div>';
-  q = q || '';
   if (promptsWithheld()) return withheldNote();
   var mine = D.prompts.filter(function(p){ return p.sid === sid; })
                       .sort(function(a, b){ return a.t - b.t; });
@@ -841,7 +866,8 @@ function sessionHTML(sid, q, convo){
   var here = (m.files || []).filter(function(f){ return f.indexOf(pre) === 0; });
   var away = (m.files || []).filter(function(f){ return f.indexOf(pre) !== 0; });
 
-  var out = ['<h3>' + esc(m.t || '(no prompt recorded)') + '</h3>',
+  var out = ['<section class="fsec sabout" data-f="about">',
+    '<h3>' + esc(m.t || '(no prompt recorded)') + '</h3>',
     '<div class="who">' +
       '<span><span class="dot ' + (m.live ? 'live' : 'arch') + '"></span> ' +
         (m.live ? 'resumable' : 'archived — transcript gone') + '</span>' +
@@ -852,10 +878,11 @@ function sessionHTML(sid, q, convo){
          available only inside a longer command */
       '<span class="sid" data-copy="' + esc(sid) + '" title="' + esc(sid) +
         ' — click to copy">' + esc(sid.slice(0, 8)) + '</span>' +
-      '</div>'];
+      '</div>', '</section>'];
 
   if (m.live && can('launch')){
-    out.push('<div class="grp">Pick it up</div>',
+    out.push('<section class="fsec sabout" data-f="about">',
+      '<div class="grp">Pick it up</div>',
       '<div class="act"><button data-act="resume" data-id="' + esc(sid) + '">Resume this session</button>' +
       '<button class="ghost" data-act="fork" data-id="' + esc(sid) + '">Fork it</button></div>',
       '<div class="qnote" style="margin-top:9px">Resume continues the conversation where it ' +
@@ -863,54 +890,58 @@ function sessionHTML(sid, q, convo){
       '<div class="grp">or by hand</div>',
       '<div class="cmd" data-copy="cd ' + esc(m.p || D.root) + ' && claude -r ' + esc(sid) + '">' +
         'cd ' + esc((m.p || D.root).replace(/^\/Users\/[^/]+/, '~')) + ' &amp;&amp; claude -r ' + esc(sid.slice(0, 8)) + '…' +
-        '<span style="color:var(--fg-dim)">  click to copy</span></div>');
+        '<span style="color:var(--fg-dim)">  click to copy</span></div>', '</section>');
   } else if (m.live){
-    out.push('<div class="grp">Pick it up</div>',
+    out.push('<section class="fsec sabout" data-f="about">',
+      '<div class="grp">Pick it up</div>',
       '<div class="cmd" data-copy="cd ' + esc(m.p || D.root) + ' && claude -r ' + esc(sid) + '">' +
         'cd ' + esc((m.p || D.root).replace(/^\/Users\/[^/]+/, '~')) + ' &amp;&amp; claude -r ' + esc(sid.slice(0, 8)) + '…' +
         '<span style="color:var(--fg-dim)">  ⌘ click to copy</span></div>',
       '<div class="qnote" style="margin-top:8px">Add <span class="f">--fork-session</span> to branch off it ' +
-        'without disturbing the original.</div>');
+        'without disturbing the original.</div>', '</section>');
   } else {
-    out.push('<div class="grp">Pick it up</div>',
+    out.push('<section class="fsec sabout" data-f="about">',
+      '<div class="grp">Pick it up</div>',
       '<div class="qnote">The transcript for this session is no longer on disk, so it cannot be resumed. ' +
-      'What survives is below — copy it into a new session instead.</div>');
+      'What survives is below — copy it into a new session instead.</div>', '</section>');
   }
 
   if (docs.length){
-    out.push('<div class="grp">Documents it bears on <span class="c">by the files they describe</span></div>');
-    docs.forEach(function(x){
-      out.push('<div class="tfile" data-doc="' + esc(x.d.rel) + '">' +
-        '<span class="nm">' + esc(x.d.title) + '</span>' +
-        '<span class="sub">' + esc(x.d.rel) + '</span>' +
-        '<span class="sub">' + (x.own ? 'edited here' : x.hit + ' file' + (x.hit > 1 ? 's' : '')) + '</span></div>');
-    });
+    out.push('<section class="fsec" data-f="files">' +
+      '<div class="grp">Documents it bears on <span class="c">by the files they describe</span></div>' +
+      docs.map(function(x){
+        return '<div class="tfile" data-doc="' + esc(x.d.rel) + '">' +
+          '<span class="nm">' + esc(x.d.title) + '</span>' +
+          '<span class="sub">' + esc(x.d.rel) + '</span>' +
+          '<span class="sub">' + (x.own ? 'edited here' : x.hit + ' file' + (x.hit > 1 ? 's' : '')) + '</span></div>';
+      }).join('') + '</section>');
   }
+  /* the whole list, not the first forty: a truncation you cannot open is a
+     file the find bar swears is not there. Long lists fold like long
+     messages do, and a search opens the fold it lands in. */
   if (here.length){
-    out.push('<div class="grp">Files it changed here <span class="c">' + here.length + '</span></div>',
-      '<div class="flist">' + here.slice(0, 40).map(function(f){
-        return '<div>' + esc(f.slice(pre.length)) + '</div>'; }).join('') +
-      (here.length > 40 ? '<div style="color:var(--fg-dim)">…and ' + (here.length - 40) + ' more</div>' : '') +
-      '</div>');
+    out.push('<section class="fsec" data-f="files">' +
+      '<div class="grp">Files it changed here <span class="c">' + here.length + '</span></div>' +
+      '<div class="flist">' + here.map(function(f){
+        return '<div>' + esc(f.slice(pre.length)) + '</div>'; }).join('') + '</div></section>');
   }
   if (away.length){
-    out.push('<div class="grp">Elsewhere <span class="c">' + away.length + '</span></div>',
-      '<div class="flist">' + away.slice(0, 12).map(function(f){
-        return '<div>' + esc(shortPath(f)) + '</div>'; }).join('') +
-      (away.length > 12 ? '<div style="color:var(--fg-dim)">…and ' + (away.length - 12) + ' more</div>' : '') +
-      '</div>');
+    out.push('<section class="fsec" data-f="files">' +
+      '<div class="grp">Elsewhere <span class="c">' + away.length + '</span></div>' +
+      '<div class="flist">' + away.map(function(f){
+        return '<div>' + esc(shortPath(f)) + '</div>'; }).join('') + '</div></section>');
   }
-  out.push('<div class="convo">' + (convo || promptList(mine, q)) + '</div>');
+  out.push('<section class="fsec" data-f="convo"><div class="convo">' +
+    (convo || promptList(mine)) + '</div></section>');
   return out.join('');
 }
 /* what survives when the transcript is gone: your half, out of history.jsonl */
-function promptList(mine, q){
+function promptList(mine){
   if (!mine.length) return '';
   return '<div class="grp">What you asked <span class="c">' + mine.length + '</span></div>' +
     '<div class="plist">' + mine.map(function(p){
-      var hit = q && count(p.text, q) > 0;
-      return '<div class="pitem' + (hit ? ' hit' : '') + '"><span class="when">' + ago(p.t) +
-             ' ago</span>' + (hit ? snippet(p.text, q, 4000) : esc(p.text)) + '</div>';
+      return '<div class="pitem"><span class="when">' + ago(p.t) +
+             ' ago</span><span class="tx">' + esc(p.text) + '</span></div>';
     }).join('') + '</div>';
 }
 
@@ -1141,14 +1172,16 @@ function docSessions(d){
     }).join('') + '</div>';
 }
 
+/* returns the marks it made, in document order — a finder steps through that
+   list, and the same call that highlights is the one that counts */
 function markHits(root, q){
-  var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], n;
+  var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], n, made = [];
   while ((n = w.nextNode())) nodes.push(n);
   /* every term, longest first, so `auth flow` highlights both words rather than
      nothing — the same AND the matcher uses. Longest first stops a short term
      eating the start of a longer one it is a prefix of. */
   var ts = terms(q).sort(function(a, b){ return b.length - a.length; });
-  if (!ts.length) return;
+  if (!ts.length) return made;
   nodes.forEach(function(node){
     var text = node.nodeValue, lt = text.toLowerCase();
     if (!node.parentNode) return;
@@ -1166,11 +1199,23 @@ function markHits(root, q){
       var m = document.createElement('mark'); m.className = 'hit';
       m.textContent = text.slice(sp[0], sp[1]);
       frag.appendChild(m);
+      made.push(m);
       last = sp[1];
     });
     frag.appendChild(document.createTextNode(text.slice(last)));
     node.parentNode.replaceChild(frag, node);
   });
+  return made;
+}
+/* the inverse, so a query can be replaced rather than layered */
+function clearMarks(root){
+  var ms = root.querySelectorAll('mark.hit');
+  for (var i = 0; i < ms.length; i++){
+    var m = ms[i], p = m.parentNode;
+    if (!p) continue;
+    p.replaceChild(document.createTextNode(m.textContent), m);
+    p.normalize();
+  }
 }
 
 /* ── surfaces ──────────────────────────────────────────────────────────────
@@ -1202,9 +1247,21 @@ function listSurface(kind){
   var S = {};
   S.render = function(host){ S.refresh(host); };
   S.refresh = function(host){
-    var c = grabCaret(host);
-    host.innerHTML = '<div class="inner">' +
-      (mine ? mine.render(D, RB) : (builtin[kind] || viewSearch)()) + '</div>';
+    var c = grabCaret(host), body;
+    /* A builder that throws used to leave the last good DOM in place and say
+       nothing, so a surface that had stopped working looked like a surface
+       that had stopped being asked. It says so now, and offers the one thing
+       that usually clears it. */
+    try { body = mine ? mine.render(D, RB) : (builtin[kind] || viewSearch)(); }
+    catch(e){
+      console.error('rubricator: the ' + kind + ' surface failed to draw', e);
+      body = '<div class="empty"><b>This surface could not be drawn.</b><br><br>' +
+        esc((e && e.message) || String(e)) +
+        '<br><br><button class="lnk" data-resurf="1">clear the query and try again</button></div>';
+    }
+    host.innerHTML = '<div class="inner">' + body + '</div>';
+    var again = host.querySelector('[data-resurf]');
+    if (again) again.onclick = function(){ query = ''; S.refresh(host); };
     var q = host.querySelector('#q');
     if (q) q.addEventListener('input', function(){ query = q.value; S.refresh(host); });
     var dz = host.querySelector('#dossier');
@@ -1378,13 +1435,314 @@ function mountReview(S){
   if (th) th.textContent = d.rel.split('/').pop();
 }
 
+/* ── folding a long message ──────────────────────────────────────────────
+   An autonomous stretch produces replies that run for pages, and scrolling
+   past them to reach the next thing anybody said is most of what reading an
+   old session is. Anything longer than a screenful folds to a fixed height
+   and says what it is holding back.
+
+   Opening one animates from the folded height to the measured one. The
+   duration scales with the distance travelled — a fixed one is wrong at both
+   ends, crawling over a small overflow and snapping shut over a large one —
+   and `max-height` returns to `none` when the animation lands, so a picture
+   or a diagram that arrives later is not clipped by a number measured before
+   it existed. */
+var FOLD_AT = 340, FOLD_TO = 216;
+var CALM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+var FOLDABLE = '.turn .bub > .md, .plist .pitem > .tx, .sdet .flist';
+
+function foldLong(root){
+  var want = [].filter.call(root.querySelectorAll(FOLDABLE), function(el){ return !el.dataset.fold; });
+  if (!want.length) return;
+  /* measure everything before touching anything: interleaving the two turns
+     one layout into eight hundred */
+  var tall = [];
+  want.forEach(function(el){
+    var h = el.scrollHeight;
+    if (h > FOLD_AT) tall.push([el, h, parseFloat(getComputedStyle(el).lineHeight) || 20]);
+  });
+  tall.forEach(function(x){
+    var el = x[0], b = document.createElement('button');
+    el.dataset.fold = '1';
+    el.classList.add('clamp');
+    el.style.maxHeight = FOLD_TO + 'px';
+    b.type = 'button';
+    b.className = 'unfold';
+    b.dataset.lines = Math.max(1, Math.round((x[1] - FOLD_TO) / x[2]));
+    el.parentNode.insertBefore(b, el.nextSibling);
+    foldLabel(b, el);
+  });
+}
+function foldLabel(b, el){
+  var open = el.classList.contains('open');
+  var hid = open ? 0 : el.querySelectorAll('mark.hit:not(.off)').length;
+  b.innerHTML = '<span class="t">' + (open ? 'show less' : 'show more') + '</span>' +
+    '<span class="h">' + (open ? '' : b.dataset.lines + ' more lines' +
+      (hid ? ' · ' + hid + ' match' + (hid > 1 ? 'es' : '') : '')) + '</span>';
+}
+/* the folds carry a match count, so they have to be relabelled when the
+   query changes and not only when one of them is opened */
+function foldSync(root){
+  [].forEach.call(root.querySelectorAll('.unfold'), function(b){
+    if (b.previousElementSibling) foldLabel(b, b.previousElementSibling);
+  });
+}
+function foldMs(d){ return Math.round(Math.min(700, 190 + Math.abs(d) * 0.3)); }
+/* a toggle mid-animation must not be finished by the previous one's listener */
+function foldEnd(el, fn){
+  var tok = el._fold;
+  var go = function(e){
+    if (e.target !== el || e.propertyName !== 'max-height') return;
+    el.removeEventListener('transitionend', go);
+    if (el._fold === tok) fn();
+  };
+  el.addEventListener('transitionend', go);
+}
+function unfold(el, snap){
+  if (!el.classList.contains('clamp') || el.classList.contains('open')) return;
+  var b = el.nextElementSibling, from = el.getBoundingClientRect().height;
+  el._fold = (el._fold || 0) + 1;
+  el.classList.add('open');
+  el.style.transition = 'none';
+  el.style.maxHeight = 'none';
+  if (!snap && !CALM){
+    var to = el.getBoundingClientRect().height;
+    el.style.maxHeight = from + 'px';
+    el.getBoundingClientRect();                       // a start the transition can see
+    el.style.transition = 'max-height ' + foldMs(to - from) + 'ms cubic-bezier(.22,.61,.36,1)';
+    el.style.maxHeight = to + 'px';
+    foldEnd(el, function(){ el.style.maxHeight = 'none'; el.style.transition = ''; });
+  } else {
+    el.style.transition = '';
+  }
+  if (b) foldLabel(b, el);
+}
+function refold(el){
+  if (!el.classList.contains('open')) return;
+  var b = el.nextElementSibling, host = el.closest('.surf');
+  /* folding something you have scrolled into throws you into whatever was
+     underneath it; the message you were reading comes back to the top first */
+  if (host && el.getBoundingClientRect().top < host.getBoundingClientRect().top)
+    (el.closest('.turn, .pitem') || el).scrollIntoView({ block:'start' });
+  var from = el.getBoundingClientRect().height;
+  el._fold = (el._fold || 0) + 1;
+  el.classList.remove('open');
+  if (CALM){
+    el.style.transition = '';
+    el.style.maxHeight = FOLD_TO + 'px';
+  } else {
+    el.style.transition = 'none';
+    el.style.maxHeight = from + 'px';
+    el.getBoundingClientRect();
+    el.style.transition = 'max-height ' + foldMs(from - FOLD_TO) + 'ms cubic-bezier(.4,0,.2,1)';
+    el.style.maxHeight = FOLD_TO + 'px';
+    foldEnd(el, function(){ el.style.transition = ''; });
+  }
+  if (b) foldLabel(b, el);
+}
+
+/* ── finding things inside one session ───────────────────────────────────
+   ⌘F used to fall through to the browser's own find, which knows a session
+   as one flat page: a word you said, the same word in a path it touched and
+   the same word again in an argument passed to a tool are one undivided list
+   of yellow boxes. A session is not flat — it has two halves and several
+   layers — so this one is told where to look.
+
+   Every match is counted in every scope whether or not that scope is on,
+   because "nothing here" is only worth reading next to "four over there":
+   the chips are how you discover that the thing you half-remember was said
+   by Claude and not by you. */
+var FSCOPES = [
+  { k:'you',    label:'you',     sel:'.turn.you .md, .plist .pitem .tx' },
+  { k:'claude', label:'Claude',  sel:'.turn.claude .md' },
+  { k:'files',  label:'files',   sel:'.flist, .tfile, .did .wrote' },
+  { k:'tools',  label:'tools',   sel:'.did .tool, .cmark span' },
+  { k:'about',  label:'about',   sel:'.sabout' }
+];
+var FSEL = FSCOPES.map(function(s){ return s.sel; }).join(', ');
+/* the rows "only matches" thins out, once a section has survived */
+var FROW = '.turn, .cmark, .plist .pitem, .flist > div, .tfile, .did .tool';
+
+function scopeOf(el){
+  for (var i = 0; i < FSCOPES.length; i++) if (el.matches(FSCOPES[i].sel)) return FSCOPES[i].k;
+  return 'about';
+}
+/* a match inside a fold or a closed disclosure is a match you cannot read */
+function reveal(el){
+  var c = el.closest('.clamp:not(.open)');
+  if (c) unfold(c, true);                             // instantly: the scroll target must hold still
+  var d = el.closest('details');
+  if (d) d.open = true;
+  el.scrollIntoView({ block:'center' });
+}
+
+function makeFind(surf){
+  var F = { on:false, q:'', only:false, scopes:{}, list:[], at:-1, counts:{}, tmr:0 };
+  function inner(){ return surf.host && surf.host.querySelector('.inner'); }
+  function bar(){ return surf.host && surf.host.querySelector('.find'); }
+  function narrowed(){ return FSCOPES.some(function(s){ return F.scopes[s.k]; }); }
+  function within(k){ return !narrowed() || !!F.scopes[k]; }
+
+  F.open = function(dir){
+    if (dir && F.on && F.list.length) return F.step(dir);
+    F.on = true;
+    F.paint();
+    var i = bar() && bar().querySelector('.fq');
+    if (i){ i.focus(); i.select(); }
+  };
+  F.shut = function(){
+    F.on = false; F.q = ''; F.only = false;
+    F.list = []; F.at = -1; F.counts = {};
+    var root = inner();
+    if (root){ clearMarks(root); F.thin(); foldSync(root); }
+    var b = bar();
+    if (b){ b.hidden = true; b.innerHTML = ''; delete b.dataset.built; }
+  };
+  F.later = function(){ clearTimeout(F.tmr); F.tmr = setTimeout(function(){ F.run(); }, 110); };
+
+  /* mark the whole surface, then take the highlight back off whatever is out
+     of scope. Marking only the scopes that are on would be cheaper and would
+     leave the chips unable to say where the misses are. */
+  F.run = function(hold){
+    var root = inner();
+    if (!root) return;
+    var was = F.at;
+    clearMarks(root);
+    F.list = []; F.at = -1; F.counts = {};
+    var q = F.q.trim();
+    if (q){
+      [].forEach.call(root.querySelectorAll(FSEL), function(el){
+        var k = scopeOf(el), got = markHits(el, q);
+        if (!got.length) return;
+        F.counts[k] = (F.counts[k] || 0) + got.length;
+        if (within(k)) F.list = F.list.concat(got);
+        else got.forEach(function(m){ m.classList.add('off'); });
+      });
+    }
+    F.thin();
+    foldSync(root);
+    if (F.list.length) F.go(hold && was > 0 ? Math.min(was, F.list.length - 1) : 0, hold);
+    else F.sync();
+  };
+  /* "only matches" is what makes a scope pay: a section that matched nothing
+     goes, and inside the ones that stay, so does every row that matched
+     nothing. Rows, not turns alone — a file list of four hundred is the
+     reason you asked. */
+  F.thin = function(){
+    var root = inner();
+    if (!root) return;
+    var live = F.only && !!F.q.trim();
+    [].forEach.call(root.querySelectorAll('.fsec'), function(s){
+      s.hidden = live && !s.querySelector('mark.hit:not(.off)');
+    });
+    [].forEach.call(root.querySelectorAll(FROW), function(el){
+      el.hidden = live && !el.querySelector('mark.hit:not(.off)');
+    });
+  };
+  F.go = function(i, quiet){
+    var n = F.list.length;
+    if (!n){ F.at = -1; return F.sync(); }
+    F.at = ((i % n) + n) % n;
+    F.list.forEach(function(m, k){ m.classList.toggle('now', k === F.at); });
+    if (!quiet) reveal(F.list[F.at]);
+    F.sync();
+  };
+  F.step = function(d){ if (F.list.length) F.go(F.at + d); };
+
+  /* the bar is built once and then only updated: rewriting it on every
+     keystroke would take the caret with it */
+  F.paint = function(){
+    var b = bar();
+    if (!b) return;
+    b.hidden = !F.on;
+    if (!F.on) return;
+    if (b.dataset.built) return F.sync();
+    b.dataset.built = '1';
+    b.innerHTML =
+      '<div class="fr">' +
+        '<input class="fq" placeholder="Find in this session" spellcheck="false">' +
+        '<span class="n"></span>' +
+        '<button class="st" data-fstep="-1" title="Previous match — ⇧⏎">‹</button>' +
+        '<button class="st" data-fstep="1" title="Next match — ⏎">›</button>' +
+        '<button class="st x" data-fclose="1" title="Close — esc">✕</button>' +
+      '</div>' +
+      '<div class="fs"><span class="lbl">in</span>' +
+        FSCOPES.map(function(s){
+          return '<button class="chip" data-fscope="' + s.k + '" title="Search ' +
+                 esc(s.label) + ' only">' + esc(s.label) + '<i></i></button>';
+        }).join('') +
+        '<button class="chip only" data-fonly="1">only matches</button></div>';
+    var i = b.querySelector('.fq');
+    i.value = F.q;
+    i.addEventListener('input', function(){ F.q = i.value; F.later(); });
+    i.addEventListener('keydown', function(e){
+      if (e.key === 'Enter'){ e.preventDefault(); return F.step(e.shiftKey ? -1 : 1); }
+      if (e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); return F.shut(); }
+    });
+    b.addEventListener('click', function(e){
+      var s = e.target.closest('[data-fstep]');
+      if (s) return F.step(+s.dataset.fstep);
+      if (e.target.closest('[data-fclose]')) return F.shut();
+      var sc = e.target.closest('[data-fscope]');
+      if (sc){
+        F.scopes[sc.dataset.fscope] = !F.scopes[sc.dataset.fscope];
+        return F.run();
+      }
+      if (e.target.closest('[data-fonly]')){
+        F.only = !F.only;
+        F.thin();
+        return F.sync();
+      }
+    });
+    F.sync();
+  };
+  F.sync = function(){
+    var b = bar();
+    if (!b || !b.dataset.built) return;
+    var q = F.q.trim(), n = F.list.length;
+    b.querySelector('.n').textContent = !q ? '' : n ? (F.at + 1) + ' / ' + n : 'none';
+    b.classList.toggle('none', !!q && !n);
+    [].forEach.call(b.querySelectorAll('[data-fscope]'), function(el){
+      var c = F.counts[el.dataset.fscope] || 0;
+      el.classList.toggle('on', !!F.scopes[el.dataset.fscope]);
+      el.classList.toggle('nil', !!q && !c);
+      el.querySelector('i').textContent = q ? String(c) : '';
+    });
+    var o = b.querySelector('[data-fonly]');
+    o.classList.toggle('on', F.only);
+    o.disabled = !q;
+    Shell.status();                        // the strip says how many, and where
+  };
+  /* the surface rebuilds its body on every reindex; the query outlives it */
+  F.after = function(){
+    if (!F.on) return;
+    F.paint();
+    if (F.q.trim()) F.run(true); else F.sync();
+  };
+  F.hint = function(){
+    if (!F.on || !F.q.trim()) return '';
+    var on = FSCOPES.filter(function(s){ return F.scopes[s.k]; })
+                    .map(function(s){ return s.label; });
+    return F.list.length + (F.list.length === 1 ? ' match' : ' matches') +
+           (on.length ? ' in ' + on.join(' + ') : '');
+  };
+  return F;
+}
+
 function sessionSurface(sid, q){
   var S = { q: q || '', conv: null, err: '', loading: false, host: null };
+  var F = makeFind(S);
 
   S.render = function(host){
     S.host = host;
+    /* the find bar is a sibling of the body, not part of it: the body is
+       rebuilt whenever the index moves and the query must survive that */
+    host.innerHTML = '<div class="find" hidden></div><div class="inner sdet"></div>';
     S.refresh(host);
     S.load();
+    if (S.q) F.q = S.q, F.on = true;
+    /* nothing can be measured or scrolled until the pane is shown */
+    setTimeout(function(){ S.fold(); F.after(); }, 0);
   };
   /* history.jsonl only ever held your half. The other half is in the
      transcript, which is read once, on opening, and kept for this tab. */
@@ -1405,21 +1763,29 @@ function sessionSurface(sid, q){
     });
   };
   S.slot = function(){
-    if (S.conv) return renderConvo(S.conv, S.q);
+    if (S.conv) return renderConvo(S.conv);
     if (S.loading) return '<div class="qnote">Reading the transcript…</div>';
     if (S.err) return '<div class="qnote">' + esc(S.err) + ' — what you said survives below.</div>';
     return '';
   };
+  S.fold = function(){
+    var box = S.host && S.host.querySelector('.inner');
+    if (box && S.host.offsetHeight) foldLong(box);
+  };
   S.refresh = function(host){
     S.host = host;
-    var y = host.scrollTop;
-    host.innerHTML = '<div class="inner sdet">' + sessionHTML(sid, S.q, S.slot()) + '</div>';
+    if (!host.querySelector('.inner'))
+      host.innerHTML = '<div class="find" hidden></div><div class="inner sdet"></div>';
+    var box = host.querySelector('.inner'), y = host.scrollTop;
+    box.innerHTML = sessionHTML(sid, S.slot());
+    S.fold();                              // before the scroll is restored: folding moves everything
     if (y) host.scrollTop = y;
-    if (S.q){
-      var f = host.querySelector('.pitem.hit, .convo mark.hit');
-      if (f) setTimeout(function(){ f.scrollIntoView({ block:'center' }); }, 60);
-    }
+    F.after();
   };
+  /* a pane that was never shown could not be measured, so the folds are cut
+     the first time it is looked at */
+  S.focus = function(){ S.fold(); };
+  S.find = function(dir){ F.open(dir); };
   S.label = function(){
     var m = D.sessions[sid] || {};
     return { title: clip(m.t || sid.slice(0, 8), 30), tip: m.t || sid, kd:'SES' };
@@ -1437,6 +1803,7 @@ function sessionSurface(sid, q){
       a.push({ label:'fork', fn:function(){
         act('fork', sid, '', 'forked into a new terminal window'); }});
     }
+    a.push({ label:'find', fn:function(){ F.open(0); }});
     a.push({ label:'copy id', fn:function(){ copy(sid); toast('session id copied'); }});
     if (m.live) a.push({ label:'copy command', fn:function(){
       copy('cd ' + cwd + ' && claude -r ' + sid);
@@ -1447,7 +1814,9 @@ function sessionSurface(sid, q){
   };
   S.hint = function(){
     var m = D.sessions[sid] || {};
-    if (S.conv) return S.conv.you + ' from you · ' + S.conv.claude + ' from Claude';
+    var f = F.hint();
+    if (f) return f;
+    if (S.conv) return S.conv.you + ' from you · ' + S.conv.claude + ' from Claude · ⌘F searches it';
     return m.live ? 'resumable · claude -r ' + sid.slice(0, 8) : 'archived — the transcript is gone';
   };
   return S;
@@ -1458,7 +1827,7 @@ function sessionSurface(sid, q){
    nobody has to be taught. What Claude *did* between saying things is a
    quiet line under the bubble — thinking as a count, tools behind a
    disclosure, and the files it wrote as chips you can open. */
-function renderConvo(c, q){
+function renderConvo(c){
   var out = ['<div class="grp">The conversation <span class="c">' +
     c.you + ' from you · ' + c.claude + ' from Claude' +
     (c.truncated ? ' · too long to show in full' : '') + '</span></div>'];
@@ -1475,17 +1844,16 @@ function renderConvo(c, q){
        one exchange, so only the first carries a clock and the gap tightens */
     out.push('<div class="turn ' + (mine ? 'you' : 'claude') + (run ? ' cont' : '') + '">' +
       (!run && t.t ? '<div class="tm">' + clock(t.t) + '</div>' : '') +
-      '<div class="bub"><div class="md">' + turnHTML(t.text, q) + '</div>' +
+      '<div class="bub"><div class="md">' + turnHTML(t.text) + '</div>' +
       (mine ? '' : didHTML(t)) + '</div></div>');
   });
   return out.join('');
 }
-function turnHTML(text, q){
+function turnHTML(text){
   if (!text) return '<p class="nothing">—</p>';
   var box = document.createElement('div');
   try { box.innerHTML = marked.parse(text); } catch(e){ box.textContent = text; }
   MD.sanitise(box);                        // a transcript is untrusted like anything else
-  if (q) markHits(box, q);
   return box.innerHTML;
 }
 function didHTML(t){
@@ -1897,6 +2265,8 @@ var KEYS = [
   ['Moving', [
     ['⌘ K', 'find anything — documents, sessions, notes, surfaces'],
     ['⇧ ⌘ K', 'widen a session search past this repository'],
+    ['⌘ F', 'search inside the session you are reading'],
+    ['⏎ / ⇧ ⏎', 'next / previous match, from the find field'],
     ['/', 'filter the navigator, in whichever mode it is in'],
     ['⌘ 1-9', 'jump to a tab'], ['⌘ ⌥ [ ]', 'previous / next tab'],
     ['⌘ W', 'close the tab'], ['⌘ \\', 'split the pane'], ['⌘ B', 'the navigator'],
@@ -2200,6 +2570,12 @@ $('wpath').textContent = D.root.replace(/^\/Users\/[^/]+/, '~');
 
 /* ── everything you can click ───────────────────────────────────────────── */
 document.addEventListener('click', function(e){
+  var uf = e.target.closest('.unfold');
+  if (uf){
+    var body = uf.previousElementSibling;
+    if (body) body.classList.contains('open') ? refold(body) : unfold(body);
+    return;
+  }
   var seg = e.target.closest('[data-lmode],[data-lsort],[data-lfacet],[data-sscope],[data-slive]');
   if (seg){
     var d = seg.dataset;

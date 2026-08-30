@@ -242,6 +242,9 @@ ws_run() {
     done
     rm -f "$urlfile"
     if [ -n "$url" ]; then
+      # the seam share/hook.py has had all along: with this set, print the URL
+      # and open nothing, so a test can drive the main door rather than a side one
+      if [ -n "${RUBRICATOR_NO_WINDOW:-}" ]; then printf '%s\n' "$url"; return 0; fi
       _c="$(chrome_app)"
       if [ -n "$_c" ]; then
         open -na "$_c" --args --app="$url" --window-size=1320,980 >/dev/null 2>&1 || open "$url"

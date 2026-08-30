@@ -77,7 +77,12 @@ function show(p){
     var on = i === p.active;
     if (on){
       realise(p, t);
-      if (t.dirty && t.surf.refresh){ t.surf.refresh(t.el); t.dirty = false; }
+      /* one surface that throws must not stop the others from being painted */
+      if (t.dirty && t.surf.refresh){
+        try { t.surf.refresh(t.el); }
+        catch(e){ console.error('rubricator: refreshing ' + t.kind + ' failed', e); }
+        t.dirty = false;
+      }
       if (!t.el.classList.contains('on')){
         t.el.classList.add('on');
         /* display:none drops the scroll position, so it is kept by hand */
@@ -490,6 +495,13 @@ function wire(){
     if (e.altKey){
       if (e.code === 'BracketLeft'){ e.preventDefault(); return step(-1); }
       if (e.code === 'BracketRight'){ e.preventDefault(); return step(1); }
+      return;
+    }
+    /* ⌘F belongs to the surface: only one knows what its own parts are
+       called, and the browser's find knows none of them */
+    if (e.key === 'f' || e.key === 'F'){
+      var ft = active();
+      if (ft && ft.surf.find){ e.preventDefault(); return ft.surf.find(0); }
       return;
     }
     if (e.key === 'b' || e.key === 'B'){ e.preventDefault(); return toggleNav(); }

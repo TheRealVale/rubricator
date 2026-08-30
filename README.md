@@ -164,6 +164,11 @@ its header, rather than one per pane.
 window in one list, because when you are hunting for something you rarely know which of
 those it is. `⏎` opens it here, `⌘⏎` in a split, `⇥` filters by kind.
 
+Document bodies stay on disk until the first search asks for them, and the session index
+arrives after the window does, so a search can be answering from names and headings while
+the rest is still coming. The box says so while that is true — and until the whole corpus is
+there, an empty result reads *Searching…* rather than claiming nothing matched.
+
 `⌘B` collapses the navigator · `⌘E` cycles its modes · `⌘1`–`⌘9` focus a pane · `⌘W` closes
 a tab · `⌘⌥[` and `⌘⌥]` step through them · `/` filters the navigator · `?` lists the lot.
 Every divider is draggable. Drag the navigator below the width its labels need and it

@@ -26,7 +26,19 @@
 .qbox input{all:unset;flex:1;font-family:var(--font);font-size:15px;color:var(--fg)}
 .qbox input::placeholder{color:var(--fg-dim)}
 .qbox .hint{font-size:11px;color:var(--fg-dim);white-space:nowrap}
+/* the box says it is still working. A bar travelling along its lower edge
+   rather than a spinner on the magnifier: the glyph means search, and a
+   spinning one would read as a different control. */
+.qbox.busy{border-color:var(--accent);position:relative;overflow:hidden}
+.qbox.busy .hint{color:var(--accent)}
+.qbox.busy::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:35%;
+  background:var(--accent);animation:qsweep 1.1s ease-in-out infinite}
+@keyframes qsweep{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+@media (prefers-reduced-motion:reduce){
+  .qbox.busy::after{animation:none;width:100%;opacity:.45}
+}
 .qnote{font-size:11.5px;color:var(--fg-dim);margin:0 0 18px 4px}
+.qnote.wait{color:var(--accent);margin-bottom:6px}
 .grp{margin:26px 0 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;
   color:var(--fg-dim);font-weight:650;display:flex;align-items:center;gap:9px}
 .grp .c{color:var(--fg-dim);opacity:.7;letter-spacing:0;text-transform:none;font-weight:500}
@@ -222,6 +234,54 @@ pre.dossier{
 .cmark::before,.cmark::after{content:"";flex:1;height:1px;background:var(--border-soft)}
 .cmark.interrupted{color:var(--yellow)}
 .cmark.command span{font-family:var(--mono);text-transform:none;letter-spacing:0}
+
+/* ── searching inside one session ────────────────────────────────────────
+   Pinned to the top of the surface, because what you are looking for is
+   almost never what you are looking at. */
+.find{position:sticky;top:0;z-index:6;background:var(--bg);
+  border-bottom:1px solid var(--border-soft);padding:11px 26px 10px}
+.find[hidden]{display:none}
+.find .fr,.find .fs{max-width:1000px;margin:0 auto;display:flex;align-items:center;gap:8px}
+.find .fq{all:unset;flex:1;min-width:0;font-family:var(--font);font-size:12.5px;color:var(--fg);
+  padding:6px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev)}
+.find .fq:focus{border-color:var(--accent)}
+.find .fq::placeholder{color:var(--fg-dim)}
+.find .n{flex:none;min-width:52px;text-align:right;font-family:var(--mono);font-size:11px;
+  color:var(--fg-dim);font-variant-numeric:tabular-nums}
+.find.none .n{color:var(--yellow)}
+.find .st{all:unset;cursor:pointer;flex:none;width:23px;height:23px;border-radius:6px;
+  text-align:center;line-height:23px;font-size:13px;color:var(--fg-dim)}
+.find .st:hover{color:var(--fg);background:var(--bg-elev)}
+.find .fs{margin-top:8px;flex-wrap:wrap;gap:6px}
+.find .fs .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-dim)}
+.find .fs .chip{font-size:11px;padding:3px 9px;display:inline-flex;align-items:baseline;gap:6px}
+/* the count of what is in a scope you are not searching: the whole reason the
+   chips are worth having is that they can point at where you should look */
+.find .fs .chip i{font-style:normal;font-family:var(--mono);font-size:10px;
+  color:var(--fg-dim);font-variant-numeric:tabular-nums}
+.find .fs .chip i:empty{display:none}
+.find .fs .chip.nil{opacity:.4}
+.find .fs .chip.only{margin-left:auto}
+.find .fs .chip:disabled{opacity:.32;cursor:default}
+.surf mark.hit.off{background:none;color:inherit;border-radius:0}
+.surf mark.hit.now{background:var(--accent);color:#fff}
+/* .turn and its kin are flex, which outranks what `hidden` means by default */
+.sdet [hidden]{display:none !important}
+
+/* ── a long message, folded ──────────────────────────────────────────────
+   The mask fades the last lines out without knowing what colour it is over,
+   which matters here: one bubble is elevated, the other is tinted with the
+   accent, and both are translucent. */
+.clamp{overflow:hidden;position:relative}
+.clamp:not(.open){-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 46px),transparent);
+  mask-image:linear-gradient(to bottom,#000 calc(100% - 46px),transparent)}
+button.unfold{all:unset;cursor:pointer;display:flex;align-items:baseline;gap:8px;
+  margin-top:8px;font-size:10.5px;color:var(--fg-dim)}
+button.unfold .t{font-weight:640;color:var(--accent)}
+button.unfold .h{font-variant-numeric:tabular-nums}
+button.unfold:hover .h{color:var(--fg-muted)}
+.flist.clamp{margin-bottom:0}
+.flist + button.unfold{margin-top:6px}
 
 /* ── a document's history on one axis ───────────────────────────────────── */
 .tl{position:relative;height:26px;margin:0 0 18px;font-size:10px;color:var(--fg-dim)}

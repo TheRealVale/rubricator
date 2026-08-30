@@ -922,6 +922,22 @@ try:
 finally:
     proc.kill()
 
+# the main door: a bare `md`, which is where the setting is for
+r = subprocess.run([md], capture_output=True, text=True, cwd=repo,
+                   env=dict(env0, RUBRICATOR_NO_WINDOW="1", RUBRICATOR_NO_WATCH="1"))
+bare = (r.stdout or "").strip().splitlines()
+bare = bare[0] if bare else ""
+if bare.startswith("http://127.0.0.1:"):
+    page = urllib.request.urlopen(bare, timeout=20).read().decode("utf-8", "replace")
+    m = re.search(r'"withSessions":\s*([a-z0-9]+)', page)
+    checks["a bare md honours it"] = bool(m) and m.group(1) in ("true", "1")
+    try:
+        urllib.request.urlopen(bare + "bye", data=b"{}", timeout=5)
+    except Exception:
+        pass
+else:
+    checks["a bare md honours it"] = False
+
 # and --no-sessions turns the setting off for one run
 proc, url = serve(["--no-sessions"])
 try:
@@ -947,6 +963,58 @@ if [ $? = 0 ]; then
 else
   no "21 · the history setting is not honoured where it should be" \
      "$(grep '^XX' "$WORK/pref.txt" | tr '\n' ' ')$(tail -2 "$WORK/pref.txt")"
+fi
+
+# ── 22 · the file ranking runs, and the filename still counts ───────────────
+# `fileRank` declared a local `hits` counter over the top of the `hits()`
+# matcher two functions up, so the one line that used both threw
+# `hits is not a function`. It is reached only when a matching session touched
+# a file — a narrow query never gets there, a broad one always does — and a
+# builder that throws left the last good DOM in place, so the Search surface
+# looked like it was ignoring the keystroke. Lifted from the shipped source the
+# way tests 13 and 15 are, so this asserts on what ships.
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("function terms(q)", "function snippet(text, q, len)"),
+    sl("function fileRank(sids, weights, q)", "function baseName(rel)"),
+]))' "$REPO/share/workspace.js" "$WORK/rank.js"
+  { printf 'var D = { root: "/root", touches: {\n'
+    printf '  "/root/src/auth.ts": ["s1"],\n'
+    printf '  "/root/src/other.ts": ["s1"],\n'
+    printf '  "/elsewhere/auth.ts": ["s1"]\n} };\n'
+    cat "$WORK/rank.js"
+    cat <<'JSEOF'
+var fail = [];
+var out;
+try { out = fileRank(["s1"], { s1: 1 }, "auth"); }
+catch (e) { fail.push("fileRank threw: " + e.message); out = []; }
+if (!fail.length){
+  if (out.length !== 3) fail.push("expected all three touched files, got " + out.length);
+  var by = {}; out.forEach(function(r){ by[r.file] = r; });
+  if (!by["/root/src/auth.ts"] || !by["/root/src/other.ts"]) fail.push("a touched file went missing");
+  else if (!(by["/root/src/auth.ts"].s > by["/root/src/other.ts"].s))
+    fail.push("the filename no longer counts: auth.ts scores " + by["/root/src/auth.ts"].s +
+              " against other.ts " + by["/root/src/other.ts"].s);
+  if (by["/root/src/auth.ts"] && by["/root/src/auth.ts"].hits !== 1)
+    fail.push("the 'in these' count is wrong: " + by["/root/src/auth.ts"].hits);
+  if (by["/root/src/auth.ts"] && by["/root/src/auth.ts"].here !== true) fail.push("a file in the root read as elsewhere");
+  if (by["/elsewhere/auth.ts"] && by["/elsewhere/auth.ts"].here !== false) fail.push("a file elsewhere read as here");
+  /* a query nothing matches must still come back, and quietly */
+  try { if (fileRank(["s1"], { s1: 1 }, "zzzz").length !== 3) fail.push("a non-matching query lost rows"); }
+  catch (e) { fail.push("a non-matching query threw: " + e.message); }
+}
+console.log(fail.length ? "XX " + fail.join("; ") : "ok");
+JSEOF
+  } > "$WORK/rank-run.js"
+  res=$(node "$WORK/rank-run.js" 2>&1)
+  case "$res" in ok*) ok "22 · file ranking survives a broad query and still weighs the name" ;;
+                 *)   no "22 · the file ranking is broken" "$res" ;; esac
+else
+  skip "22 · file ranking" "no node"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
