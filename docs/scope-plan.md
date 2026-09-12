@@ -263,6 +263,20 @@ not be renumbered.
    originally written for is **withdrawn by M6**, which stops writing it and removes the one it
    wrote. The walk-up keeps its second job, locating the notes root, and loses its first. It is
    not a general licence to walk up, and no other write may use it.
+   **The restore clause.** One further write is permitted, and only one: putting a tracked
+   file back to a state git already holds. It is allowed when it is (i) started by an
+   explicit human gesture in the window, (ii) confirmed by a **second** gesture that names
+   every file it touches and the lines it will discard, with the safe choice focused and no
+   keyboard path to it anywhere, (iii) performed by git, to an object git already has, and
+   (iv) recoverable — a ref under `refs/rubricator/undo/` is written first, and the window
+   names both the ref and the command that uses it. Rubricator still authors nothing: it
+   moves between states git already holds, which is what separates this from the four
+   proposals above. The confirmation is the load-bearing half rather than a courtesy. This
+   rule's justification is about writes the human did not ask for, and a restore reachable
+   by a stray keypress is one — which is also why **X20**, a Suggest verb with one-key
+   apply, stays dead: the clause forbids the key, not merely the content. Everything else
+   is unmoved. Generating a change and writing it to a tracked file remains forbidden at
+   any confidence, behind any flag.
 
 2. **Nothing that must survive a restart may live in `localStorage`.** Per-root state goes in
    `.rubricator/`, per-user state in `config.json` behind the whitelist; `localStorage` is

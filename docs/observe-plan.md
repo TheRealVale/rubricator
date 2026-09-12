@@ -1,7 +1,7 @@
 ---
 title: What the agent did to the code
 subtitle: Phase R — the settled change set, prompt-to-code provenance at two grains, and the two rules this cannot have without an amendment
-status: plan — 2026-08-30, hook measurement 2026-09-12. §1 is a collision with X8 and rule 1; §6 and §9 are decisions only the owner can take
+status: plan — 2026-08-30, hook measurement and both §12 decisions 2026-09-12. Tier A and Tier B are both cleared to build
 ---
 
 # What the agent did to the code
@@ -36,8 +36,11 @@ side-by-side render path, and forge integrations to matter at all."*
 **Rule 1, the write rule.** *"It may never create, modify or delete a file that
 git tracks … Proposing a change the human applies is an export; applying it is
 not — at any confidence, behind any flag."* Revert-this-file, revert-this-hunk and
-discard are working-tree writes to tracked files. They are not a hard case under
-rule 1; they are the central case it was written to forbid.
+discard are working-tree writes to tracked files, and they were the central case it
+was written to forbid. This is the one of the three that moved: rule 1 now carries
+a **restore clause**, and §6 is where the shape of it is worked out. The clause
+permits exactly one thing — putting a tracked file back to a state git already
+holds — and pays for it with a confirmation the human cannot stumble into.
 
 **The all-day ambition.** *"A tool you keep open all day is not achievable here,
 and the reason is structural rather than a missing feature … The right target is
@@ -46,10 +49,12 @@ second, at moments something else created."* A realtime monitor is the all-day
 tool by construction, and needs the daemon that paragraph refuses.
 
 So the naive reading of the request — a live monitor you keep open, with a diff
-lane and git buttons — is refused three times over by this project's own record,
-and this document does not argue with any of the three.
+lane and git buttons — met three refusals from this project's own record. Two of
+them stand untouched: the all-day monitor is not built, and this is not a review
+product. The third was put to the owner on its own merits and answered by amending
+the rule rather than by reading around it.
 
-What follows is the part that is genuinely not covered.
+What follows is the part that was genuinely not covered.
 
 ---
 
@@ -118,6 +123,11 @@ sit in *running* forever, so quiet has to settle it too: no write for a fixed
 interval and no live turn in the transcript reads as **presumed settled**, marked
 as such and never shown as though the agent had finished cleanly.
 
+The rest of the table above is still 2.1.251, and it is re-derived before **R3 and
+R4** — the only two items that read any of those rows. R1, R2 and R5 do not touch
+them, so the re-run belongs at the moment a wrong number would cost something
+rather than now.
+
 ---
 
 ## 3. What is new since X8, and what is not
@@ -132,6 +142,11 @@ None of that bears on the question the owner actually asked, because the answer 
 *who is the first user* was **you, right now**. A surface with one user needs no
 addressable market, competes with no incumbent, and integrates with no forge. The
 X8 refusal is intact as a refusal of the *product*; it never measured the *tool*.
+
+**Settled 2026-09-12, by the owner:** the cede covers the product. Every reason
+recorded under X8 is a reason not to ship code review to strangers, and none of
+them survives contact with a window one person opens. X8 stands, in full, as the
+refusal it was — §11 keeps every line of it — and it is not a refusal of this.
 
 That distinction is only worth anything if the tool does something a diff viewer
 cannot, and it does — one thing, which is the whole of the case:
@@ -244,6 +259,13 @@ with no window open has no baseline and falls back to the reconstructed set of R
 line grain where a `structuredPatch` exists, file grain for a Bash write — which is
 coarser and says so.
 
+A window that closes *during* a run is a third case, and it keeps its baseline: the
+ref is on disk, so reopening still computes the exact set against it. What was lost
+is the watching, not the anchor. The live lane has a hole and the run says so, with
+the care rule 8 asks for everywhere else — *the window was shut for part of this
+run* is a different sentence from *this run was never observed*, and they must not
+render the same.
+
 Run state lives in `.rubricator/runs/<sid>.json` — rule 1 (a), rule 6 (a file, not
 a database), rule 2 (not `localStorage`). *Done when:* a baseline survives a window
 restart and a session resumed in another terminal, a repeat capture on an unchanged
@@ -325,7 +347,7 @@ database, a daemon, an MCP server or a forge.
 
 ---
 
-## 6. Tier B — the git actions, and the rule they need · **DECISION**
+## 6. Tier B — the git actions, and the clause that permits them
 
 The requested actions split cleanly in two, and the split is rule 1's own wording:
 *"create, modify or delete a file that git tracks."*
@@ -338,39 +360,43 @@ recoverable from the reflog. What they need is a clarifying clause, not an
 amendment.
 
 **B-tree — revert file, revert hunk, discard, and *revert everything this prompt
-did*.** These modify tracked files in the working tree. They are forbidden, plainly,
-and no reading of rule 1 admits them.
+did*.** These modify tracked files in the working tree, and they are permitted by
+rule 1's restore clause, which is the rule's only exception and was added for them.
 
 The last of them is the one worth wanting. Because R4 knows which lines a given
 prompt caused, *undo that prompt and keep the rest* is a coherent operation, and it
 is the single most useful thing in this entire document when an agent goes down a
-wrong path three prompts back. It is also the one that most clearly requires the
-amendment.
+wrong path three prompts back.
 
-**The amendment, if the owner wants it**, stated so it can be judged:
+What the clause permits, and what it costs, in the rule's own words: a restore is
+allowed when it is **(i)** started by an explicit human gesture in the window,
+**(ii)** confirmed by a *second* gesture naming every file it touches and the lines
+it will discard, with the safe choice focused and no keyboard path to it anywhere,
+**(iii)** performed by git, to an object git already has, and **(iv)** recoverable —
+a ref under `refs/rubricator/undo/` written first, with the window naming both the
+ref and the command that uses it.
 
-> Rule 1 gains: *a working-tree restore is permitted when it is (i) initiated by
-> an explicit human gesture in the same window, (ii) performed by git, to a state
-> git already holds, and (iii) recoverable — a ref under `refs/rubricator/` is
-> written before the operation and the window names it. Rubricator still authors
-> no content: it moves between states git already has.*
-
-The distinction that makes it defensible is that rule 1's justification is about
+The distinction that makes this defensible is that rule 1's justification is about
 **authored writes** — a reader that edits your files, a tool that writes another
-tool's config. A git restore authors nothing. Clause (iii) is what makes it true
-rather than merely arguable, and it costs one `git update-ref`.
+tool's config. A git restore authors nothing; it moves between states git already
+holds. Clause (iv) is what makes that true rather than merely arguable, and it costs
+one `git update-ref`.
 
-The argument against is also real and should be recorded: rule 1's power comes from
-being absolute, four separately attractive proposals died on it, and *"at any
-confidence, behind any flag"* was written precisely to stop a reasonable-sounding
-exception. An amendment weakens the rule for every future proposal, not just this one.
+The argument against was real and is worth keeping in view rather than deleting:
+rule 1's power came from being absolute, four separately attractive proposals died
+on it, and *"at any confidence, behind any flag"* was written precisely to stop a
+reasonable-sounding exception. Clause (ii) is the answer to it. The four dead
+proposals were all about **authored content**, and the one closest to this — X20's
+Suggest verb with one-key apply — stays dead on the clause's own wording, because
+the clause forbids the key as flatly as it forbids the content. An exception that
+makes a *faster* path to writing your files would have weakened the rule. This one
+only makes a slower path to a state git is already holding for you.
 
-**My recommendation:** build B-ref under a clarifying clause; do not build B-tree
-until the owner has decided the amendment on its own merits, on a day when he is not
-also deciding whether to build the feature. Ship Tier A with **copy-the-command** for
-every B-tree operation — which is an export, which rule 1 explicitly permits — and
-find out over a month whether the copy step is actually annoying. If it is not, the
-amendment was never needed.
+**Build order.** B-ref first: nothing you were looking at changes and the reflog
+holds everything. Then B-tree behind the confirmation. **Copy-the-command stays**
+for every B-tree operation, beside the button rather than instead of it — it is an
+export, it needs no clause at all, and it is the right thing to reach for when you
+would rather paste into a terminal you can see.
 
 ---
 
@@ -418,6 +444,16 @@ migrations directory, `package.json`, anything under `.github/`. Amber on the st
 and that is all: no modal, no focus steal. §12's measurement of blocking hooks — a
 modal dozens of times a day, disabled within two days — is the standing evidence for
 why this must never escalate further.
+
+**The one modal, and why it is not a contradiction.** The rule above is that
+nothing the *agent* does may interrupt you. A restore is something *you* started,
+and rule 1's clause (ii) requires a second gesture, so the confirmation is a modal
+and is meant to be one. It names every file it will touch and the lines it will
+discard, focuses the safe choice, and is reachable by pointer only — no key, no
+shortcut, nothing on the keyboard map, which is the clause's wording and not a
+preference. Afterwards the window keeps the undo ref and the command that uses it
+on screen until you dismiss them, because a restore you cannot walk back is the
+thing clause (iv) exists to prevent.
 
 **Rule 8 everywhere.** *No changes yet* and *this run's transcript is gone* are
 different empty states and must read differently, with counts.
@@ -493,7 +529,7 @@ Effort in the register's vocabulary: **S** an evening or less · **M** a day or 
 | R7 | live lane over the existing SSE | **S** |
 | R8 | collisions | **S** — a set intersection over what R5 already computes |
 | B-ref | stage / commit / branch, allowlisted | **M** |
-| B-tree | restores + safety refs | **M**, and blocked on §6 |
+| B-tree | restores, safety refs, and the confirmation | **M** — the confirmation is most of it |
 
 Tier A is **R1–R5**, plus R7 and R8 which ride on what R5 computes. R1+R2+R5 alone
 — two evenings — is a usable surface: *what did this run actually change, riskiest
@@ -527,15 +563,24 @@ semantics, settle transitions — belongs to the half that §4 shows is worth th
 
 ---
 
-## 12. The two questions
+## 12. The two questions, and their answers
 
-1. **Does the X8 cede cover a single-user observe surface?** §3 argues it does not —
-   X8 was killed on addressable market, and a tool with one user has none — but X8's
-   wording is *permanently*, and only its author can say whether that was meant to
-   cover the mechanism or the product.
-2. **Does rule 1 get the working-tree clause in §6?** Recommended: not yet. Ship the
-   copy-the-command export first and let a month of use say whether the amendment is
-   needed.
+Both were the owner's alone, and both were answered on **2026-09-12**. They are
+recorded here with what was asked, so that neither is re-argued by a later self who
+remembers only the outcome.
 
-Until both are answered, the buildable set is **R1–R5, R7 and R8** — read-only,
-rule-clean, and about a week. Neither question blocks any of it.
+1. **Does the X8 cede cover a single-user observe surface?** *No — it covered the
+   product.* X8 was killed on addressable market, and every reason filed under it is
+   a reason not to ship code review to strangers. A window one person opens has no
+   market to be wrong about. X8 stands in full as the refusal it was, and §11 keeps
+   every line of it.
+2. **Does rule 1 get the working-tree clause?** *Yes, with the confirmation made
+   part of the clause.* Not the version §6 first proposed: the owner's condition was
+   that a restore must be impossible to trigger by accident, so clause (ii) — a
+   second gesture naming the files and the lines, the safe choice focused, and no
+   keyboard path — is written into the rule rather than left to the UI. That
+   condition is also what keeps X20 dead.
+
+So the buildable set is **R1–R5, R7 and R8** in Tier A, then **B-ref** and
+**B-tree** behind the clause. Nothing in this document is now waiting on a
+decision. What it is waiting on is §2's remaining rows, and only for R3 and R4.
