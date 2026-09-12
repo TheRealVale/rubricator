@@ -1,7 +1,7 @@
 ---
 title: What the agent did to the code
 subtitle: Phase R — the settled change set, prompt-to-code provenance at two grains, and the two rules this cannot have without an amendment
-status: plan — 2026-08-30. §1 is a collision with X8 and rule 1; §6 and §9 are decisions only the owner can take
+status: plan — 2026-08-30, hook measurement 2026-09-12. §1 is a collision with X8 and rule 1; §6 and §9 are decisions only the owner can take
 ---
 
 # What the agent did to the code
@@ -87,6 +87,37 @@ here rather than deleted, because this is the second time in this project's
 history that a plausible-looking formula reproduced a wrong number
 (`signals-plan.md` §3), and the lesson is the same one.
 
+### The two hook events this depends on
+
+Re-measured on **2.1.269**; the figures above were taken on 2.1.251, and rule 12
+asks for the re-run rather than the citation. These come from hook fires recorded
+in real sessions on this machine, not from a synthetic harness — two projects here
+already configure both events, so the question is answered by what happened rather
+than by what a test rig can be made to do.
+
+| | measured |
+|---|---|
+| `Stop` fires | **865** recorded, `hookErrors: []` on **847** — the error channel works, and the nine failures are a project's own parity hook reporting |
+| `SessionStart` fires | **69**, across only **20** startups: `compact` **34**, `startup` 20, `resume` 7, `clear` 7, `fork` 1 |
+| `SessionStart` arrives ahead of the first prompt | by **2m49s** in the session measured |
+| a session that never settles | one carries `SessionStart:startup` and **zero** `Stop` fires across seven assistant turns |
+| recorded outcomes | 212 `hook_success`, 368 `hook_additional_context`, **1** `hook_cancelled`, no failures |
+
+Both events fire, so R6 is no longer scoped on an unmeasured platform feature. Two
+consequences, and each one changes a design.
+
+**`SessionStart` is not once per session.** Sixty-nine fires against twenty
+startups, and `compact` is its most common source — a long session that compacts
+eight times fires it eight times. A hook that *opens* a window would put eight of
+them on the screen. The hook must be *ensure running*, and idempotence is the
+requirement rather than a nicety.
+
+**`Stop` is not guaranteed.** One session on this disk has a startup fire and no
+`Stop` at all across seven assistant turns. A run that settles only on `Stop` would
+sit in *running* forever, so quiet has to settle it too: no write for a fixed
+interval and no live turn in the transcript reads as **presumed settled**, marked
+as such and never shown as though the agent had finished cleanly.
+
 ---
 
 ## 3. What is new since X8, and what is not
@@ -159,28 +190,64 @@ produce**, because git sees only the final state. It costs one counter.
 
 This also resolves the collision with the all-day ambition. §12's stated target is
 *"frequency times summonability: a window you open five times a day, in under a
-second, at moments something else created."* **A run ending is exactly such a
-moment**, and this project already has the machinery that acts on one: `md --hook
+second, at moments something else created."* **A session beginning is exactly such
+a moment**, and this project already has the machinery that acts on one: `md --hook
 plan` opens a window when Claude finishes a plan. The observe surface is the same
-gesture with a different trigger — a `Stop` hook rather than `ExitPlanMode`.
+gesture with a different trigger — `SessionStart` rather than `ExitPlanMode`.
 
-So: not a monitor you keep open. A window that opens when the agent stops, showing
-what it did. That is a smaller feature than the one requested, it is the one the
-measurements support, and it needs no daemon.
+The trigger is the beginning rather than the end for a mechanical reason. A
+baseline cannot be taken retroactively: `git stash create` describes the tree as it
+is now, not as it was when a prompt began an hour ago. A window summoned when the
+agent stops arrives one moment too late to have captured anything, and would show a
+reconstructed set where an exact one had been there for the asking.
+
+So: not a monitor you keep open. A window that comes up when you start working,
+watches quietly, and has an exact answer ready each time the agent stops. That is a
+smaller feature than the one requested, it is the one the measurements support, and
+it needs no daemon.
 
 ---
 
 ## 5. Tier A — what survives every standing rule unchanged
 
-Read-only throughout. No working-tree write, no ref write, no rule amendment. This
-is the whole of the recommended first build.
+Read-only throughout — the one ref these write is rubricator's own, under a
+namespace nothing else reads. No working-tree write, no rule amendment. This is the
+whole of the recommended first build.
 
-**R1 · The baseline.** On the first observed event of a session, record the current
-`HEAD` and a tree object for the dirty working tree (`git stash create`, which
-writes an object without touching the tree). Store under `.rubricator/runs/<sid>.json`
-— rule 1 (a), rule 6 (a file, not a database), rule 2 (not `localStorage`). *Done
-when:* a baseline survives a window restart and a session resumed in another
-terminal.
+**What a run is.** Not a session. A session on this disk runs for a median of
+**22.9 hours**, 45 of 95 span more than a day and the longest is **743**, so *what
+this session changed* is a branch diff wearing a different hat. A run is **one
+prompt and everything the agent did for it** — baselined at the prompt, settled
+when the agent stops or goes quiet. That gives several runs per session, each small
+enough to read, and it is what makes *undo what prompt 2 did* a coherent sentence.
+
+**R1 · The baseline, and what holds it.** At each prompt, record `HEAD` and — only
+if the tree is dirty — a tree object for it. `git stash create` writes that object
+without touching the working tree and without touching the stash list, which stays
+empty; on an unchanged tree it returns what it returned last time, so a repeat
+costs nothing. A clean tree needs no object at all: the baseline *is* `HEAD`.
+
+The object is anchored at `refs/rubricator/runs/<sid>/<n>` rather than left to
+fend for itself. Unanchored it is a dangling commit — `git fsck` reports it as
+noise and `git gc` decides when it dies, which may be in the middle of the run that
+needs it. Anchored, every baseline the tool holds is one `git for-each-ref
+refs/rubricator/` away and removing one is `git update-ref -d`. A ref is dropped
+when its run's work is committed and when the run passes the thirty-day transcript
+cliff, and the namespace is swept on window open. The cleanup ships in the same
+commit as the thing that writes: this project has already shipped a prune that
+globbed the wrong path.
+
+The capture belongs to the open window, not to a hook. The `/events` loop already
+ticks every second; it tails each watched transcript from a stored byte offset,
+sees a new prompt within that tick, and takes the baseline then. A run that happened
+with no window open has no baseline and falls back to the reconstructed set of R3 —
+line grain where a `structuredPatch` exists, file grain for a Bash write — which is
+coarser and says so.
+
+Run state lives in `.rubricator/runs/<sid>.json` — rule 1 (a), rule 6 (a file, not
+a database), rule 2 (not `localStorage`). *Done when:* a baseline survives a window
+restart and a session resumed in another terminal, a repeat capture on an unchanged
+tree adds no object, and `git stash list` is empty after a day of watching.
 
 **R2 · The settled change set.** `git diff <baseline>` for what changed — not a
 fold of the per-edit patches. This is the important architectural call and it is
@@ -188,8 +255,17 @@ what keeps R2 out of X8's cost estimate: **git is the diff engine, the transcrip
 the attribution layer.** X8 priced *"a diff parser, hunk-level anchoring across two
 file versions, a side-by-side render path"*; none of the three is built here, because
 `git diff` already did all of it and the render is a one-column patch view, not a
-side-by-side. *Done when:* a session's set matches `git diff` from its baseline,
-exactly.
+side-by-side.
+
+One working tree, several runs. Sessions here share a directory — **1 of 95** ran
+in a worktree, and no project on this machine has more than one — so `git diff
+<baseline>` shows the other run's writes beside this one's and cannot say which is
+which. The division of labour survives, but its weight moves: **git supplies the
+hunks, the transcript decides whose they are.** A file that no record in this run's
+transcript names is not in this run's set, however dirty the tree is around it.
+*Done when:* a run's set matches `git diff` from its baseline restricted to the
+files its own transcript names, and a file only a concurrent session wrote is in
+neither run's set by accident.
 
 **R3 · Attribution, at the grain the record supports.** Subagent work is marked
 from `isSidechain`, which is on every record. A human-versus-agent split is not
@@ -216,19 +292,35 @@ through a heredoc was fourteen times as hard to get right as the count would
 otherwise suggest, which is why the classifier behind `touches` is this item's
 precondition. *Done when:* the 154-rewrite file sorts first.
 
-**R6 · The summons.** A `Stop` hook opens the window on the settled set, the way
-`--hook plan` opens it on a plan. Non-blocking, and a failure must exit 0 and leave
-Claude Code untouched — `hook.py`'s existing guiding rule. **Unmeasured:** whether
-`Stop` fires reliably on 2.1.251 is not established in §2, and rule 12 forbids
-scoping on it until it is. Measure before building R6.
+**R6 · The summons.** A `SessionStart` hook ensures the window is running for this
+project, the way `--hook plan` opens it on a plan. *Ensure*, never *open*: §2
+measured 69 fires across 20 startups with `compact` the most common source, so an
+`open` would stack eight windows during one long session. Non-blocking, and a
+failure must exit 0 and leave Claude Code untouched — `hook.py`'s existing guiding
+rule. *Done when:* eight compactions in one session leave exactly one window, and a
+session that starts with the window already up changes nothing on the screen.
 
-**R7 · The ambient strip, if and only if the window is already open.** One row: the
-file being written, a churn tick per edit, amber on a tripwire glob you configured.
-Not a reading surface — a peripheral pulse. It never steals scroll and never opens a
-file on its own. This is the only part of the original realtime request that
-survives §4, and it survives as garnish.
+**R7 · The live lane.** While the window is open: which session is running, the
+file it is writing, a churn tick per write, and amber on a tripwire glob you
+configured. That is the whole of it. Each of those is true at the instant it is
+recorded and none of them is superseded four minutes later, which is exactly what
+§4 says the content is not. It never steals scroll and never opens a file on its
+own. This is the part of the original realtime request that survives, and it
+survives because it carries state rather than drafts.
 
-Nothing in R1–R7 writes anything git tracks, generates any artefact, needs a
+**R8 · Collisions.** Two runs whose write sets intersect get a marker, on both rows
+and on the file they share. Live against live is the obvious case; live against
+settled-but-uncommitted is the one that has actually cost time here, and it clears
+itself when that work is committed rather than needing a gesture. This is the one
+thing in this document that neither a diff viewer nor a per-run surface can offer,
+and it is not hypothetical: **13.8% of all active ten-minute windows on this
+machine have two or more sessions running in the same directory**, with a peak of
+**seven**. It is drawn calm — a marker and a word, never a modal — because §8's
+rule about what may interrupt applies to it exactly as it applies to tripwires.
+*Done when:* two sessions writing `workspace.py` see each other, and one of them
+committing clears it.
+
+Nothing in R1–R8 writes anything git tracks, generates any artefact, needs a
 database, a daemon, an MCP server or a forge.
 
 ---
@@ -330,11 +422,25 @@ why this must never escalate further.
 **Rule 8 everywhere.** *No changes yet* and *this run's transcript is gone* are
 different empty states and must read differently, with counts.
 
-**Not a fifth navigator mode.** The navigator is a finder, and a run is not a list
-of things to find. The session surface already carries the list of files a session
-changed, and the settled set is what that list is *about* — so the surface opens
-there, as one entry in `TITLES` reachable from `⌘K`. Panes, tabs, split and history
-come free with it, and nothing new has to be taught.
+**The Sessions surface grows; nothing is added beside it.** The navigator is a
+finder, and a run is not a list of things to find. Sessions already lists every
+session and the files it changed, so it gains the state rather than a neighbour: a
+live dot, the file being written, the churn count, the collision marker. Opening a
+session shows its runs, and a run's settled set opens in a tab, where panes, split
+and history already work. There is no second place that lists sessions, and nothing
+new has to be taught.
+
+**Live first, then today, then the rest.** This project has 5 sessions on disk; one
+on this machine has 254. Whatever is running now sorts to the top, then whatever
+settled today, then a *show earlier* that opens the full history. Rule 8 applies to
+both silences, which are different sentences: *nothing is running here*, and *no
+transcript survives for this session*.
+
+**Watching is a setting, and it is off.** Tailing transcripts and writing a git
+object at every prompt, across as many as seven concurrent sessions, is not
+something a markdown reader should start doing because you opened it. It switches
+on once — the way indexing your history does — and until it does, Sessions looks
+exactly as it looks today.
 
 **Colour comes from the validated slots.** Lanes, marks and badges take the
 categorical palette in `analytics-plan.md` §7 — rust, violet, teal, blue — because
@@ -378,19 +484,23 @@ Effort in the register's vocabulary: **S** an evening or less · **M** a day or 
 
 | | | |
 |---|---|---|
-| R1 | baseline ref + run file | **S** |
+| R1 | baseline capture, the ref namespace, and its sweep | **M** — the sweep is the half that gets forgotten |
 | R2 | settled change set over `git diff` | **S** |
 | R3 | attribution: `isSidechain`, and line grain vs. file grain | **S** — smaller than it reads, because the human split is not available at any price |
 | R4 | provenance, both directions | **M** — the differentiator, and the only M worth paying twice |
 | R5 | churn + ordering | **S** |
-| R6 | `Stop`-hook summons | **S**, gated on the measurement |
-| R7 | ambient strip over existing SSE | **S** |
+| R6 | `SessionStart` summons, idempotent | **S** — the measurement it was gated on is in §2 |
+| R7 | live lane over the existing SSE | **S** |
+| R8 | collisions | **S** — a set intersection over what R5 already computes |
 | B-ref | stage / commit / branch, allowlisted | **M** |
 | B-tree | restores + safety refs | **M**, and blocked on §6 |
 
-Tier A is **R1–R5**, and R1+R2+R5 alone — two evenings — is a usable surface: *what
-did this run actually change, riskiest first.* Build that, use it for a week, and let
-it argue for R3 and R4 on evidence rather than on this document.
+Tier A is **R1–R5**, plus R7 and R8 which ride on what R5 computes. R1+R2+R5 alone
+— two evenings — is a usable surface: *what did this run actually change, riskiest
+first.* Build that, use it for a week, and let it argue for R3 and R4 on evidence
+rather than on this document. R8 is the cheapest thing here with the highest chance
+of paying for itself, because the collision it names has already happened twice in
+this repository.
 
 The ordering that matters: **build it non-live first.** Everything that makes this
 worth having works on a finished run, and every hard part — SSE, decay, follow
@@ -427,5 +537,5 @@ semantics, settle transitions — belongs to the half that §4 shows is worth th
    copy-the-command export first and let a month of use say whether the amendment is
    needed.
 
-Until both are answered, the buildable set is **R1–R5 and R7** — read-only, rule-clean,
-and about four evenings.
+Until both are answered, the buildable set is **R1–R5, R7 and R8** — read-only,
+rule-clean, and about a week. Neither question blocks any of it.

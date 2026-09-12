@@ -1,20 +1,27 @@
 ---
 title: How every figure in the plans was obtained
-subtitle: One machine, one day — the command behind each number in the five phase plans
-status: reference — 2026-08-23
+subtitle: One machine — the command behind each number in the phase plans
+status: reference — 2026-08-23, Phase R added 2026-09-12
 ---
 
 # How every figure in the plans was obtained
 
-The five phase plans — `install-plan.md`, `signals-plan.md`, `anchoring-plan.md`,
-`retention-plan.md`, `scope-plan.md` — are built almost entirely on local
-measurement. That is the point of them, and it is also the thing a reader cannot
-check unless the measurements are written down somewhere they can be re-run.
+The phase plans — `install-plan.md`, `signals-plan.md`, `anchoring-plan.md`,
+`retention-plan.md`, `scope-plan.md` and `observe-plan.md` — are built almost
+entirely on local measurement. That is the point of them, and it is also the thing
+a reader cannot check unless the measurements are written down somewhere they can
+be re-run.
 
-This is that page. Every count, percentage, byte size, timing and file:line those
-five documents cite has an entry here, with the command or the method that
-produces it. Entries carry stable ids, so a plan can cite
+This is that page. Entries carry stable ids, so a plan can cite
 `measurements.md#m-ins-3` and land on the thing it is claiming.
+
+Coverage is complete for the first five: every count, percentage, byte size, timing
+and file:line they cite has an entry with the command or the method that produces
+it. It is **partial for `observe-plan.md`**. The `M-OBS` section covers the hook
+census, the session-span and concurrency figures, and the `git stash create`
+behaviour behind R1 — the things that plan was rescoped on. Its §2 table, taken on
+2.1.251 and not re-derived here, is still owed an entry apiece — which that section
+says of itself in its own opening line.
 
 Three kinds of figure are **not** here. External sources — papers, vendor
 documentation, competitor repositories — live in `citations.md`, in the wording
@@ -40,6 +47,11 @@ what is missing.
 | node | v24.18.0 (used only to run browser code outside a browser) |
 | git | 2.53.0 |
 | browser | Google Chrome, `--headless=new`, for two entries only |
+
+The `M-OBS` section is a second run, on the same machine: **2026-09-12**, `claude`
+**2.1.269**, over a corpus that has since grown to 95 transcripts with usable
+timestamps. Each entry there states the figures it produced; nothing in it revises
+a number above, because none of them measured the same thing.
 
 The five repositories, as `git ls-files '*.md' | wc -l` / `git ls-files | wc -l`.
 Four of the five are private and appear throughout these plans as **repo A** to
@@ -1837,6 +1849,106 @@ was located, so it is reported as reported behaviour.
 figures that are *not* from this disk are the two GitHub rows, and they are marked
 as such in the plan's own §1 table: `M-POS-14`, `M-POS-16`, `M-POS-17`,
 `M-POS-18`, `M-POS-19` all move on their own and carry the date they were fetched.
+
+---
+
+# Observing a run
+
+`observe-plan.md` is scoped on six figures taken on **2026-09-12** against `claude`
+**2.1.269**, over `~/.claude/projects` — 95 transcripts carrying a usable pair of
+timestamps. The plan's own §2 table predates these and was taken on 2.1.251; where
+the two disagree, the later one governs, which is rule 12 doing its job.
+
+### M-OBS-1
+
+**Both hook events this plan depends on do fire, in real sessions on this disk.**
+Two projects here configure `SessionStart` and `Stop`, so this is a census of what
+happened rather than a synthetic rig.
+
+```sh
+cd ~/.claude/projects
+grep -rhoE '"hookName":"[^"]+"' --include="*.jsonl" . | sort | uniq -c | sort -rn
+grep -rhoE '"subtype":"[a-z_]*hook[a-z_]*"' --include="*.jsonl" . | sort | uniq -c
+grep -rhoE '"type":"hook_[a-z_]+"' --include="*.jsonl" . | sort | uniq -c
+```
+
+`Stop` records differently from the rest: it emits a `stop_hook_summary` **system**
+record, **865** of them, while the other events emit an `attachment` carrying
+`hookName` and `hookEvent`. Outcomes across the corpus are 212 `hook_success`, 368
+`hook_additional_context`, **1** `hook_cancelled`, and no failure type at all.
+`hookErrors: []` on **847** of the 865 stop summaries; the nine non-empty ones are
+a project's own parity hook reporting, which is the error channel working.
+
+### M-OBS-2
+
+**`SessionStart` fires 69 times across 20 startups, and `compact` is its commonest
+source.** From the first command in `M-OBS-1`: `compact` **34**, `startup` **20**,
+`resume` **7**, `clear` **7**, `fork` **1**. This is why R6 is specified as *ensure
+running* rather than *open* — the naive reading would put eight windows on screen
+during one long compacting session.
+
+### M-OBS-3
+
+**`Stop` is not guaranteed, so quiet must settle a run too.** One session carries
+`SessionStart:startup` and zero `stop_hook_summary` across seven assistant records.
+
+```sh
+f=~/.claude/projects/<slug>/<sid>.jsonl
+grep -o '"hookName":"SessionStart:[a-z]*"' "$f" | sort | uniq -c
+grep -c '"subtype":"stop_hook_summary"' "$f"
+grep -c '"type":"assistant"' "$f"
+```
+
+In the same census, the summons arrives well ahead of the work: `SessionStart:startup`
+at `09:39:48` against a first user prompt at `09:42:37` — **2m49s**.
+
+### M-OBS-4
+
+**A session is not a run.** Wall-clock span from each transcript's first to last
+`timestamp`, over the 95 with both: median **22.9 hours**, p90 **264**, max
+**743.6**, and **45 of 95** span more than a day. This is the whole argument for
+baselining per prompt rather than per session — at the median, *what this session
+changed* is a branch diff.
+
+### M-OBS-5
+
+**Concurrency in one working directory is normal, and worktrees are not used.**
+Each transcript's `cwd` is read from its head; timestamps are bucketed into
+ten-minute windows per `(cwd, session)`, and a window is contended when two or more
+sessions appear in it.
+
+```sh
+grep -o '"timestamp":"[^"]*"' "$f"     # per transcript, bucketed at 600s
+```
+
+**13.8%** of all active windows are contended (270 of 1,957), across 12 directories
+— Conventum-Hub 106, vsohr-sandbox 55, lattisfy 34, werdewaerts 27, vsohr-toolbox
+25, rubricator 5 — with a peak of **seven** sessions active at once in one
+directory. Against that, **1 of 95** sessions ran in a worktree and **no** project
+slug has more than one distinct `cwd`. So the shared tree is the case to design
+for, and the clean-baseline case is the rounding error.
+
+### M-OBS-6
+
+**`git stash create` does not touch the stash list, and repeats are free.** Run in
+a throwaway repository with one dirty tracked file:
+
+```sh
+git stash list | wc -l          # 0
+b1=$(git stash create); b2=$(git stash create)
+git stash list | wc -l          # 0 — still
+[ "$b1" = "$b2" ] && echo same  # same: an unchanged tree returns the same object
+git status --porcelain          # ' M a.txt' — the tree is untouched
+git fsck                        # dangling commit <b1>
+git update-ref refs/rubricator/runs/sid1/1 "$b1"
+git fsck                        # silent — it is reachable now
+git for-each-ref refs/rubricator/   # the whole set the tool holds
+git update-ref -d refs/rubricator/runs/sid1/1
+```
+
+This is the evidence behind R1's ref namespace. The flooding risk is not the stash
+list, which stays empty; it is that an unanchored baseline is a dangling commit
+that `git gc` may collect during the run that needs it.
 
 ---
 
