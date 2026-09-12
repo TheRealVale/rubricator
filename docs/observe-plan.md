@@ -1,6 +1,6 @@
 ---
 title: What the agent did to the code
-subtitle: Phase R — the settled change set, prompt-to-line provenance, and the two rules this cannot have without an amendment
+subtitle: Phase R — the settled change set, prompt-to-code provenance at two grains, and the two rules this cannot have without an amendment
 status: plan — 2026-08-30. §1 is a collision with X8 and rule 1; §6 and §9 are decisions only the owner can take
 ---
 
@@ -70,8 +70,9 @@ anything here is built.
 | the most-rewritten single file in it | `main.ts`, **154 times** |
 | gross lines changed vs. net effect, four sessions | **62% · 78% · 75% · 65%** — so **22–38% of what a live feed shows is superseded before the run ends** |
 | files touched and left net-unchanged | **0 of 362** across those four sessions |
-| per-edit structured diff | present: `toolUseResult.structuredPatch`, real hunks (`oldStart`/`newStart`/`lines[]` with `+`/`-`) |
-| human-vs-agent attribution | present: `toolUseResult.userModified` |
+| per-edit structured diff | present on Edit and Write: `toolUseResult.structuredPatch`, real hunks (`oldStart`/`newStart`/`lines[]` with `+`/`-`) |
+| file work through Bash | **18,119 Bash calls against 7,995 Edits**, of which **4,753 command lines are write-shaped** — and a Bash write carries **no `structuredPatch`** |
+| human-vs-agent attribution | **absent.** `toolUseResult.userModified` is `false` on all **9,429** records that carry it |
 | subagent attribution | present: `isSidechain` on the record |
 | prompt causality | present: `promptId` → `parentUuid` chain → `requestId` → `tool_use` → patch |
 
@@ -105,10 +106,17 @@ That distinction is only worth anything if the tool does something a diff viewer
 cannot, and it does — one thing, which is the whole of the case:
 
 **Git knows what changed. Only the transcript knows why.** `promptId` →
-`tool_use` → `structuredPatch` → file is an unbroken causal chain from the sentence
-you typed to the line that exists because of it. That is not diff review. It is the
+`tool_use` → file is an unbroken causal chain from the sentence you typed to the
+code that exists because of it. That is not diff review. It is the
 document↔session join — this project's most original computation — pointed at code
 instead of at markdown.
+
+The chain resolves at two grains, and the difference is the `structuredPatch`. An
+Edit or a Write carries one, so the chain ends on a *line*. A Bash write carries
+none, so it ends on a *file* — this turn's command wrote this file. Both are the
+same causal claim at different resolution, and the corpus is mostly the second:
+18,119 Bash calls against 7,995 Edits. A surface that showed only the line grain
+would be silent about most of the work.
 
 And here the strongest objection reverses. §7 measured that join and found it
 **fails**: 49 of 419 sessions carry a file list, a thirty-day half-life by
@@ -183,20 +191,30 @@ file versions, a side-by-side render path"*; none of the three is built here, be
 side-by-side. *Done when:* a session's set matches `git diff` from its baseline,
 exactly.
 
-**R3 · Attribution.** Every changed line carries agent / human / agent-then-human,
-from `structuredPatch` overlap plus `userModified`, and subagent lines are marked
-from `isSidechain`. *Done when:* a file you edited by hand mid-run is distinguishable
-from one only the agent touched.
+**R3 · Attribution, at the grain the record supports.** Subagent work is marked
+from `isSidechain`, which is on every record. A human-versus-agent split is not
+available and no amount of design recovers it: `userModified` is `false` on all
+9,429 records that carry it, so nothing in the transcript separates a line you
+typed from one the agent wrote. What the record does support is *how* a line
+arrived — `structuredPatch` overlap for Edit and Write, and the command itself for
+a Bash write. *Done when:* a file rewritten by a heredoc is attributed at file
+grain and says so, beside one rewritten by Edit that is attributed line by line.
 
 **R4 · Provenance, both directions.** Click a line → the prompt that caused it and
-the assistant's stated reason. Select a prompt → its lines highlighted across every
+the assistant's stated reason. Select a prompt → its work highlighted across every
 file. This is §3's argument made concrete and it is the feature the whole plan
-exists for. *Done when:* both directions resolve on a live session, and rule 8's
-empty state — *this line predates the run* vs. *this line's cause is not in the
-transcript* — is distinguishable and counted.
+exists for. It highlights lines where a `structuredPatch` exists and the whole file
+where the writer was Bash, and the surface says which of the two it is showing
+rather than letting a file-grain answer pass for a line-grain one. *Done when:*
+both directions resolve on a live session, and rule 8's empty states — *this line
+predates the run*, *this file's writer named no lines*, and *this run's transcript
+is gone* — read differently and are counted.
 
-**R5 · Churn.** Edits-per-file, and the review queue ordered by it rather than
-alphabetically. *Done when:* the 154-rewrite file sorts first.
+**R5 · Churn.** Writes-per-file, and the review queue ordered by it rather than
+alphabetically. It counts both grains — a file the agent rewrote fourteen times
+through a heredoc was fourteen times as hard to get right as the count would
+otherwise suggest, which is why the classifier behind `touches` is this item's
+precondition. *Done when:* the 154-rewrite file sorts first.
 
 **R6 · The summons.** A `Stop` hook opens the window on the settled set, the way
 `--hook plan` opens it on a plan. Non-blocking, and a failure must exit 0 and leave
@@ -312,8 +330,18 @@ why this must never escalate further.
 **Rule 8 everywhere.** *No changes yet* and *this run's transcript is gone* are
 different empty states and must read differently, with counts.
 
-**The keyboard.** It is a pane in the workspace, so `⌘K`, panes, tabs and the
-navigator come free. One new mode — **Runs** — beside Documents, Sessions and Notes.
+**Not a fifth navigator mode.** The navigator is a finder, and a run is not a list
+of things to find. The session surface already carries the list of files a session
+changed, and the settled set is what that list is *about* — so the surface opens
+there, as one entry in `TITLES` reachable from `⌘K`. Panes, tabs, split and history
+come free with it, and nothing new has to be taught.
+
+**Colour comes from the validated slots.** Lanes, marks and badges take the
+categorical palette in `analytics-plan.md` §7 — rust, violet, teal, blue — because
+the older accents do not survive a colourblind check: `#8a7f9e` and `#5f8f7a` sit
+at ΔE 5.1 under deuteranopia and read as two greys. And in the `bone` theme
+`--accent` and `--red` are the same hex, so hue alone cannot carry *problem* in the
+light theme. A 3px lane always carries a word.
 
 ---
 
@@ -352,7 +380,7 @@ Effort in the register's vocabulary: **S** an evening or less · **M** a day or 
 |---|---|---|
 | R1 | baseline ref + run file | **S** |
 | R2 | settled change set over `git diff` | **S** |
-| R3 | attribution from `structuredPatch` + `userModified` | **M** |
+| R3 | attribution: `isSidechain`, and line grain vs. file grain | **S** — smaller than it reads, because the human split is not available at any price |
 | R4 | provenance, both directions | **M** — the differentiator, and the only M worth paying twice |
 | R5 | churn + ordering | **S** |
 | R6 | `Stop`-hook summons | **S**, gated on the measurement |
