@@ -22,6 +22,90 @@ DOC_EXT = {".pdf", ".docx", ".doc", ".rtf", ".odt"}      # read through share/ex
 ALL_EXT = MD_EXT | DOC_EXT
 SCRATCH = re.compile(r"^/(private/)?(tmp|var/folders)/|/\.cache/|/node_modules/|/\.claude/|/\.git/")
 
+# ── the files a shell command writes ─────────────────────────────────────────
+# A session's file list is built from the `file_path` the file tools record. A
+# session that does its file work through Bash records none, and this corpus is
+# mostly that: 17,460 Bash calls against 4 Grep and 3 Glob, and 11 sessions whose
+# transcripts say they changed nothing while their commands rewrote whole trees.
+#
+# Only writes are recovered here, not reads. `touches` feeds the churn signal,
+# and a grep booked as an edit inflates exactly the number that is supposed to
+# say how hard a file was to get right.
+_P = r"""(?:~|\.{0,2}/)?[\w.-]+(?:/[\w.-]+)*\.[A-Za-z0-9]{1,6}"""
+
+# The shell names the target, so these are known rather than inferred. `2>` and
+# `>&` are file-descriptor plumbing and not a path.
+_REDIR = re.compile(r"(?<![0-9&])>>?\s*[\"']?(" + _P + r")[\"']?")
+_TEE   = re.compile(r"\btee\b(?:\s+-\w+)*\s+[\"']?(" + _P + r")[\"']?")
+# BSD sed takes an empty backup suffix as its own argument, so between `-i` and
+# the file there may be several quoted words: `sed -i '' 's/a/b/' f`.
+_SEDI  = re.compile(r"\bsed\s+(?:-\w+\s+)*-i[\w.]*\s+(?:(?:-e\s+)?(?:'[^']*'|\"[^\"]*\")\s*)*[\"']?(" + _P + r")[\"']?")
+_TOUCH = re.compile(r"\b(?:touch|install)\s+(?:-\w+\s+)*[\"']?(" + _P + r")[\"']?")
+_CPMV  = re.compile(r"\b(?:cp|mv)\b(?:\s+-\w+)*\s+\S+\s+[\"']?(" + _P + r")[\"']?")
+_TARGETED = (_REDIR, _TEE, _SEDI, _TOUCH, _CPMV)
+
+# An interpreter fed a heredoc is the dominant idiom here, and the path is a
+# string literal inside the script where the shell never sees it. The only
+# available signal is that the script writes at all — which is enough, because
+# the shape is read-modify-write: what it opens is what it rewrites.
+_WRITES  = re.compile(r"write_text|\.write\(|\bopen\([^)]*['\"][wa]|json\.dump|"
+                      r"shutil\.(?:copy|move)|os\.replace|\.rename\(|writeFileSync|"
+                      r"\bsips\b|>>?\s*[\"']?" + _P)
+_LITERAL = re.compile(r"""[\"'`](""" + _P + r""")[\"'`]""")
+# Scoping the literal sweep to the heredoc body keeps `grep a.ts; python3 <<PY …`
+# from booking the grep's target as written: the two halves are not one statement.
+_HEREDOC = re.compile(r"<<-?\s*[\"']?(\w+)[\"']?\n(.*?)(?:\n\1\b|\Z)", re.S)
+
+
+def bash_writes(cmd):
+    """Paths a shell command writes to, as written in the command. The caller
+    resolves them against the session's cwd."""
+    out = set()
+    for rx in _TARGETED:
+        for m in rx.finditer(cmd):
+            out.add(m.group(1))
+    bodies = [m.group(2) for m in _HEREDOC.finditer(cmd)]
+    for chunk in (bodies or [cmd]):
+        if _WRITES.search(chunk):
+            out.update(m.group(1) for m in _LITERAL.finditer(chunk))
+    return {f for f in out if f != "/dev/null" and not f.startswith(("http:", "https:"))}
+
+
+def bash_targets(line, out):
+    """Write paths named by every Bash call on one transcript line."""
+    try:
+        d = json.loads(line)
+    except Exception:
+        return
+    for b in ((d.get("message") or {}).get("content") or []):
+        if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Bash":
+            cmd = (b.get("input") or {}).get("command") or ""
+            if cmd:
+                out |= bash_writes(cmd)
+
+
+def resolve_writes(raw, cwd, cache):
+    """Absolute paths for what `bash_writes` found. A relative path is read
+    against the session's own cwd, and a path that names no file on disk is
+    dropped: the list is joined against the index, so a path nothing can open is
+    not a fact about the session but a guess about one."""
+    out = set()
+    for r in raw:
+        f = os.path.expanduser(r)
+        if not os.path.isabs(f):
+            if not cwd:
+                continue
+            f = os.path.normpath(os.path.join(cwd, f))
+        hit = cache.get(f)
+        if hit is None:
+            try:
+                hit = cache[f] = os.path.isfile(f)
+            except Exception:
+                hit = cache[f] = False
+        if hit:
+            out.add(f)
+    return out
+
 
 # ── the corpus ───────────────────────────────────────────────────────────────
 def git(root, *args, timeout=25):
@@ -329,12 +413,12 @@ def load_sessions(limit_project=None, deep=False):
                 if not m["t"]:
                     m["t"] = text[:120]                   # the first thing you asked names it
 
-    touches = {}
+    touches, exists = {}, {}
     root = HOME / ".claude/projects"
     if root.is_dir():
         for p in root.glob("*/*.jsonl"):                  # subagent runs live deeper; not ours
             sid = p.stem
-            seen, cwd = set(), ""
+            seen, raw, cwd = set(), set(), ""
             try:
                 with p.open(encoding="utf-8", errors="replace") as f:
                     for line in f:
@@ -342,9 +426,10 @@ def load_sessions(limit_project=None, deep=False):
                             m = re.search(r'"cwd":"([^"]+)"', line)
                             if m:
                                 cwd = m.group(1)
-                        if '"file_path"' not in line:
-                            continue
-                        seen.update(re.findall(r'"file_path":"([^"]+)"', line))
+                        if '"file_path"' in line:
+                            seen.update(re.findall(r'"file_path":"([^"]+)"', line))
+                        if '"name":"Bash"' in line:
+                            bash_targets(line, raw)
             except Exception:
                 continue
             if deep:
@@ -355,8 +440,11 @@ def load_sessions(limit_project=None, deep=False):
                             for line in f:
                                 if '"file_path"' in line:
                                     seen.update(re.findall(r'"file_path":"([^"]+)"', line))
+                                if '"name":"Bash"' in line:
+                                    bash_targets(line, raw)
                     except Exception:
                         pass
+            seen |= resolve_writes(raw, cwd, exists)
             seen = {f for f in seen if not SCRATCH.search(f)}
             m = meta.get(sid)
             if m is None:

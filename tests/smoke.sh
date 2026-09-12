@@ -1219,5 +1219,51 @@ else
   skip "26 · verb reachability" "no node"
 fi
 
+# ── 27 · a session's file work through Bash is not invisible ────────────
+# The file tools record a `file_path`; Bash records a command string. This corpus
+# is overwhelmingly the second — 17,460 Bash calls against 4 Grep — so a session
+# that wrote its files through a heredoc used to report that it changed nothing.
+#
+# The classifier is tested rather than the scan, because workspace.py drops
+# anything under a temp directory as scratch and every path a test can write to
+# is scratch. The negative cases are the ones that matter: `touches` feeds the
+# churn signal, and a grep booked as an edit inflates the number that is supposed
+# to say how hard a file was to get right.
+python3 - "$REPO" >"$WORK/bashw.txt" 2>&1 <<'BASHW_EOF'
+import sys
+sys.path.insert(0, sys.argv[1] + "/share")
+from workspace import bash_writes
+
+cases = [
+    # a write whose path the shell itself names
+    ("cat > docs/x.md <<'EOF'\nhi\nEOF",        {"docs/x.md"}),
+    ("sed -i '' 's/a/b/' share/workspace.py",    {"share/workspace.py"}),
+    ("sed -i 's/a/b/' src/app.ts",               {"src/app.ts"}),
+    ("tee -a logs/out.txt",                      {"logs/out.txt"}),
+    ("cp a/x.ts b/y.ts",                         {"b/y.ts"}),
+    # a write whose path is a literal inside a heredoc the shell never reads
+    ("python3 - <<'PY'\np = 'src/sim/hit.ts'\nopen(p,'w').write(s)\nPY",
+                                                 {"src/sim/hit.ts"}),
+    # reads, which must not count
+    ("grep -rn 'foo' src/app.ts",                set()),
+    ("sed -n '1,20p' docs/plan.md",              set()),
+    ("npm run build > /dev/null 2>&1",           set()),
+    # one statement writes and another reads: only the writer's target counts
+    ("grep -n x 'a.ts'; python3 - <<'PY'\np='b.ts'\nopen(p,'w').write(s)\nPY",
+                                                 {"b.ts"}),
+]
+bad = []
+for cmd, want in cases:
+    got = bash_writes(cmd)
+    if got != want:
+        bad.append("%r -> %s want %s" % (cmd[:34], sorted(got), sorted(want)))
+print("XX " + " | ".join(bad) if bad else "ok")
+BASHW_EOF
+res=$(cat "$WORK/bashw.txt")
+case "$res" in
+  ok*) ok "27 · a file written through Bash is a file the session touched" ;;
+  *)   no "27 · Bash writes are misread" "$res" ;;
+esac
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
