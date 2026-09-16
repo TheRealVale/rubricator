@@ -20,8 +20,9 @@ and file:line they cite has an entry with the command or the method that produce
 it. It is **partial for `observe-plan.md`**. The `M-OBS` section covers the hook
 census, the session-span and concurrency figures, and the `git stash create`
 behaviour behind R1 — the things that plan was rescoped on. Its §2 table, taken on
-2.1.251 and not re-derived here, is still owed an entry apiece — which that section
-says of itself in its own opening line.
+2.1.251 and not re-derived here, is owed an entry apiece before **R3 and R4**, the
+only two items that read those rows — which is the obligation that section states
+for itself: per item, not per phase.
 
 Three kinds of figure are **not** here. External sources — papers, vendor
 documentation, competitor repositories — live in `citations.md`, in the wording

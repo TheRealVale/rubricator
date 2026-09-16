@@ -62,8 +62,11 @@ What follows is the part that was genuinely not covered.
 
 Against `claude` **2.1.251**, 2026-08-30. Rule 12 obliges a re-measurement rather
 than a citation of the 2.1.241 figures, and the numbers below are the ones this
-plan is scoped on. The command behind each belongs in `measurements.md` before
-anything here is built.
+plan is scoped on. The command behind each belongs in `measurements.md`, and the
+obligation is per item rather than per phase: a figure is written up — and re-run if
+a version has moved under it — before the item that reads it is built. Writing up a
+row nothing has been built on yet buys nothing, and it goes stale on its own while
+it waits.
 
 | | measured |
 |---|---|
@@ -267,9 +270,22 @@ run* is a different sentence from *this run was never observed*, and they must n
 render the same.
 
 Run state lives in `.rubricator/runs/<sid>.json` — rule 1 (a), rule 6 (a file, not
-a database), rule 2 (not `localStorage`). *Done when:* a baseline survives a window
-restart and a session resumed in another terminal, a repeat capture on an unchanged
-tree adds no object, and `git stash list` is empty after a day of watching.
+a database), rule 2 (not `localStorage`) — and the pass that sweeps the refs sweeps
+these too. One file per session accumulates for as long as the tool is used, and
+nothing else reaches them: `prune_cache()` prunes `~/.cache/rubricator`, while this
+is repository state, which is a different place. That gap is the one this project
+has already shipped once.
+
+The two have different lifetimes, and the difference is deliberate. A ref goes as
+soon as its run's work is committed, because git is then holding that state itself.
+The file outlives it, because the churn counts still answer a question for as long
+as the transcript is on disk. Both go at the thirty-day cliff, where the transcript
+they describe is gone and neither can be joined to anything.
+
+*Done when:* a baseline survives a window restart and a session resumed in another
+terminal, a repeat capture on an unchanged tree adds no object, `git stash list` is
+empty after a day of watching, and a run past the cliff leaves neither a ref nor a
+file.
 
 **R2 · The settled change set.** `git diff <baseline>` for what changed — not a
 fold of the per-edit patches. This is the important architectural call and it is
