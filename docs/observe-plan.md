@@ -298,15 +298,19 @@ arrived — `structuredPatch` overlap for Edit and Write, and the command itself
 a Bash write. *Done when:* a file rewritten by a heredoc is attributed at file
 grain and says so, beside one rewritten by Edit that is attributed line by line.
 
-**R4 · Provenance, both directions.** Click a line → the prompt that caused it and
-the assistant's stated reason. Select a prompt → its work highlighted across every
-file. This is §3's argument made concrete and it is the feature the whole plan
-exists for. It highlights lines where a `structuredPatch` exists and the whole file
-where the writer was Bash, and the surface says which of the two it is showing
-rather than letting a file-grain answer pass for a line-grain one. *Done when:*
-both directions resolve on a live session, and rule 8's empty states — *this line
-predates the run*, *this file's writer named no lines*, and *this run's transcript
-is gone* — read differently and are counted.
+**R4 · Provenance, both directions.** The unit is the run. Within one run the
+question does not arise — a run *is* one prompt, so every line it wrote has the same
+cause — and the question that does arise is what a file accumulates across a session:
+three runs touch `workspace.py` and it ends up carrying lines from all three. Click a
+line → the run that put it there, its prompt, and the assistant's stated reason.
+Select a run → its work highlighted across every file it touched. That is §3's
+argument made concrete and it is the feature the whole plan exists for. It highlights
+lines where a `structuredPatch` exists and the whole file where the writer was Bash,
+and the surface says which of the two it is showing rather than letting a file-grain
+answer pass for a line-grain one. *Done when:* both directions resolve on a file more
+than one run has written, and rule 8's empty states — *this line predates the
+session*, *this file's writer named no lines*, and *this run's transcript is gone* —
+read differently and are counted.
 
 **R5 · Churn.** Writes-per-file, and the review queue ordered by it rather than
 alphabetically. It counts both grains — a file the agent rewrote fourteen times
@@ -420,22 +424,27 @@ not looking at, and the surface must be legible in the two seconds after it appe
 churn, not by name, so the riskiest thing is first and the user's eye starts in the
 right place without being told to.
 
-**Recency as opacity, and it decays.** When the strip is live, a just-written hunk
-carries a wash that fades over ~20 seconds. This is the honest form of *"highlight
-what was added"*: everything cannot stay highlighted, or nothing is. Old changes stop
-shouting on their own.
+**Recency lives on the strip, because that is where the live surface is.** A tick
+just written carries the accent and fades to its resting colour over ~20 seconds.
+This is the honest form of *"highlight what was added"* once the thing being
+highlighted is activity rather than content: everything cannot stay lit, or nothing
+is, and old writes stop shouting on their own.
 
 **Never steal scroll — the one detail that decides whether this is tolerable.**
-Auto-follow only while pinned to the bottom. The moment the user scrolls up, the view
-freezes and a pill reads *3 more edits below*. A surface that yanks the viewport while
-someone is reading gets closed once and never reopened.
+Nothing arrives in the patch column while a run is live, so there is no feed to
+follow and nothing to yank the viewport from under you. The hazard moves rather than
+disappears: the file rail orders by churn, and a list that re-sorts under the cursor
+while you are reading it is the same failure in a different place. So the rail holds
+its order while any run is live and re-sorts once the session goes quiet, landing in
+the order §4 asks for — riskiest first. A surface that moves what someone is reading
+gets closed once and never reopened.
 
 **Churn as a sparkline, not a number.** Per file, one tick per write across the run's
 timeline. A file written 14 times in the last minute looks different at a glance from
 one written 14 times spread evenly, and the first is the one that was going wrong.
 
-**Provenance on hover, not on click.** Hovering a hunk dims the change set to just
-the lines from the same prompt, and puts that prompt in the margin. Click pins it.
+**Provenance on hover, not on click.** Hovering a hunk dims the change set to the
+lines from the same run, and puts that run's prompt in the margin. Click pins it.
 Making the tool's one distinctive computation cost a hover rather than a click is
 what makes it feel like a property of the diff rather than a feature with a button.
 
@@ -455,8 +464,11 @@ preference. Afterwards the window keeps the undo ref and the command that uses i
 on screen until you dismiss them, because a restore you cannot walk back is the
 thing clause (iv) exists to prevent.
 
-**Rule 8 everywhere.** *No changes yet* and *this run's transcript is gone* are
-different empty states and must read differently, with counts.
+**Rule 8 everywhere.** The silences here are not one silence, and each gets its own
+sentence and its own count: *no changes yet*, *this run's transcript is gone*, *this
+file's writer named no lines*, and *the window was shut for part of this run*. One
+empty state standing in for four different facts is the defect the rule exists to
+catch.
 
 **The Sessions surface grows; nothing is added beside it.** The navigator is a
 finder, and a run is not a list of things to find. Sessions already lists every
