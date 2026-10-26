@@ -319,16 +319,16 @@ def resume(cwd, sid, fork=False):
 
 
 def reveal(path):
-    if _dry():
-        return {"ok": True, "dry": "reveal"}
+    if _dry():                                     # resolved and checked, opened nowhere
+        return {"ok": True, "dry": str(path)}
     subprocess.run(["open", "-R", str(path)], check=True, timeout=15,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"ok": True}
 
 
 def edit(path):
-    if _dry():
-        return {"ok": True, "dry": "edit"}
+    if _dry():                                     # resolved and checked, opened nowhere
+        return {"ok": True, "dry": str(path)}
     ed = os.environ.get("RUBRICATOR_EDITOR") or config().get("editor") or ""
     if ed:
         _open_window(_script(Path(path).parent, [ed, str(path)]))

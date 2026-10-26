@@ -142,6 +142,21 @@ pre.dossier{
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
 .dot.live{background:var(--green)}
 .dot.arch{background:var(--fg-dim);opacity:.45}
+/* ── who is waiting on you ─────────────────────────────────────────────── */
+.dot.asking{background:var(--accent)}
+.dot.done{background:var(--green)}
+.dot.background,.dot.unknown{background:var(--fg-dim)}
+.wcard{margin:0 0 24px}
+.wcard .whead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin:0 0 8px}
+.wcard .whead b{font-size:14px;font-weight:650;letter-spacing:-.01em}
+.wcard .whead .sub{font-size:11.5px;color:var(--fg-dim)}
+.wcard .turn{margin:0}
+.wcard .turn .bub{max-width:100%}
+.wcard .wfoot{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:8px 2px 0;
+  font-size:11.5px;color:var(--fg-dim)}
+.wcard .wfoot button{all:unset;cursor:pointer;color:var(--accent)}
+.wcard .sid{font-family:var(--mono);font-size:10px;cursor:pointer;margin-left:auto}
+.wcard .sid:hover{color:var(--fg)}
 .srow{display:flex;gap:11px;align-items:baseline;padding:8px 11px 8px 0;cursor:pointer;color:var(--fg-muted)}
 .srow::before{content:"";flex:none;width:3px;height:11px;margin:0 0 0 5.5px;align-self:center;background:transparent}
 .srow:hover{color:var(--fg)}

@@ -24,6 +24,7 @@ md                    # the workspace for this directory, README already open
 md README.md          # render and open one file
 md docs/              # the workspace, scoped to a subdirectory
 md --sessions         # …and correlate it with your Claude Code history
+md --waiting          # the Claude Code sessions running now that wait on you
 md docs/spec.md -b    # a normal browser tab instead of an app window
 git show HEAD:NOTES.md | md -
 ```
@@ -233,7 +234,10 @@ match inside a fold, a closed disclosure or a collapsed folder opens it on the w
 A session is **resumable** while its transcript is on disk and **archived** once it is gone.
 Prompts outlive transcripts, so most of your history can be read and searched but not picked
 up again; the browser says which is which rather than offering a resume command that would
-fail. For the live ones it hands you `cd <project> && claude -r <id>`, ready to paste.
+fail. For the live ones it hands you `cd <project> && claude -r <id>`, ready to paste. A
+session still **running** in a terminal is answered there: the window offers it no resume,
+because a second process on the same session would write the same transcript, and the
+server refuses one whatever the page asks. Forking it stays open.
 
 **Notes** collects your marks across every document — every open Question, everything marked
 Cut — because what you are hunting is often your own reaction, not the text. Its **copy**
@@ -251,6 +255,24 @@ which one it was in — usually the question is not *what did I say* but *where 
 said it*. Results carry the line that matched, the repository and how long ago; opening one
 jumps to that prompt with the word highlighted. Scoped to the current repository, with a
 count of how many more are elsewhere and one key to widen.
+
+**Waiting** is for coming back to the desk: the Claude Code sessions running now that wait
+on you, each with what it said last, rendered, its links opening outside the window. They
+are grouped by what they wait on — *asking you* (a permission or a question is open in its
+terminal), *your turn*, and *waiting on its own command* (its turn ended with a background
+command still running, so it will likely carry on by itself) — newest wait first, scoped to
+this repository and its worktrees, with *everywhere* beside it. `md --waiting` opens a window
+on it.
+
+It reads two things, each time you look, and keeps neither: Claude Code's own file per
+running session in `~/.claude/sessions`, which says whether a session is working, asking or
+done, and the end of each waiting session's transcript — a quarter of a megabyte of a
+gigabyte transcript, a few milliseconds. A session counts as running only while a `claude`
+process lives at its pid. The session file is Claude Code's, undocumented, and measured
+against 2.1.309; when it is missing or in a shape this does not read, the surface says so
+rather than showing nothing. Reading it is reading your history, so it waits for the same
+consent: history turned on, `--waiting` for its own window, or the surface's button — and
+none of the three starts the full index for it.
 
 **Behind its code** lists documents whose *named* files kept changing after the document
 stopped — counted only in the paths each one mentions in backticks or links, so it says
@@ -371,7 +393,8 @@ Off by default. With `md --allow-launch` — or `{"allow_launch": true}` in
 
 - **Send to Claude** on an open document: a new session at the repository root, with the
   marks you just took as its first prompt.
-- **Resume** or **fork** a past session, offered only where a transcript still exists.
+- **Resume** or **fork** a past session, offered only where a transcript still exists —
+  and resume only while the session is not running in a terminal.
 - **Reveal** a file in Finder, or open it in your editor — any file a session touched, not
   only the documents this window can read.
 
@@ -459,11 +482,12 @@ share/serve.py      the local server: ephemeral port, per-run token, idle exit
 share/actions.py    the verb allowlist — the only place the page can cause anything
 share/extract.py    PDF and Word into text, cached on mtime and size
 share/transcript.py one conversation, parsed on demand
+share/waiting.py    which sessions are running, and which wait on you
 share/hook.py       blocking review server for --review and --hook
 .claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook
 ```
 
-Eighteen files, under ten thousand lines, plus five vendored render libraries. No build
+Twenty files, under eleven thousand lines, plus five vendored render libraries. No build
 step, no runtime dependency beyond what macOS ships. `./tests/smoke.sh` drives the whole
 thing from a throwaway install; CI runs it on every push.
 

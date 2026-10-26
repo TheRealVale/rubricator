@@ -1105,7 +1105,8 @@ def machine_readable(data):
 
 
 # ── the live tier ────────────────────────────────────────────────────────────
-def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, idle=None):
+def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, idle=None,
+                    waiting=False):
     sys.path.insert(0, str(share))
     import serve as S
 
@@ -1124,6 +1125,12 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
     started = [False]
     state = {"data": build(roots, False, deep)}
     state["data"]["open"] = open_rel or ""
+    state["data"]["surface"] = "waiting" if waiting else ""
+    # Which running sessions wait on you reads Claude Code's own session files
+    # and the end of each running session's transcript: your history, so it
+    # asks the same consent. `md --waiting` is that ask for one window, and it
+    # does not start the full index — which is a minute and a half at 12 GB.
+    look = [bool(with_sessions) or bool(waiting)]
     state["data"]["withSessions"] = want[0]
     state["data"]["sessionsPending"] = want[0]
 
@@ -1148,7 +1155,7 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         data = dict(state["data"])
         data["base"] = srv.base
         data["caps"] = {"live": 1, "text": 1, "reindex": 1, "notes": 1, "asset": 1,
-                        "conversation": 1,
+                        "conversation": 1, "waiting": 1,
                         # a seam for driving the page: an open SSE channel stops
                         # headless Chrome's virtual clock from ever finishing
                         "watch": 0 if os.environ.get("RUBRICATOR_NO_WATCH") else 1,
@@ -1283,6 +1290,14 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                 m = (state["data"].get("sessions") or {}).get(ident)
                 if not m or not m.get("live"):
                     return S.J({"error": "that session has no transcript to resume"}, 400)
+                # A session still running in a terminal would get a second
+                # process writing the same transcript. Fork is a new session
+                # and touches nothing of the original, so it stays.
+                if verb == "resume":
+                    import waiting as _W
+                    if ident in _W.ids():
+                        return S.J({"error": "that session is running in another terminal — "
+                                             "answer it there, or fork it"}, 409)
                 cwd = m.get("p") or str(root)
                 if not os.path.isdir(cwd):
                     cwd = str(root)
@@ -1396,9 +1411,25 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                     "retention": d.get("retention"),
                     "deep": d.get("deep")})
 
+    def waiting_route(method, query, body):
+        """The running sessions and which of them wait on you, read again on
+        every ask. A POST is the surface's own button: look this once, in this
+        window, without turning history on."""
+        if method == "POST":
+            look[0] = True
+        if not (look[0] or want[0]):
+            return S.J({"allowed": False})
+        try:
+            import waiting as _W
+            got = _W.running([Path(r) for r in (roots if isinstance(roots, list) else [roots])])
+        except Exception as e:
+            got = {"state": "failed", "error": str(e)[:200], "sessions": []}
+        got["allowed"] = True
+        return S.J(got)
+
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
               "notes": notes, "act": act, "events": events, "settings": settings,
-              "session": session, "sessions": sessions_route}
+              "session": session, "sessions": sessions_route, "waiting": waiting_route}
     srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
     if port:
         srv.httpd.server_close()
@@ -1432,6 +1463,7 @@ def main():
     # `--deep` is still accepted, and is now a no-op; `--shallow` opts out.
     deep = "--shallow" not in args
     stay = "--stay" in args
+    waiting = "--waiting" in args
     port = 0
     for a in args:
         if a.startswith("--port="):
@@ -1459,7 +1491,7 @@ def main():
             idle = None
         srv = serve_workspace(roots, with_sessions, share,
                               os.environ.get("RUBRICATOR_OPEN") or "", deep=deep,
-                              port=port, idle=10 ** 9 if stay else idle)
+                              port=port, idle=10 ** 9 if stay else idle, waiting=waiting)
         sys.stdout.write(srv.base + "/\n")
         sys.stdout.flush()
         srv.wait()

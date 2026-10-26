@@ -1151,7 +1151,9 @@ def serve(extra, env_extra):
     seen, url = "", None
     for _ in range(200):
         time.sleep(0.1)
-        seen += p.stdout.read() or ""
+        # Python 3.14 raises where earlier ones returned None on an empty pipe
+        try: seen += p.stdout.read() or ""
+        except BlockingIOError: pass
         m = re.search(r"(http://127\.0\.0\.1:%d/[A-Za-z0-9_-]+/)" % port, seen)
         if m: url = m.group(1); break
     return p, url
@@ -1171,8 +1173,13 @@ try:
         m = (j.get("sessions") or {}).get(sid) or {}
         checks["the seeded session reached the page"] = m.get("files") == [real, gone]
         i = 0 if m.get("files") and m["files"][0] == real else -1
-        checks["an ordinal reveals the file"] = post(url, {"verb": "reveal-file", "id": sid, "n": i})[0].get("ok") is True
-        checks["and opens it in an editor"] = post(url, {"verb": "edit-file", "id": sid, "n": i})[0].get("ok") is True
+        r1 = post(url, {"verb": "reveal-file", "id": sid, "n": i})[0]
+        r2 = post(url, {"verb": "edit-file", "id": sid, "n": i})[0]
+        checks["an ordinal reveals the file"] = r1.get("ok") is True
+        checks["and opens it in an editor"] = r2.get("ok") is True
+        # under the dry seam nothing reaches Finder or an editor: a run of this
+        # suite that opened windows on the desk is caught here, by name
+        checks["the dry seam holds for reveal and edit"] = r1.get("dry") == real and r2.get("dry") == real
         # the refusal has to be the RANGE refusal, not whatever the runtime
         # happened to raise: an unchecked files[99] throws IndexError and an
         # unchecked files[-1] quietly resolves to the last file, and both would
@@ -1353,6 +1360,188 @@ case "$res" in
   ok*) ok "27 · a file written through Bash is a file the session touched" ;;
   *)   no "27 · Bash writes are misread" "$res" ;;
 esac
+
+# ── 28 · who waits on you, read from the end, and never resumed twice ───────
+# `md --waiting` reads Claude Code's file per running session and the end of
+# each waiting session's transcript. What this pins down, each by a case that
+# goes red without it:
+#
+#   - a session counts as running only while a process called `claude` lives at
+#     its pid: a file whose process has ended is left out
+#   - each status lands in its group, an unknown one is listed rather than
+#     dropped, and a file in another shape is counted rather than ignored
+#   - the last reply is the text after the last tool result, not every reply
+#   - only the tail is read: a reply at the end of a 3 MB transcript costs a
+#     quarter of a megabyte, and one behind 600 KB of other records is still found
+#   - a session in a worktree of the repository counts as this repository's
+#   - the server shows the list only with consent (history on, --waiting, or the
+#     surface's own button), and refuses to resume a running session while
+#     still letting it be forked
+#
+# The processes are /bin/sleep run through a link named `claude`, so `ps`
+# reports the name the real thing has. A copy of /bin/sleep will not do: macOS
+# kills a platform binary run from anywhere else. The test ends them itself.
+python3 - "$MD" "$WORK" "$REPO" >"$WORK/waiting.txt" 2>&1 <<'PYEOF'
+import json, os, re, shutil, socket, subprocess, sys, time, urllib.error, urllib.request
+md, work, repo_root = sys.argv[1], sys.argv[2], sys.argv[3]
+home = os.environ["HOME"]
+sdir = os.path.join(home, ".claude/sessions"); os.makedirs(sdir, exist_ok=True)
+pdir = os.path.join(home, ".claude/projects/-smoke-waiting"); os.makedirs(pdir, exist_ok=True)
+
+repo = os.path.join(work, "wrepo"); os.makedirs(repo, exist_ok=True)
+tree = os.path.join(work, "wrepo-tree")
+def git(*a): subprocess.run(["git", "-C", repo] + list(a), check=True, capture_output=True)
+open(os.path.join(repo, "README.md"), "w").write("# waiting\n")
+git("init", "-q"); git("add", "."); git("-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qm", "one")
+git("worktree", "add", "-q", "--detach", tree)
+
+bindir = os.path.join(work, "fakebin"); os.makedirs(bindir, exist_ok=True)
+fake = os.path.join(bindir, "claude"); os.symlink("/bin/sleep", fake)
+procs = []
+def claude():
+    p = subprocess.Popen([fake, "300"]); procs.append(p); return p.pid
+ended = subprocess.Popen([fake, "0"]); ended.wait()
+
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+def session(n, status, cwd, pid=None, **extra):
+    d = {"pid": pid or claude(), "sessionId": sid(n), "cwd": cwd, "name": "smoke-%d" % n,
+         "status": status, "statusUpdatedAt": int(time.time() * 1000) - n * 60000}
+    d.update(extra)
+    open(os.path.join(sdir, "%d.json" % d["pid"]), "w").write(json.dumps(d))
+def rec(kind, cwd, **kw):
+    r = {"type": kind, "cwd": cwd, "timestamp": "2026-10-26T12:00:00.000Z"}; r.update(kw); return json.dumps(r)
+def says(cwd, text): return rec("assistant", cwd, message={"content": [{"type": "text", "text": text}]})
+def tool(cwd): return rec("assistant", cwd, message={"content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]})
+def result(cwd): return rec("user", cwd, message={"content": [{"type": "tool_result", "tool_use_id": "t1"}]})
+def pad(cwd, size): return [rec("attachment", cwd, pad="x" * 1000)] * (size // 1100)
+def transcript(n, lines):
+    open(os.path.join(pdir, sid(n) + ".jsonl"), "w").write("\n".join(lines) + "\n")
+
+LINK = "[the lab](http://localhost:5555/?lab=smoke)"
+# 1 · done, in a worktree of the repo, its reply behind a tool call, at the end of 3 MB
+transcript(1, pad(tree, 3_000_000) + [
+    rec("ai-title", tree, aiTitle="Smoke title one"),
+    says(tree, "EARLIER-REPLY before the tool"), tool(tree), result(tree),
+    says(tree, "FINAL-REPLY part one, " + LINK), says(tree, "FINAL-REPLY part two")])
+session(1, "idle", work)                                        # started outside, works in the tree
+# 2 · working: its transcript is never read
+transcript(2, [says(repo, "WORKING-TEXT")]); session(2, "busy", repo)
+# 3 · asking you something, with the dialog's reason
+transcript(3, [says(repo, "ASKING-TEXT")]); session(3, "waiting", repo, waitingFor="permission to run Bash")
+# 4 · a status nobody measured
+transcript(4, [says(repo, "ODD-TEXT")]); session(4, "pondering", repo)
+# 5 · its process has ended
+transcript(5, [says(repo, "ENDED-TEXT")]); session(5, "idle", repo, pid=ended.pid)
+# 6 · elsewhere, its reply behind 600 KB of other records
+transcript(6, pad("/elsewhere", 3_000_000) + [says("/elsewhere", "FAR-REPLY")] + pad("/elsewhere", 600_000))
+session(6, "idle", "/elsewhere")
+# 7 · the background-command state
+transcript(7, [says(repo, "BG-TEXT")]); session(7, "shell", repo)
+# a file of another shape
+open(os.path.join(sdir, "99999.json"), "w").write(json.dumps({"pid": 99999, "session": "x"}))
+# 8 · not running at all, but resumable: a transcript and no session file
+transcript(8, [says(repo, "OLD-TEXT")])
+
+checks = {}
+try:
+    sys.path.insert(0, os.path.join(repo_root, "share"))
+    import waiting as Wt
+    got = Wt.running([repo])
+    rows = {r["sid"]: r for r in got["sessions"]}
+    checks["the file of another shape is counted"] = got["misshapen"] == 1
+    checks["a session whose process ended is left out"] = sid(5) not in rows
+    checks["each status lands in its group"] = (
+        rows.get(sid(1), {}).get("on") == "done" and rows.get(sid(2), {}).get("on") == "working"
+        and rows.get(sid(3), {}).get("on") == "asking" and rows.get(sid(7), {}).get("on") == "background")
+    checks["an unknown status is listed, not dropped"] = rows.get(sid(4), {}).get("on") == "unknown"
+    one = rows.get(sid(1), {})
+    checks["the last reply is what came after the last tool"] = (
+        "FINAL-REPLY part one" in one.get("text", "") and "FINAL-REPLY part two" in one.get("text", "")
+        and "EARLIER-REPLY" not in one.get("text", ""))
+    checks["the link survives into the reply"] = "http://localhost:5555/?lab=smoke" in one.get("text", "")
+    checks["the title comes from the transcript"] = one.get("title") == "Smoke title one"
+    size1 = os.path.getsize(os.path.join(pdir, sid(1) + ".jsonl"))
+    checks["only the tail of a 3 MB transcript is read"] = 0 < one.get("read", 0) <= 262144 < size1
+    six = rows.get(sid(6), {})
+    size6 = os.path.getsize(os.path.join(pdir, sid(6) + ".jsonl"))
+    checks["a reply behind 600 KB is still found, from the tail"] = (
+        six.get("text") == "FAR-REPLY" and six.get("read", 0) < size6)
+    checks["a working session's transcript is not read"] = "text" not in rows.get(sid(2), {})
+    checks["the dialog's reason comes along"] = rows.get(sid(3), {}).get("waitingFor") == "permission to run Bash"
+    checks["a worktree of the repository is this repository"] = one.get("inRepo") is True
+    checks["another directory is not"] = six.get("inRepo") is False
+
+    # the server: consent first, then the guard on resume
+    sys.path.insert(0, os.path.join(repo_root, "share"))
+    import workspace as W
+    W._cache_write("sessions-deep.json", W.session_stamp(True), {
+        "prompts": [], "touches": {},
+        "sessions": {sid(1): {"p": repo, "t": "one", "n": 1, "a": 1, "b": 1, "live": 1, "files": []},
+                     sid(8): {"p": repo, "t": "eight", "n": 1, "a": 1, "b": 1, "live": 1, "files": []}}})
+
+    def free_port():
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+    def serve(extra, env_extra):
+        port = free_port()
+        env = dict(os.environ, RUBRICATOR_NO_WINDOW="1", RUBRICATOR_NO_WATCH="1", **env_extra)
+        p = subprocess.Popen([md, "serve", "--port", str(port)] + extra + [repo],
+                             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        os.set_blocking(p.stdout.fileno(), False)
+        seen, url = "", None
+        for _ in range(200):
+            time.sleep(0.1)
+            try: seen += p.stdout.read() or ""
+            except BlockingIOError: pass
+            m = re.search(r"(http://127\.0\.0\.1:%d/[A-Za-z0-9_-]+/)" % port, seen)
+            if m: url = m.group(1); break
+        return p, url
+    def call(url, path, body=None):
+        r = urllib.request.Request(url + path, data=None if body is None else json.dumps(body).encode(),
+                                   headers={"Content-Type": "application/json"})
+        try: return json.load(urllib.request.urlopen(r, timeout=60)), 200
+        except urllib.error.HTTPError as e: return json.load(e), e.code
+
+    p, url = serve(["--no-sessions"], {})
+    try:
+        checks["without consent the list is not read"] = bool(url) and call(url, "waiting")[0].get("allowed") is False
+        j = call(url, "waiting", {})[0] if url else {}
+        checks["the surface's own button reads it, for this window"] = (
+            j.get("allowed") is True and any(r["sid"] == sid(1) for r in j.get("sessions", [])))
+    finally:
+        p.kill()
+
+    p, url = serve(["--no-sessions", "--waiting"], {})
+    try:
+        page = urllib.request.urlopen(url, timeout=30).read().decode() if url else ""
+        checks["--waiting opens on the list"] = re.search(r'"surface":\s*"waiting"', page) is not None
+        checks["--waiting is consent for its window"] = bool(url) and call(url, "waiting")[0].get("allowed") is True
+    finally:
+        p.kill()
+
+    p, url = serve(["--sessions", "--allow-launch"], {"RUBRICATOR_DRY_LAUNCH": "1"})
+    try:
+        if url: urllib.request.urlopen(url + "sessions", timeout=120).read()
+        got, code = call(url, "act", {"verb": "resume", "id": sid(1)}) if url else ({}, 0)
+        checks["a running session is not resumed"] = code == 409 and "running in another terminal" in got.get("error", "")
+        got, code = call(url, "act", {"verb": "fork", "id": sid(1)}) if url else ({}, 0)
+        checks["but it can be forked"] = code == 200 and got.get("ok") is True
+        got, code = call(url, "act", {"verb": "resume", "id": sid(8)}) if url else ({}, 0)
+        checks["a session that is not running is resumed as before"] = code == 200 and got.get("ok") is True
+    finally:
+        p.kill()
+except Exception as e:
+    checks["the test ran: %s" % e] = False
+finally:
+    for q in procs: q.terminate()
+
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "28 · who waits on you is read from the end, and a running session is never resumed"
+else
+  no "28 · the waiting list is wrong" "$(grep '^XX' "$WORK/waiting.txt" | tr '\n' ' ')$(tail -2 "$WORK/waiting.txt")"
+fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

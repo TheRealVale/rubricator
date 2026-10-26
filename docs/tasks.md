@@ -1450,6 +1450,57 @@ this register does not trust. Q has no plan document of its own.
 
 ---
 
+## Who waits on you
+
+Several Claude Code sessions run side by side, each finishing at its own
+moment, and coming back to the desk means visiting every terminal to learn which
+one is done and what it said. The answer is already on disk: Claude Code keeps a
+file per running session with its status, and the reply is at the end of the
+transcript. This reads both, each time it is asked, and keeps nothing. No plan
+document of its own; the measurements are in `share/waiting.py`'s header.
+
+- [x] **W1 · The list.** `share/waiting.py` reads `~/.claude/sessions/<pid>.json`,
+      counts a session as running only while `ps` finds a process called
+      `claude` at its pid, and for each one not working reads the tail of its
+      transcript for the last reply — what came after the last tool result.
+      Measured on 2.1.309 across fourteen running sessions: `busy`, `idle` and
+      `shell` on disk, and the binary's own list adds `waiting`; both `shell`
+      sessions had ended their turn with a background command still
+      unreported. The tail is a quarter of a megabyte first and grows fourfold
+      to sixteen at most: **2–17 ms per session**, against transcripts up to
+      **1.4 GB**; the whole list for fourteen sessions in **0.27–0.3 s**.
+      *Done when:* each status lands in its group, an unknown one is listed, a
+      file of another shape is counted, and a worktree of the repository counts
+      as the repository — test 28.
+- [x] **W2 · The surface and the door.** *Waiting* is a surface like *Search*:
+      the replies rendered, links opening outside the app window, grouped as
+      *asking you*, *your turn* and *waiting on its own command*, newest wait
+      first, scoped like Sessions. `md --waiting` opens a window on it. Reading
+      it is reading your history, so it asks the same consent: history on, the
+      flag for its window, or the surface's own button — and the flag does not
+      start the full index (W4). Every empty says which: no session files, files
+      of another shape, nothing running here, everything working.
+- [x] **W3 · A running session is not resumed.** Resume on a session still
+      running in a terminal starts a second process writing the same
+      transcript. The session view says *running now* and offers fork only; the
+      server refuses `resume` for a running id with 409 whatever the page sent.
+      *Done when:* test 28 resumes a session that is not running, forks one
+      that is, and is refused resuming it.
+- [ ] **W4 · The Sessions index at 12 GB.** Measured 2026-10-26 on this
+      machine: 626 sessions, 12 GB of transcripts, **59.5 s** shallow and
+      **87.6 s** deep (the default), against the two seconds the README was
+      written on. `session_stamp` takes the newest transcript's mtime, so any
+      running session invalidates the cache and the whole scan is paid on
+      every window. A per-transcript cache keyed on size and mtime would pay
+      only for what changed. *Done when:* a second window with sessions running
+      fills the Sessions list in seconds. **M**
+- [ ] **W5 · `waiting` seen on disk.** The `asking` group is built from the
+      binary's code, not from a file seen with that status. Open a permission
+      prompt in a session, read its file, and confirm `status` and
+      `waitingFor` — rule 12. **S**
+
+---
+
 ## Killed
 
 Written out because this is what stops it coming back. Thirty-one proposals,

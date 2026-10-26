@@ -78,6 +78,11 @@ WORKSPACE
                           Local only — cannot be combined with --out, and a page built
                           to be moved (--static, -o) takes history only when this flag
                           asks for it, never from the setting.
+      --waiting           open on the Claude Code sessions running now that wait on you,
+                          each with what it said last — for coming back to the desk.
+                          Reads Claude Code's list of running sessions and the end of
+                          their transcripts, for this window only; it does not index
+                          your history. Needs the live workspace.
       --static            skip the local server: build one self-contained page instead.
                           You lose reindexing and notes on disk; you gain a file you
                           can move. -o and -n always imply this.
@@ -104,6 +109,7 @@ MORE
 EXAMPLES
   md                       # the workspace for this directory
   md --sessions            # …and correlate it with your Claude Code history
+  md --waiting             # the running sessions that wait on you, and what each said last
   md README.md
   md ~/Repositories/other  # the workspace for another repo
   md . ../other-repo       # both at once (read-only past the first: see below)
@@ -217,6 +223,9 @@ ws_run() {
   if [ -n "$out" ] && [ -n "$sessions" ]; then
     die "refusing --out with --sessions: your history stays on this machine"
   fi
+  if [ "${WAITING:-0}" = 1 ] && { [ -n "$out" ] || [ "${WS_STATIC:-0}" = 1 ] || [ "$doopen" != 1 ]; }; then
+    die "--waiting needs the live workspace: it reads the running sessions each time you look"
+  fi
   ensure_vendor
   mkdir -p "$CACHE"
   abs="$(cd "$dir" && pwd)"
@@ -232,7 +241,8 @@ ws_run() {
     RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OPEN="$opendoc" \
       RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
       RUBRICATOR_SESSIONS="$([ "$SESSIONS_EXPLICIT" = 1 ] && { [ -n "$sessions" ] && echo 1 || echo 0; })" \
-      nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${SHALLOW:+--shallow} --serve >"$urlfile" 2>/dev/null &
+      nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${SHALLOW:+--shallow} \
+        ${WAITING:+--waiting} --serve >"$urlfile" 2>/dev/null &
     local i=0 url=""
     while [ $i -lt 100 ]; do
       url="$(head -1 "$urlfile" 2>/dev/null || true)"
@@ -251,6 +261,8 @@ ws_run() {
       else open "$url"; fi
       return 0
     fi
+    # the waiting list is read each time you look, which a static page cannot do
+    [ "${WAITING:-0}" != 1 ] || die "could not start the local server, which --waiting needs"
     printf 'rubricator: could not start the local server; falling back to a static page\n' >&2
   fi
 
@@ -258,6 +270,8 @@ ws_run() {
   RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OUT="$file" RUBRICATOR_OPEN="$opendoc" \
     "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${SHALLOW:+--shallow} >/dev/null || exit 1
   if [ "$doopen" = 1 ] && [ -z "$out" ]; then
+    # the test seam holds on this path too: a fallback is no reason to open a window
+    if [ -n "${RUBRICATOR_NO_WINDOW:-}" ]; then printf '%s\n' "$file"; return 0; fi
     url="file://$(urlenc "$file")"
     _c="$(chrome_app)"
     if [ -n "$_c" ]; then
@@ -335,6 +349,7 @@ case "${1:-}" in
         --deep)       WS_SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
         --shallow)    SHALLOW=1 ;;
         --static)     WS_STATIC=1 ;;
+        --waiting)    WAITING=1 ;;
         --allow-launch) ALLOW_LAUNCH=1 ;;
         -o|--out)     shift; WS_OUT="${1:?--out needs a path}" ;;
         -n|--no-open) WS_OPEN=0 ;;
@@ -358,6 +373,7 @@ case "${1:-}" in
         --no-sessions)  SV_SESSIONS=""; SESSIONS_EXPLICIT=1 ;;
         --deep)         SV_SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
         --shallow)      SV_ARGS+=(--shallow) ;;
+        --waiting)      SV_ARGS+=(--waiting) ;;
         --allow-launch) ALLOW_LAUNCH=1 ;;
         --port)         shift; SV_PORT="${1:?--port needs a number}" ;;
         --port=*)       SV_PORT="${1#--port=}" ;;
@@ -417,6 +433,7 @@ while [ $# -gt 0 ]; do
     --deep)                SESSIONS="--sessions"; SESSIONS_EXPLICIT=1 ;;
     --shallow)             SHALLOW=1 ;;
     --static)              WS_STATIC=1 ;;
+    --waiting)             WAITING=1 ;;
     --allow-launch)        ALLOW_LAUNCH=1 ;;
     --vendor)              VENDOR_FORCE=1 ;;
     -h|--help)             usage; exit 0 ;;
@@ -438,16 +455,20 @@ if [ -n "${FILE:-}" ] && [ "$FILE" != "-" ] && [ -d "$FILE" ]; then
   exit 0
 fi
 if [ -z "${FILE:-}" ] && [ "${VENDOR_FORCE:-0}" != 1 ] && [ "${RUBRICATOR_BARE:-}" != "readme" ]; then
-  # bare md: the workspace for here, with the README already open in the reader
+  # bare md: the workspace for here, with the README already open in the reader —
+  # or, with --waiting, the sessions that wait on you in front instead
   OPENDOC=""
-  for cand in README.md readme.md README.markdown index.md; do
-    [ -f "$cand" ] && { OPENDOC="$cand"; break; }
-  done
+  if [ "${WAITING:-0}" != 1 ]; then
+    for cand in README.md readme.md README.markdown index.md; do
+      [ -f "$cand" ] && { OPENDOC="$cand"; break; }
+    done
+  fi
   ws_run "$OUT" "$WS_OPEN" "$SESSIONS" "$OPENDOC" "."
   exit 0
 fi
 [ "$SESSIONS_EXPLICIT" != 1 ] || [ -z "$SESSIONS" ] \
   || die "--sessions applies to the workspace, not to a single file"
+[ "${WAITING:-0}" != 1 ] || die "--waiting applies to the workspace, not to a single file"
 
 ensure_vendor
 if [ "${VENDOR_FORCE:-0}" = 1 ] && [ -z "${FILE:-}" ]; then exit 0; fi
