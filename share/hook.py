@@ -167,6 +167,8 @@ def open_window(url):
 
 def close_window(port):
     """Close only the window showing this run's URL — matched on the port."""
+    if os.environ.get("RUBRICATOR_NO_WINDOW"):   # none was opened, so there is none to close,
+        return                                   # and no application is scripted to look
     # only ever close a single-tab window showing exactly this URL: never a
     # window the user has other tabs in
     script = f'''

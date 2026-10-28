@@ -35,6 +35,16 @@ skip() { printf '  skip  %s (%s)\n' "$1" "$2"; }
 
 echo "rubricator smoke tests"
 
+# ── nothing here scripts another application ─────────────────────────────────
+# A run of this suite happens on a desk where terminals hold live sessions, and
+# one AppleScript that reached them would type into one or switch its tabs. So
+# `osascript` on the PATH is a tripwire: it scripts nothing, writes down that it
+# was called, and fails. Test 34 reads what it wrote, which has to be nothing.
+TRIP="$WORK/tripwire"; mkdir -p "$TRIP"
+printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s"\nexit 1\n' "$WORK/osascript.log" > "$TRIP/osascript"
+chmod +x "$TRIP/osascript"
+export PATH="$TRIP:$PATH"
+
 # ── install into an isolated prefix, the way a stranger would ────────────────
 export HOME="$WORK/home"; mkdir -p "$HOME/.claude"
 # Tests 10 and 14 assert that prompt text does not reach a static page. Under a
@@ -1837,6 +1847,17 @@ JSEOF
                  *)   no "30b · the Open now group is wrong" "$res" ;; esac
 else
   skip "30b · Open now group" "no node"
+fi
+
+# ── 34 · nothing in this run scripted another application ───────────────────
+# The tripwire at the top of this file stands where `osascript` would be found.
+# A test that reached it — the hook closing a window it never opened, say —
+# wrote its arguments down, and that is a failure whether or not the test that
+# did it noticed.
+if [ ! -s "$WORK/osascript.log" ]; then
+  ok "34 · nothing in the suite reached osascript"
+else
+  no "34 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
