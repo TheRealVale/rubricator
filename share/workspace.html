@@ -361,6 +361,8 @@ pre.dossier{
 
 /* the reply line at the foot of a running session, and in a Waiting card */
 .sreply{margin:26px 0 0;padding:16px 0 0;border-top:1px solid var(--border-soft);scroll-margin-bottom:18px}
+/* the reply line stays at the foot of the pane however far up the conversation is read */
+.sreply:not(.off){position:sticky;bottom:0;z-index:2;padding:14px 0 16px;background:var(--bg)}
 .sreply.off .qnote{margin:0 0 0 4px}
 .rbox{display:flex;flex-direction:column;gap:8px}
 .wcard .rbox{margin:12px 0 0}

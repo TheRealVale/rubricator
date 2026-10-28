@@ -2587,7 +2587,6 @@ function sessionSurface(sid, q){
    is there. Opened on a match, a search hit or a prompt you jumped to, it
    opens on that match instead: the first in what you said if any is, since
    that is what a search of your history found. */
-var LANDING_END = '.sreply, .convo > .turn, .convo > .cmark, .plist .pitem';
 function landing(host, F){
   if (F.on && F.list.length){
     var i = 0;
@@ -2597,9 +2596,9 @@ function landing(host, F){
     F.go(i);
     return 'match';
   }
-  var all = host.querySelectorAll(LANDING_END), end = all[all.length - 1];
-  if (end) end.scrollIntoView({ block:'end' });
-  else host.scrollTop = host.scrollHeight;
+  /* the pane's own foot: the reply line stays there, sticky, so it is no
+     element to scroll to, and neither is anything it covers */
+  host.scrollTop = host.scrollHeight;
   return 'end';
 }
 

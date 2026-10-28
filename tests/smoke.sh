@@ -2321,22 +2321,16 @@ var timers = [];
 function setTimeout(fn){ timers.push(fn); }
 function flush(){ while (timers.length) timers.shift()(); }
 
-/* a stand-in for the DOM: the elements landing can ask for are made from the
-   markup the surface wrote, and each records where it was scrolled to */
+/* a stand-in for the DOM: a pane that records each time it is put at its
+   foot, the one place a session opens at when it opens on no match */
 function Host(shown){
-  var h = { offsetHeight: shown ? 600 : 0, scrollTop: 0, scrollHeight: 5000, moved: [], html: '' };
+  var h = { offsetHeight: shown ? 600 : 0, scrollHeight: 5000, moved: [], html: '', top: 0 };
+  Object.defineProperty(h, 'scrollTop', { get: function(){ return h.top; },
+    set: function(v){ if (v === h.scrollHeight) h.moved.push('end'); h.top = v; } });
   var inner = { set innerHTML(v){ h.html = v; }, get innerHTML(){ return h.html; } };
   h.querySelector = function(sel){ return /inner/.test(sel) && h.html !== null ? inner : null; };
   Object.defineProperty(h, 'innerHTML', { set: function(v){ h.html = ''; } });
-  h.querySelectorAll = function(){
-    var out = [], re = /<div class="(turn [a-z]+|sreply)"/g, m, i = 0;
-    while ((m = re.exec(h.html))){
-      (function(name, k){
-        out.push({ name: name, scrollIntoView: function(o){ h.moved.push(name + '#' + k + ':' + o.block); h.scrollTop = 4000; } });
-      })(m[1], i++);
-    }
-    return out;
-  };
+  h.querySelectorAll = function(){ return []; };
   return h;
 }
 /* a find bar that has run: matches, each in what you said or not */
@@ -2365,7 +2359,7 @@ var S = sessionSurface('r1', ''), host = Host(true);
 S.render(host); flush();
 want(host.moved.length === 0, 'it scrolled before the conversation arrived: ' + host.moved);
 pending.shift()(conv);
-want(host.moved.join() === 'sreply#4:end', 'it did not open at its foot: ' + host.moved);
+want(host.moved.join() === 'end', 'it did not open at its foot: ' + host.moved);
 /* later, the place is yours */
 host.scrollTop = 1234; S.refresh(host); S.focus();
 want(host.moved.length === 1 && host.scrollTop === 1234, 'a refresh or a second look moved it: ' + host.moved);
@@ -2385,7 +2379,7 @@ S = sessionSurface('h1', ''); host = Host(false);
 S.render(host); flush(); pending.shift()(conv);
 want(host.moved.length === 0, 'a hidden pane was scrolled');
 host.offsetHeight = 600; S.focus(); S.focus();
-want(host.moved.join() === 'turn claude#3:end', 'shown, it did not open at its last turn, once: ' + host.moved);
+want(host.moved.join() === 'end', 'shown, it did not open at its end, once: ' + host.moved);
 
 /* nothing to read: an archived session is whole at once, and opens at its end */
 D.sessions = { a1: { live: 0 } }; finders = [];
