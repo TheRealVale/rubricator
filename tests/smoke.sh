@@ -1017,6 +1017,95 @@ else
   skip "22 · file ranking" "no node"
 fi
 
+# ── 23 · an abandoned composer takes its mark with it ───────────────────────
+# A verb writes its mark before the composer opens, so the composer is the only
+# thing standing between a keystroke and a stored item. Close it having written
+# nothing — Escape, or a click anywhere else — and the mark used to stay: a
+# highlight over an empty note, in the tray and in the export. The rule has
+# three edges and all three are in one browser run, because this is event
+# ordering and DOM state, not a function that can be lifted out.
+if [ "$WITH_BROWSER" = 1 ]; then
+  CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  [ -x "$CHROME" ] || CHROME="$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+fi
+if [ "$WITH_BROWSER" = 1 ] && [ -x "$CHROME" ]; then
+  printf '# composer fixture\n\nAlpha paragraph.\n\nBeta paragraph.\n' > "$WORK/composer.md"
+  "$MD" -o "$WORK/composer.html" "$WORK/composer.md" >/dev/null 2>&1
+  python3 - "$WORK/composer.html" "$WORK/composer-probe.html" <<'PYEOF'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+probe = """<script>window.addEventListener('load',function(){setTimeout(function(){
+function K(t,k){ t.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true})); }
+function type(t,v){ t.value=v; t.dispatchEvent(new Event('input',{bubbles:true})); }
+var out={}, doc=document.querySelector('article.md')||document.querySelector('.md');
+var blocks=[].filter.call(doc.children,function(e){return e.dataset.lineStart;});
+var b=blocks[1]||blocks[0];
+var comp=document.getElementById('composer'), t=document.getElementById('c-text');
+function hover(){ b.dispatchEvent(new MouseEvent('mouseover',{bubbles:true})); }
+function items(){ return __mdReview.store.items.length; }
+function hl(){ return doc.querySelectorAll('.has-anno').length; }
+
+hover(); K(document,'c');
+out.opens=comp.classList.contains('show'); out.openHl=hl();
+K(t,'Escape');
+out.escItems=items(); out.escHl=hl(); out.escClosed=!comp.classList.contains('show');
+
+hover(); K(document,'n');
+document.body.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
+out.awayItems=items(); out.awayHl=hl();
+
+hover(); K(document,'c'); type(t,'written'); K(t,'Escape');
+out.keptItems=items(); out.keptNote=(__mdReview.store.items[0]||{}).note;
+
+hover(); K(document,'a');
+out.silentItems=items();
+
+var card=document.querySelector('#tray-list > div');
+if (card) card.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+setTimeout(function(){
+  out.reopened=comp.classList.contains('show');
+  type(t,''); K(t,'Escape');
+  out.emptiedItems=items();
+  var d=document.createElement('div'); d.id='probe';
+  d.textContent=JSON.stringify(out); document.body.appendChild(d);
+},450);
+},500);});</script>"""
+i = src.rindex("</body>")
+open(sys.argv[2], "w", encoding="utf-8").write(src[:i] + probe + src[i:])
+PYEOF
+  "$CHROME" --headless --disable-gpu --virtual-time-budget=12000 \
+    --use-mock-keychain --password-store=basic --disable-background-networking \
+    --window-size=1280,900 --dump-dom "file://$WORK/composer-probe.html" \
+    >"$WORK/composer.dom" 2>/dev/null
+  python3 - "$WORK/composer.dom" >"$WORK/composer.txt" 2>&1 <<'PYEOF'
+import json, re, sys
+dom = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+m = re.search(r'<div id="probe">(.*?)</div>', dom, re.S)
+if not m:
+    print("XX the page never reached the probe"); sys.exit(1)
+p = json.loads(m.group(1))
+checks = {
+  "a verb opens the composer on the block":  p["opens"] and p["openHl"] == 1,
+  "escape discards the empty mark":          p["escClosed"] and p["escItems"] == 0 and p["escHl"] == 0,
+  "so does clicking away":                   p["awayItems"] == 0 and p["awayHl"] == 0,
+  "a written note is kept":                  p["keptItems"] == 1 and p["keptNote"] == "written",
+  "a silent verb needs no note":             p["silentItems"] == 2,
+  "emptying an existing note keeps it":      p["reopened"] and p["emptiedItems"] == 2,
+}
+for k, v in checks.items():
+    print(("ok " if v else "XX ") + k + "  " + json.dumps(p))
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+  if [ $? = 0 ]; then
+    ok "23 · a composer closed with nothing written leaves no mark behind"
+  else
+    no "23 · the composer keeps an empty mark" \
+       "$(grep '^XX' "$WORK/composer.txt" | head -2 | cut -c1-220 | tr '\n' ' ')"
+  fi
+else
+  skip "23 · composer lifecycle" "needs --browser and Chrome"
+fi
+
 # ── 24 · a session's files can be reached, and only those ───────────────────
 # `reveal` and `edit` resolve their target through the document index, so they
 # reach the markdown in a repository and nothing else — while a session touches

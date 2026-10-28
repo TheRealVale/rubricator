@@ -378,7 +378,7 @@ function addFromSelection(verb){
   hidePop();
   getSelection().removeAllRanges();
   if (SILENT[verb]) toast(VERBS[verb].label + ' · line ' + s.a);
-  else openComposer(it);
+  else openComposer(it, null, true);
 }
 function addFromBlock(verb, el){
   if (!el) { toast('Hover a block or select text first'); return; }
@@ -386,11 +386,16 @@ function addFromBlock(verb, el){
   if (/^H[1-6]$/.test(el.tagName)){ b = sectionEnd(a); section = b > a; }
   var it = addItem(verb, srcSlice(a, b), a, b, false, el, section);
   if (SILENT[verb]) toast(VERBS[verb].label + ' · line ' + a);
-  else openComposer(it, el);
+  else openComposer(it, el, true);
 }
 
 /* ── composer ────────────────────────────────────────── */
-var editing = null, saveT = null;
+/* a verb writes its mark before the composer appears, so walking away from a
+   new composer without writing anything has to take the mark with it —
+   otherwise Escape leaves a highlight standing over an empty note. Only a mark
+   born with this composer is discarded; clearing the text of an existing note
+   and closing leaves the mark where you put it. */
+var editing = null, saveT = null, born = false;
 var cChips = document.getElementById('c-chips');
 var cText = document.getElementById('c-text');
 var cDel = document.getElementById('c-del');
@@ -410,8 +415,8 @@ function syncChips(){
     b.style.setProperty('--chip-color', VERBS[b.dataset.verb].color);
   });
 }
-function openComposer(it, el){
-  editing = it;
+function openComposer(it, el, isNew){
+  editing = it; born = !!isNew;
   var target = el || blockAtLine(it.lineStart);
   composer.classList.add('show');
   syncChips();
@@ -425,7 +430,12 @@ function openComposer(it, el){
   hidePop();
 }
 function closeComposer(){
-  composer.classList.remove('show'); editing = null;
+  /* a chip can turn a new mark into one of the verbs that carries no note,
+     and those are complete the moment they are made. */
+  var empty = born && editing && !SILENT[editing.verb] && !String(editing.note).trim();
+  var abandoned = empty ? editing.id : null;
+  composer.classList.remove('show'); editing = null; born = false;
+  if (abandoned !== null) removeItem(abandoned);
 }
 cText.addEventListener('input', function(){
   if (!editing) return;
@@ -439,7 +449,8 @@ cText.addEventListener('keydown', function(e){
 });
 cDel.addEventListener('click', function(){
   if (!editing) return;
-  removeItem(editing.id); closeComposer();
+  var id = editing.id; born = false;
+  closeComposer(); removeItem(id);
 });
 document.addEventListener('mousedown', function(e){
   if (!composer.contains(e.target) && !pop.contains(e.target) && composer.classList.contains('show')){
@@ -701,6 +712,9 @@ document.addEventListener('keydown', function(e){
 var booted = false, hovering = null;
 function openDoc(m){
   if (!m || !m.doc) return;
+  /* before a single field moves: closing the composer can write to the store,
+     and the store it means is the one still on screen. */
+  hidePop(); closeComposer();
   doc = m.doc;
   META = m.META || {};
   raw  = m.raw || '';
@@ -710,7 +724,6 @@ function openDoc(m){
   PATH  = META.rel || META.name || '';
   SHORT = META.name || PATH;
 
-  hidePop(); closeComposer();
   loadStore();
   if (!m.premapped) mapLines();     // an extracted document arrives already mapped
   blocks = [].filter.call(doc.children, function(el){ return el.dataset.lineStart; });
