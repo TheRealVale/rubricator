@@ -242,6 +242,47 @@ end of it.
       worked on it since, with the existing timeline finally labelled.
 - [ ] **G6 · Finish.** `ai-title` as the session title, compaction markers, and
       jumping from a search hit to the turn that matched.
+- [x] **G7 · The pictures in a conversation.** A transcript carries pictures
+      three ways, read off this machine's: an image block in a tool's result
+      (a PNG Claude read, a browser's screenshot), an image block beside your
+      prompt's `[Image #1]` with a note after it naming where the harness saved
+      it, and a path to an image in Claude's words or a subagent's report. Each
+      is a thumbnail where it happened — under your prompt, under Claude's
+      words, under the report — loaded when it scrolls into view, and a tool's
+      line opens the picture it returned. A thumbnail opens a lightbox in the
+      window; the arrow keys step through the session's pictures, Escape or a
+      click closes it. A path whose file has gone, or is past 25 MB, says so in
+      its place. The harness's note on a picture's size, `[Image: original …]`,
+      marks nothing, and a paste's own note marks only a prompt that carried no
+      image. The page asks for a picture by session and place: the byte its
+      record's line begins at and its ordinal there, which an append-only
+      transcript keeps, where an ordinal across a transcript read from its end
+      would shift as it grows. The server reads that record and serves its
+      bytes, or a path its own words name — only an image file, by extension
+      and by its first bytes, on disk and under the cap — with no caching, and
+      inert opened on its own; never a path the page sends. Measured
+      2026-10-28: 139 pictures in a 113 MB transcript, the reading 0.6 s.
+      *Done when:* each kind lands where it happened, every place serves its own
+      bytes, a path sent, a file not named, a gone one, an oversize one and a
+      non-image are refused, the page's policy is untouched — test 40; the
+      lightbox opens, steps round and closes — test 42.
+- [x] **G8 · What a session published.** The Artifact tool's call names its
+      file and, updating one published elsewhere, its url; its result's
+      `toolUseResult` holds the url, the path and the published title. A
+      session's view lists what it published, one row per url, counting the
+      publishes that succeeded: a failed one, a read, a quickstart, an asset
+      upload, a sidechain's and a logged request's copy count for nothing. A
+      row's title is the file's `<title>`, the published one once the file is
+      gone; it opens claude.ai in the browser, and *open the source* opens the
+      file in a tab as highlighted text, never rendered, so nothing in it runs
+      or loads. The list is read from the whole transcript — searched in large
+      pieces for the tool's name, only the lines holding it and the few after
+      each parsed: 0.4 s for 1.4 GB, measured 2026-10-28 — and the index counts
+      them for the session's row in Sessions, for a third of a second on that
+      transcript.
+      *Done when:* calls fold per artifact with their count, the index counts
+      them, the source comes by number and never by a path sent — test 41; the
+      rows, the count and a source that runs nothing on the page — test 43.
 
 ---
 
@@ -1624,7 +1665,7 @@ measurements are in `share/waiting.py`'s header.
       is queued, are for the first real run to show.
       *Done when:* a busy reply is refused without the flag, `waiting` and
       `shell` even with it, a stop unless busy; a stop sends exactly one Escape
-      and no text; the page asks before either — tests 35 and 37, and test 40
+      and no text; the page asks before either — tests 35 and 37, and test 44
       finds no call to osascript.
 - [x] **W12 · The server lives while its window does.** A window in the
       background, or on a Mac asleep, has its timers held back, so its

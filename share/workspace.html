@@ -207,6 +207,7 @@ pre.dossier{
 .srow.on::before{background:var(--accent)}
 .srow .ttl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .srow .sub{font-size:11px;color:var(--fg-dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+.srow .sub .arts svg{width:10px;height:10px;vertical-align:-1px;margin-right:2px}
 .sdet h3{font-size:15.5px;margin:0 0 5px;letter-spacing:-.01em;line-height:1.45}
 .sdet .who{font-size:11.5px;color:var(--fg-dim);margin-bottom:16px;display:flex;gap:11px;flex-wrap:wrap}
 .plist{display:flex;flex-direction:column;gap:7px}
@@ -345,6 +346,42 @@ pre.dossier{
 .fchip i{font-style:normal;opacity:.66}
 .fchip.go{cursor:pointer;color:var(--fg-muted)}
 .fchip.go:hover{border-color:var(--accent);color:var(--fg)}
+/* the pictures in a conversation: one size of thumbnail where each happened,
+   and in its place, words, where there is no picture to show */
+.shots{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.shots.mid{justify-content:center;margin:-12px 0 20px}
+.shot{all:unset;box-sizing:border-box;cursor:zoom-in;display:block;width:122px;height:78px;border-radius:7px;
+  overflow:hidden;border:1px solid var(--border);background:var(--bg-soft)}
+.shot img{display:block;width:100%;height:100%;object-fit:cover}
+.shot:hover,.shot:focus-visible{border-color:var(--accent)}
+.shot.off{cursor:default;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:7px 9px;
+  font-size:10px;line-height:1.35;color:var(--fg-dim);border-style:dashed;background:transparent}
+.shot.off i{font-style:normal;font-family:var(--mono);color:var(--fg-muted);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.did .tool .shotref{all:unset;cursor:zoom-in;flex:none;font-family:var(--font);font-size:9.5px;
+  color:var(--fg-muted);border:1px solid var(--border);border-radius:20px;padding:0 7px}
+.did .tool .shotref:hover{color:var(--fg);border-color:var(--accent)}
+/* what a session published: the row opens it on claude.ai, its button the
+   file it was published from */
+.tfile.art{cursor:default;align-items:center}
+.tfile.art .nm{color:var(--fg);text-decoration:none}
+.tfile.art a.nm{cursor:pointer}
+.tfile.art a.nm:hover{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.tfile.art .asrc{all:unset;cursor:pointer;flex:none;font-size:11px;color:var(--fg-muted);
+  border:1px solid var(--border);border-radius:20px;padding:1px 10px}
+.tfile.art .asrc:hover{color:var(--fg);border-color:var(--accent)}
+.tfile.art .sub.gone{font-style:italic}
+/* an artifact's source: text, never a page */
+.srcv .who .f{font-family:var(--mono);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;max-width:52ch}
+.srcv .who a{color:var(--accent);text-decoration:none}
+.srcv .who a:hover{text-decoration:underline}
+.srccode{margin:4px 0 0;padding:14px 16px;border:1px solid var(--border);border-radius:10px;
+  background:var(--bg-soft);font-family:var(--mono);font-size:11.5px;line-height:1.55;
+  white-space:pre-wrap;overflow-wrap:anywhere;tab-size:2}
+.srccode code{background:none;padding:0;font-size:inherit;white-space:inherit}
+/* the highlighter's own theme draws a box of its own; the view has one already */
+.surf .srccode code.hljs{background:none;padding:0;overflow:visible}
 /* where the conversation was cut, compacted, or interrupted */
 .cmark{display:flex;align-items:center;gap:11px;margin:20px 0;font-size:9.5px;
   text-transform:uppercase;letter-spacing:.09em;color:var(--fg-dim)}
@@ -712,6 +749,26 @@ html[data-mode="light"] #keys{background:rgba(60,50,35,.20)}
 #keys .row span{color:var(--fg-muted)}
 #keys .note{margin-top:18px;font-size:11.5px;color:var(--fg-dim);line-height:1.55;
   border-top:1px solid var(--border-soft);padding-top:13px}
+/* ── the lightbox: one picture over the window, dark in either mode, because
+   a screenshot reads best on dark ─────────────────────────────────────────── */
+#shotbox{position:fixed;inset:0;z-index:96;display:flex;align-items:center;justify-content:center;
+  background:rgba(7,8,11,.88);cursor:zoom-out}
+#shotbox[hidden]{display:none}
+#shotbox figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:11px;max-width:90vw}
+#shotbox img{display:block;max-width:90vw;max-height:84vh;object-fit:contain;border-radius:6px;
+  box-shadow:0 12px 44px rgba(0,0,0,.55)}
+#shotbox img.bad{min-width:260px;min-height:150px;background:#1b1d22}
+#shotbox figcaption{display:flex;gap:16px;max-width:90vw;font-size:11.5px;color:#d8d4cc}
+#shot-cap{font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#shot-n{flex:none;color:#9d998f;font-variant-numeric:tabular-nums}
+#shotbox .shotnav{all:unset;cursor:pointer;position:absolute;top:50%;transform:translateY(-50%);
+  width:46px;height:66px;display:flex;align-items:center;justify-content:center;border-radius:10px;
+  color:#ece8df;background:rgba(255,255,255,.06)}
+#shotbox .shotnav:hover{background:rgba(255,255,255,.15)}
+#shotbox .shotnav[hidden]{display:none}
+#shotbox .shotnav svg{width:22px;height:22px}
+#shotbox #shot-prev{left:16px}
+#shotbox #shot-next{right:16px}
 </style>
 </head>
 <body>
@@ -763,6 +820,13 @@ html[data-mode="light"] #keys{background:rgba(60,50,35,.20)}
     <h3>Keys</h3>
     <div class="cols" id="keys-cols"></div>
   </div>
+</div>
+<!-- a picture from a conversation, over the window: Escape or a click closes
+     it, the arrows step through the session's others -->
+<div id="shotbox" hidden role="dialog" aria-modal="true" aria-label="Picture">
+  <figure><img id="shot-img" alt=""><figcaption><span id="shot-cap"></span><span id="shot-n"></span></figcaption></figure>
+  <button class="shotnav" id="shot-prev" aria-label="Previous picture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <button class="shotnav" id="shot-next" aria-label="Next picture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
 </div>
 <div id="pal">
   <div class="box">

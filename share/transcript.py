@@ -24,12 +24,23 @@ Not every record that wears the user's role is the user's. Another session's
 message, an agent's report, a background task's notice and the harness's own
 notes arrive as `type: user` too, and `voice` says which each is; they become
 turns of their own, never yours. The shapes are in `voice`'s comment.
+
+A conversation carries pictures, and a turn says where each one is rather than
+carrying it: the byte its record's line begins at, and which of that line's
+images it is. `image` serves one by that place and by nothing else, so the page
+never names a file. What the session published with the Artifact tool is read
+by `artifacts`, from the whole transcript rather than its end, because a page
+published early is still the session's.
 """
 
+import base64
+import calendar
 import glob
+import html
 import json
 import os
 import re
+import stat
 import time
 from pathlib import Path
 
@@ -139,12 +150,17 @@ def read(sid, path=None):
     # among them; that there were earlier ones is said rather than hidden.
     earlier = len(turns) > MAX_TURNS
     turns = turns[-MAX_TURNS:]
+    looked = {}
     for t in turns:
         for k in ("text", "from"):
             if t.get(k):
                 t[k] = scrub(t[k])
         for x in t.get("tools") or ():
             x["b"] = scrub(x["b"])
+            if x.get("imgs"):
+                x["imgs"] = [_shot(s, cwd, looked, x["n"], x["b"]) for s in x["imgs"]]
+        if t.get("imgs"):
+            t["imgs"] = [_shot(s, cwd, looked) for s in t["imgs"]]
     return {"id": sid, "title": title, "project": cwd, "turns": turns,
             "you": sum(1 for t in turns if t["who"] == "you"),
             "claude": sum(1 for t in turns if t["who"] == "claude"),
@@ -167,7 +183,7 @@ def _records(p, start, end):
             line = f.readline()
             if not line:
                 break
-            pos += len(line)
+            at, pos = pos, pos + len(line)
             top = TOP_TYPE.match(line)
             if top and top.group(1) not in READ:
                 continue
@@ -176,13 +192,18 @@ def _records(p, start, end):
             except Exception:
                 continue
             if isinstance(d, dict):
-                out.append(_slim(d))
+                out.append(_slim(d, at))
     return out, min(first, end)
 
 
-def _slim(d):
+def _slim(d, at=0):
     """A record without what no turn shows — a tool's output, a file's
-    content — so a gigabyte of transcript is a few megabytes held."""
+    content, an image's bytes — so a gigabyte of transcript is a few
+    megabytes held. What stays of an image is where it is."""
+    ims = [dict(k=im["k"], at=at, i=i, **{x: im[x] for x in ("tid", "path") if x in im})
+           for i, im in enumerate(images_of(d))]
+    if ims:
+        d = dict(d, _im=ims)
     msg = d.get("message")
     content = msg.get("content") if isinstance(msg, dict) else None
     if d.get("type") == "user" and isinstance(content, list):
@@ -253,6 +274,7 @@ def _turns(recs):
         content = msg.get("content")
 
         if kind == "user":
+            ims = d.get("_im") or []
             if isinstance(content, str):
                 text = content.strip()
             else:
@@ -264,6 +286,10 @@ def _turns(recs):
                         got = pending.pop(b.get("tool_use_id"), None)
                         if got is not None:
                             got["ok"] = not b.get("is_error")
+                            # what a tool showed Claude: a screenshot, an image it read
+                            shot = [s for s in ims if s["k"] == "tool" and s.get("tid") == b.get("tool_use_id")]
+                            if shot:
+                                got["imgs"] = shot
                         res = d.get("toolUseResult")
                         if isinstance(res, dict) and res.get("type") in ("create", "update"):
                             fp = res.get("filePath") or ""
@@ -272,22 +298,44 @@ def _turns(recs):
                     elif b.get("type") == "text":
                         said.append(b.get("text") or "")
                 text = "\n".join(x for x in said if x.strip()).strip()
-            if not text:
+            pasted = [s for s in ims if s["k"] == "pasted"]
+            # The harness's note on an image a tool returned, its size and how
+            # it was scaled, follows the tool's result: not a paste, and
+            # nothing to show that the tool's own line does not.
+            if text.startswith("[Image: original"):
+                continue
+            # A pasted image's bytes are in your prompt, and a note naming the
+            # file it was saved to follows it. The prompt already shows it;
+            # the note stands alone only where the prompt carried no image.
+            if text.startswith("[Image: source:"):
+                last = turns[-1] if turns and cur is None else None
+                if not (last and last["who"] == "you" and last.get("imgs")):
+                    mark("image", "you pasted an image")
+                    src = [s for s in ims if s["k"] == "source"]
+                    if src:
+                        turns[-1]["imgs"] = src
+                continue
+            if not text and not pasted:
                 continue
             if text.startswith("[Request interrupted"):
                 mark("interrupted", "you interrupted here")
                 continue
             v = voice(d, text)
             if v == "you":
-                if bare_command(text):
+                if bare_command(text) and not pasted:
                     said_it(mark, text)
                 else:
                     close()
                     turns.append({"who": "you", "t": stamp(d), "text": text[:MAX_TEXT]})
+                    if pasted:
+                        turns[-1]["imgs"] = pasted
             elif v:
                 close()
                 turns.append({"who": "note", "t": stamp(d), "kind": v[0], "from": v[1],
                               "about": v[2], "text": v[3][:MAX_TEXT]})
+                shots = [s for s in ims if s["k"] == "path"]
+                if shots:
+                    turns[-1]["imgs"] = shots
             else:
                 said_it(mark, text)
             continue
@@ -319,6 +367,10 @@ def _turns(recs):
                     entry = {"n": b.get("name") or "?", "b": brief(b.get("name"), b.get("input"))}
                     cur["tools"].append(entry)
                     pending[b.get("id")] = entry
+            # the pictures Claude names by their path go with the words that name them
+            shots = [s for s in d.get("_im") or () if s["k"] == "path"]
+            if shots:
+                cur.setdefault("imgs", []).extend(shots)
     close()
 
     # a reply that is only tool calls belongs with the one that explains it
@@ -331,6 +383,8 @@ def _turns(recs):
                 and not merged[-1]["text"]):
             prev = merged.pop()
             t["tools"] = prev["tools"] + t["tools"]
+            if prev.get("imgs"):
+                t["imgs"] = prev["imgs"] + t.get("imgs", [])
             t["thinking"] += prev["thinking"]
             t["wrote"] = prev["wrote"] + t["wrote"]
             t["edited"] = prev["edited"] + t["edited"]
@@ -454,11 +508,407 @@ def said_it(mark, text):
 
 
 def stamp(d):
+    """When a record was written: its timestamp is UTC, as its Z says."""
     ts = d.get("timestamp") or ""
     try:
-        return int(time.mktime(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")))
+        return calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
     except Exception:
         return 0
+
+
+# ── the pictures in a conversation ───────────────────────────────────────────
+# Three ways, read off this machine's transcripts:
+#
+#   a tool's result   an image block inside a tool_result's content, base64:
+#                     Claude read a PNG, or a browser tool returned a screenshot.
+#                     The harness follows it with "[Image: original WxH,
+#                     displayed at …]", a note of its own and not a paste
+#   your paste        an image block beside your prompt's "[Image #1]", base64,
+#                     and a record after it, "[Image: source: <path>]", naming
+#                     where the harness saved it
+#   a path            a screenshot Claude names in its own words, or a subagent
+#                     in its report: an absolute path to an image on disk, which
+#                     may have gone since
+#
+# A turn holds each as a place — the byte its record's line begins at and its
+# ordinal among that line's images — and `image` serves it by that place alone.
+# The page cannot name a file: the bytes come from the record itself, or from a
+# path the record's own words name. What `images_of` counts on a line is what
+# `image` counts there, because both call it.
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")     # never SVG: it can carry a script
+IMAGE_MAX = 25 * 1024 * 1024
+LINE_MAX = 64 * 1024 * 1024
+# an absolute path, or one from home, ending on a raster image's extension; not
+# the tail of a URL, and not cut out of the middle of a longer word
+IMAGE_PATH = re.compile(r"(?<![\w/.~:-])((?:~/|/)[^\s`'\"()<>\[\]{}|*,;]*\.(?:png|jpe?g|gif|webp))(?![\w])",
+                        re.I)
+PASTE_SOURCE = re.compile(r"\[Image: source: ([^\]\n]+)\]")
+MAGIC = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"),
+         (b"GIF87a", "image/gif"), (b"GIF89a", "image/gif"))
+
+
+class Withheld(Exception):
+    """What a route refuses to serve, with the status it answers and why."""
+    def __init__(self, status, why):
+        super().__init__(why)
+        self.status, self.why = status, why
+
+
+def paths_in(text):
+    """Image paths named in some words, each once, in the order named."""
+    out = []
+    for m in IMAGE_PATH.finditer(text or ""):
+        p = os.path.expanduser(m.group(1))
+        if p not in out:
+            out.append(p)
+    return out
+
+
+def images_of(d):
+    """The images one record holds, in order, as {k, tid?, src?, path?}."""
+    if not isinstance(d, dict) or d.get("isSidechain"):
+        return []
+    msg = d.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    out = []
+    if d.get("type") == "assistant" and isinstance(content, list):
+        for p in paths_in("\n".join(b.get("text") or "" for b in content
+                                    if isinstance(b, dict) and b.get("type") == "text")):
+            out.append({"k": "path", "path": p})
+    elif d.get("type") == "user":
+        blocks = content if isinstance(content, list) else []
+        text = content if isinstance(content, str) else "\n".join(
+            b.get("text") or "" for b in blocks if isinstance(b, dict) and b.get("type") == "text")
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_result" and isinstance(b.get("content"), list):
+                for x in b["content"]:
+                    if isinstance(x, dict) and x.get("type") == "image" and isinstance(x.get("source"), dict):
+                        out.append({"k": "tool", "tid": b.get("tool_use_id"), "src": x["source"]})
+            elif b.get("type") == "image" and isinstance(b.get("source"), dict):
+                out.append({"k": "pasted", "src": b["source"]})
+        for m in PASTE_SOURCE.finditer(text):
+            out.append({"k": "source", "path": os.path.expanduser(m.group(1).strip())})
+        # a subagent's report names the screenshots it took, as Claude does
+        if "<agent-message" in text[:1000]:
+            v = voice(d, text.strip())
+            if isinstance(v, tuple) and v[0] == "agent":
+                out.extend({"k": "path", "path": p} for p in paths_in(v[3]))
+    return out
+
+
+def sniff(data):
+    """The image type its first bytes say it is, or None."""
+    for head, mime in MAGIC:
+        if data.startswith(head):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def look(path):
+    """Whether a named image can be shown: ok, gone, big, or not (not an
+    image file of a kind this shows)."""
+    if not path or not os.path.isabs(path) or not path.lower().endswith(IMAGE_EXT):
+        return "not"
+    try:
+        st = os.stat(path)
+    except OSError:
+        return "gone"
+    if not stat.S_ISREG(st.st_mode):
+        return "not"
+    return "big" if st.st_size > IMAGE_MAX else "ok"
+
+
+def _shot(s, cwd, looked, tool="", brief_=""):
+    """An image as the page gets it: its place, its kind, what to call it, and
+    whether it can be shown. A path is told by its name, never sent back."""
+    out = {"at": s["at"], "i": s["i"], "k": s["k"]}
+    if "path" in s:
+        p = s["path"]
+        if p not in looked:
+            looked[p] = look(p)
+        out["state"] = looked[p]
+        out["name"] = scrub(os.path.basename(p))
+        out["where"] = scrub(short(p, cwd))
+    else:
+        out["state"] = "ok"
+    if tool:
+        out["tool"] = tool
+        out["about"] = brief_
+    return out
+
+
+def image(sid, at, i, path=None):
+    """One image, by its place in the session's transcript: the line that
+    begins at byte `at`, and the `i`th image on it. Returns (bytes, type), or
+    raises Withheld saying why not."""
+    p = path or find(sid)
+    if not p or not p.is_file():
+        raise Withheld(404, "no transcript on disk")
+    if not isinstance(at, int) or not isinstance(i, int) or at < 0 or i < 0:
+        raise Withheld(400, "an image is named by its place in the transcript")
+    if at >= p.stat().st_size:
+        raise Withheld(404, "that place is past the end of the transcript")
+    with p.open("rb") as f:
+        if at:
+            f.seek(at - 1)
+            if f.read(1) != b"\n":
+                raise Withheld(404, "no line begins there")
+        line = f.readline(LINE_MAX + 1)
+    top = TOP_TYPE.match(line)
+    if len(line) > LINE_MAX or (top and top.group(1) not in READ):
+        raise Withheld(404, "no turn is read from that line")
+    try:
+        d = json.loads(line.decode("utf-8", "replace"))
+    except Exception:
+        raise Withheld(404, "that line is not a record")
+    ims = images_of(d)
+    if i >= len(ims):
+        raise Withheld(404, "no such image on that line")
+    im = ims[i]
+    if "src" in im:
+        src = im["src"]
+        if src.get("type") != "base64" or not isinstance(src.get("data"), str):
+            raise Withheld(415, "not an image carried in the transcript")
+        if len(src["data"]) > IMAGE_MAX * 4 // 3 + 4:
+            raise Withheld(413, "too large to show")
+        try:
+            data = base64.b64decode(src["data"])
+        except Exception:
+            raise Withheld(415, "not an image carried in the transcript")
+    else:
+        state = look(im["path"])
+        if state != "ok":
+            raise Withheld({"gone": 404, "big": 413}.get(state, 415),
+                           {"gone": "that file is no longer on disk", "big": "too large to show"}
+                           .get(state, "not an image file"))
+        with open(im["path"], "rb") as f:
+            data = f.read(IMAGE_MAX + 1)
+        if len(data) > IMAGE_MAX:
+            raise Withheld(413, "too large to show")
+    mime = sniff(data)
+    if not mime:
+        raise Withheld(415, "not an image file")
+    return data, mime
+
+
+# ── what the session published ───────────────────────────────────────────────
+# Claude Code's Artifact tool publishes a page to claude.ai. Its call names the
+# local file (`file_path`), an `action` (none, or "publish", for a publish) and,
+# when it updates one published from another session, its `url`; its result's
+# `toolUseResult` holds the published `url`, the `path`, the published `title`
+# and a `seq` counting versions, and its text says "Published <path> at <url>".
+# An update keeps the url, sometimes from another file, so an artifact is its
+# url. A call that failed, or that only read, listed, opened or uploaded an
+# asset, published nothing. Read off this machine's transcripts on 2.1.309.
+ARTIFACT_URL = re.compile(r"https://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+")
+PAGE_EXT = (".html", ".htm", ".md")
+PAGE_MAX = 16 * 1024 * 1024        # the Artifact tool's own limit on a page
+SOURCE_MAX = 2 * 1024 * 1024       # what a source view is sent of one
+STALE = 2000                       # lines a call waits for its result
+
+
+class Published:
+    """The artifacts a session published, one per artifact however often it
+    was published again, fed one line at a time. Lines that cannot matter are
+    passed over unparsed."""
+
+    def __init__(self):
+        self.calls = {}                 # tool_use id → the call, until its result is read
+        self.arts = {}                  # url → the artifact, in the order first published
+        self.seen = 0
+
+    def feed(self, line):
+        b = isinstance(line, bytes)
+        self.seen += 1
+        if (b'"name":"Artifact"' if b else '"name":"Artifact"') in line:
+            d = self._parse(line)
+            if d and d.get("type") == "assistant" and not d.get("isSidechain"):
+                self._call(d)
+        elif self.calls and (b'"tool_use_id"' if b else '"tool_use_id"') in line:
+            ids = [k for k in self.calls if (k.encode() if b else k) in line]
+            if ids:
+                d = self._parse(line)
+                if d and d.get("type") == "user":
+                    self._result(d)
+            for k in [k for k, c in self.calls.items() if self.seen - c["seen"] > STALE]:
+                del self.calls[k]
+
+    @staticmethod
+    def _parse(line):
+        try:
+            d = json.loads(line.decode("utf-8", "replace") if isinstance(line, bytes) else line)
+            return d if isinstance(d, dict) else None
+        except Exception:
+            return None
+
+    def _call(self, d):
+        for b in (d.get("message") or {}).get("content") or ():
+            if not (isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Artifact"):
+                continue
+            inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            if (inp.get("action") or "publish") != "publish" or inp.get("asset"):
+                continue
+            fp = inp.get("file_path") if isinstance(inp.get("file_path"), str) else ""
+            if isinstance(b.get("id"), str):
+                self.calls[b["id"]] = {"file": fp, "t": stamp(d), "seen": self.seen}
+
+    def _result(self, d):
+        for b in (d.get("message") or {}).get("content") or ():
+            if not (isinstance(b, dict) and b.get("type") == "tool_result"):
+                continue
+            c = self.calls.pop(b.get("tool_use_id"), None)
+            if c is None or b.get("is_error"):
+                continue
+            res = d.get("toolUseResult") if isinstance(d.get("toolUseResult"), dict) else {}
+            url = res.get("url") if isinstance(res.get("url"), str) else ""
+            if not url:
+                said = b.get("content")
+                said = said if isinstance(said, str) else " ".join(
+                    x.get("text") or "" for x in said or () if isinstance(x, dict))
+                m = re.match(r"Published .* at (https://\S+)", said or "")
+                url = m.group(1) if m else ""
+            m = ARTIFACT_URL.match(url or "")
+            if not m:
+                continue
+            url = m.group(0)
+            a = self.arts.setdefault(url, {"url": url, "file": "", "title": "", "n": 0,
+                                           "first": stamp(d) or c["t"]})
+            a["n"] += 1
+            a["last"] = stamp(d) or c["t"]
+            fp = res.get("path") if isinstance(res.get("path"), str) else ""
+            a["file"] = fp or c["file"] or a["file"]
+            if isinstance(res.get("title"), str) and res["title"].strip():
+                a["title"] = res["title"].strip()
+
+    def out(self):
+        return list(self.arts.values())
+
+
+def _line_start(f, pos):
+    """The byte the line holding `pos` begins at."""
+    while pos > 0:
+        back = min(pos, 1 << 20)
+        f.seek(pos - back)
+        i = f.read(back).rfind(b"\n")
+        if i >= 0:
+            return pos - back + i + 1
+        pos -= back
+    return 0
+
+
+def published(p):
+    """Every artifact a transcript published. A gigabyte is read in a second:
+    it is searched in large pieces for the tool's name, and only the lines
+    that hold it, and the few after each where its result is, are parsed."""
+    pub, needle = Published(), b'"name":"Artifact"'
+    starts, done, size = [], 0, p.stat().st_size
+    with p.open("rb") as f:
+        tail = b""
+        while done < size:
+            chunk = f.read(16 << 20)
+            if not chunk:
+                break
+            buf, base = tail + chunk, done - len(tail)
+            i = buf.find(needle)
+            while i >= 0:
+                starts.append(base + i)
+                i = buf.find(needle, i + 1)
+            done += len(chunk)
+            tail = buf[-(len(needle) - 1):]
+        lines = []
+        for hit in starts:
+            at = _line_start(f, hit)
+            if not lines or lines[-1] != at:
+                lines.append(at)
+        for at in lines:
+            f.seek(at)
+            pub.feed(f.readline(LINE_MAX))
+            # its result follows within a few lines, read until it is found
+            n = 0
+            while pub.calls and n < STALE:
+                line = f.readline(LINE_MAX)
+                if not line:
+                    break
+                n += 1
+                if needle not in line:
+                    pub.feed(line)
+            pub.calls.clear()
+    return pub.out()
+
+
+def page_title(path):
+    """What a page calls itself: its <title>, or a Markdown page's first heading."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(256 * 1024).decode("utf-8", "replace")
+    except OSError:
+        return ""
+    m = (re.search(r"<title[^>]*>(.*?)</title>", head, re.S | re.I) if not path.endswith(".md")
+         else re.search(r"^#\s+(.+)$", head, re.M))
+    return re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()[:200] if m else ""
+
+
+def _source_state(path):
+    """Whether a published file can be opened as its source: ok, gone, big, not."""
+    if not path or not os.path.isabs(path) or not path.lower().endswith(PAGE_EXT):
+        return "not"
+    try:
+        st = os.stat(path)
+    except OSError:
+        return "gone"
+    if not stat.S_ISREG(st.st_mode):
+        return "not"
+    return "big" if st.st_size > PAGE_MAX else "ok"
+
+
+def artifacts(sid, path=None):
+    """The artifacts a session published, for its view. Each is numbered by
+    the order it was first published in, which a growing transcript keeps, and
+    that number is how the page asks for its source."""
+    t0 = time.time()
+    p = path or find(sid)
+    if not p or not p.is_file():
+        return {"id": sid, "error": "no transcript on disk", "artifacts": []}
+    out = []
+    for n, a in enumerate(published(p)):
+        state = _source_state(a["file"])
+        title = (page_title(a["file"]) if state == "ok" else "") or a["title"] or a["url"].rsplit("/", 1)[-1]
+        out.append({"n": n, "url": a["url"], "title": scrub(title), "count": a["n"],
+                    "first": a["first"], "last": a["last"], "source": state,
+                    "file": scrub(a["file"].replace(str(HOME), "~", 1))})
+    return {"id": sid, "artifacts": out, "took": round(time.time() - t0, 2)}
+
+
+def artifact_source(sid, n, path=None):
+    """The source of the `n`th artifact a session published, as text. The
+    file is the one its Artifact call named; the page names only the number."""
+    p = path or find(sid)
+    if not p or not p.is_file():
+        raise Withheld(404, "no transcript on disk")
+    if not isinstance(n, int) or n < 0:
+        raise Withheld(400, "an artifact is named by its number in the session")
+    arts = published(p)
+    if n >= len(arts):
+        raise Withheld(404, "the session published no such artifact")
+    a = arts[n]
+    state = _source_state(a["file"])
+    if state != "ok":
+        raise Withheld({"gone": 404, "big": 413}.get(state, 415),
+                       {"gone": "its file is no longer on disk", "big": "its file is too large to show"}
+                       .get(state, "it was published from no page file"))
+    with open(a["file"], "rb") as f:
+        raw = f.read(SOURCE_MAX + 1)
+    size = os.path.getsize(a["file"])
+    return {"id": sid, "n": n, "url": a["url"], "count": a["n"], "last": a["last"],
+            "title": scrub(page_title(a["file"]) or a["title"] or a["url"].rsplit("/", 1)[-1]),
+            "file": scrub(a["file"].replace(str(HOME), "~", 1)),
+            "kind": "md" if a["file"].lower().endswith(".md") else "html",
+            "text": raw[:SOURCE_MAX].decode("utf-8", "replace"), "bytes": size,
+            "cut": size > SOURCE_MAX}
 
 
 if __name__ == "__main__":

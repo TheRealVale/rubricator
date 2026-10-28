@@ -39,7 +39,7 @@ echo "rubricator smoke tests"
 # A run of this suite happens on a desk where terminals hold live sessions, and
 # one AppleScript that reached them would type into one or switch its tabs. So
 # `osascript` on the PATH is a tripwire: it scripts nothing, writes down that it
-# was called, and fails. Test 40 reads what it wrote, which has to be nothing.
+# was called, and fails. Test 44, the last, reads what it wrote, which has to be nothing.
 TRIP="$WORK/tripwire"; mkdir -p "$TRIP"
 printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s"\nexit 1\n' "$WORK/osascript.log" > "$TRIP/osascript"
 chmod +x "$TRIP/osascript"
@@ -1287,8 +1287,10 @@ function dash(k){ return k.replace(/[A-Z]/g, function(c){ return '-' + c.toLower
 
 /* an attribute that carries a value for some handler to read, rather than
    naming the thing to do — `data-doc="…" data-line="12"` is one verb, one
-   payload. A new one belongs here only if nothing is meant to click it. */
-var PAYLOAD = ['copy-note','f','fg','id','line','n','q','sid','t','val'];
+   payload. A new one belongs here only if nothing is meant to click it:
+   `an` is the artifact `data-asrc` opens, `cap` and `ref` a picture's caption
+   and place, `arts` the slot a session's artifacts fill. */
+var PAYLOAD = ['an','arts','cap','copy-note','f','fg','id','line','n','q','ref','sid','t','val'];
 
 var emitted = {}, handled = {}, m;
 var reEmit = /data-([a-z][a-z-]*)="/g;
@@ -3187,15 +3189,613 @@ else
   no "39 · where a session works is read wrong" "$(grep '^XX' "$WORK/workshere.txt" | tr '\n' ' ')$(tail -2 "$WORK/workshere.txt")"
 fi
 
-# ── 40 · nothing in this run scripted another application ───────────────────
+# ── 40 · the pictures in a conversation are found where they happened ───────
+# A conversation carries pictures three ways, in the shapes read off this
+# machine's transcripts (transcript.py's `images_of` lists them): an image block
+# in a tool's result, an image block beside your prompt's "[Image #1]" with a
+# note after it naming the file it was saved to, and a path to an image in
+# Claude's words or a subagent's report. Pinned:
+#
+#   40a, the reading:
+#   - your paste is under your prompt, and its note marks nothing; a note whose
+#     prompt carried no image marks the paste, with the file it names
+#   - a tool's image is on that tool's line, and the harness's note on its size
+#     marks nothing
+#   - the paths Claude names are under its words, in order, with whether each
+#     can be shown: there, gone, too large; a URL's tail is not a path
+#   - a subagent's report shows the screenshot it names
+#   - every picture is named by its place, and its place serves its bytes
+#
+#   40b, the server: by place and by nothing else. A path the page sends is not
+#   read; a file the transcript does not name is served from no place; a file it
+#   names is served only while it is an image file on disk under the size cap;
+#   a place that is not a line's start, or a logged request's line, serves
+#   nothing; the right type, no caching, inert on its own; and the page's own
+#   content security policy is the one it was
+python3 - "$WORK" "$REPO" >"$WORK/pictures.txt" 2>&1 <<'PYEOF'
+import base64, json, os, struct, sys, zlib
+work, repo_root = sys.argv[1], sys.argv[2]
+home = os.environ["HOME"]
+base = os.path.join(work, "media"); os.makedirs(os.path.join(base, "images"), exist_ok=True)
+sys.path.insert(0, os.path.join(repo_root, "share"))
+import transcript as T
+
+def png(w, h, rgb):
+    raw = b"".join(b"\x00" + bytes(rgb) * w for _ in range(h))
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+def put(name, data):
+    p = os.path.join(base, name); open(p, "wb").write(data); return p
+PASTED, TOOL = png(3, 2, (0, 0, 255)), png(4, 4, (0, 255, 0))
+shot = put("shot-on-disk.png", png(5, 3, (255, 0, 0)))
+gone = os.path.join(base, "shot-gone.png")
+big = put("shot-big.png", png(1, 1, (1, 1, 1)))
+with open(big, "r+b") as f: f.truncate(T.IMAGE_MAX + 4096)          # sparse: large on paper only
+fake = put("shot-fake.png", b"<html>not a picture</html>")
+notes = put("notes.txt", b"plain words")
+link = os.path.join(base, "shot-link.png"); os.symlink(notes, link)
+unnamed = put("never-named.png", png(2, 2, (9, 9, 9)))
+agent_shot = put("agent-shot.png", png(6, 2, (0, 99, 99)))
+src1 = put("images/1.png", PASTED)
+src2 = put("images/2.png", png(7, 7, (77, 0, 77)))
+
+def b64(d): return {"type": "base64", "media_type": "image/png", "data": base64.b64encode(d).decode()}
+def rec(kind, content, **kw):
+    r = {"type": kind, "isSidechain": False, "timestamp": "2026-10-28T12:00:00.000Z", "cwd": base,
+         "message": {"role": kind, "content": content}}
+    r.update(kw); return r
+recs = [
+    rec("user", [{"type": "text", "text": "look at this [Image #1]"}, {"type": "image", "source": b64(PASTED)}],
+        promptSource="typed"),
+    rec("user", [{"type": "text", "text": "[Image: source: %s]" % src1}], isMeta=True),
+    rec("assistant", [{"type": "tool_use", "id": "tu1", "name": "Read", "input": {"file_path": "/x/seen.png"}}]),
+    rec("user", [{"type": "tool_result", "tool_use_id": "tu1", "content": [{"type": "image", "source": b64(TOOL)}]}]),
+    rec("user", "[Image: original 2880x1800, displayed at 2000x1250. Multiply coordinates by 1.44.]", isMeta=True),
+    {"type": "api-request", "content": [{"type": "image", "source": b64(png(8, 8, (1, 2, 3)))}]},
+    rec("assistant", [{"type": "text", "text": "Saved `%s`, and %s, also %s,\n%s and (%s); the page "
+                       "is at https://example.com/a/b.png and file:///x/y.png" % (shot, gone, big, fake, link)}]),
+    rec("user", 'Another Claude session sent a message:\n<agent-message from="a1">\n[Subagent hand-back] '
+        'The report follows:\n  Screens:\n  - `%s`: the main one\n</agent-message>' % agent_shot,
+        promptSource="system", isMeta=True, origin={"kind": "peer", "name": "Explore", "handback": True}),
+    rec("user", [{"type": "text", "text": "and this one [Image #2]"}], promptSource="typed"),
+    rec("user", [{"type": "text", "text": "[Image: source: %s]" % src2}], isMeta=True),
+    rec("user", [{"type": "tool_result", "tool_use_id": "tu9", "content": [{"type": "image", "source": b64(TOOL)}]}],
+        isSidechain=True),
+    rec("assistant", [{"type": "text", "text": "Done."}]),
+]
+sid = "44444444-0000-4000-8000-000000000004"
+pdir = os.path.join(home, ".claude", "projects", "-media-fixture"); os.makedirs(pdir, exist_ok=True)
+path = os.path.join(pdir, sid + ".jsonl")
+# written as Claude Code writes them, without spaces: the readers look for
+# what a line holds by its bytes before they parse it
+open(path, "w").write("\n".join(json.dumps(r, separators=(",", ":")) for r in recs) + "\n")
+
+checks = {}
+try:
+    got = T.read(sid)
+    turns = got["turns"]
+    json.dump(got, open(os.path.join(base, "convo.json"), "w"))
+    you = [t for t in turns if t["who"] == "you"]
+    marks = [t for t in turns if t["who"] == "mark"]
+    claude = [t for t in turns if t["who"] == "claude"]
+    notes_ = [t for t in turns if t["who"] == "note"]
+    checks["your paste is under your prompt"] = (
+        len(you) == 2 and [s["k"] for s in you[0].get("imgs", [])] == ["pasted"] and not you[1].get("imgs"))
+    checks["a paste whose prompt carried it marks nothing; one that did not marks it, with its file"] = (
+        [m["text"] for m in marks] == ["you pasted an image"] and
+        [(s["k"], s["name"], s["state"]) for s in marks[0].get("imgs", [])] == [("source", "2.png", "ok")])
+    tools = [x for t in claude for x in t.get("tools", [])]
+    checks["a tool's image is on its line"] = (
+        len(tools) == 1 and [(s["k"], s["tool"]) for s in tools[0].get("imgs", [])] == [("tool", "Read")])
+    named = [(s["name"], s["state"]) for t in claude for s in t.get("imgs", [])]
+    checks["the paths Claude names are under its words, in order, with whether each can be shown"] = named == [
+        ("shot-on-disk.png", "ok"), ("shot-gone.png", "gone"), ("shot-big.png", "big"),
+        ("shot-fake.png", "ok"), ("shot-link.png", "ok")]
+    checks["a subagent's report shows what it names"] = (
+        len(notes_) == 1 and [s["name"] for s in notes_[0].get("imgs", [])] == ["agent-shot.png"])
+    checks["a sidechain's and a logged request's images are not the conversation's"] = (
+        sum(len(t.get("imgs", [])) + sum(len(x.get("imgs", [])) for x in t.get("tools", [])) for t in turns) == 9)
+    # every place serves its own bytes
+    want = {("pasted", None): PASTED, ("tool", None): TOOL, ("source", "2.png"): open(src2, "rb").read(),
+            ("path", "shot-on-disk.png"): open(shot, "rb").read(), ("path", "agent-shot.png"): open(agent_shot, "rb").read()}
+    places = [s for t in turns for s in t.get("imgs", [])] + [s for x in tools for s in x.get("imgs", [])]
+    served = {}
+    for s in places:
+        key = (s["k"], s.get("name"))
+        if key in want:
+            data, mime = T.image(sid, s["at"], s["i"])
+            served[key] = data == want[key] and mime == "image/png"
+    checks["every picture's place serves its bytes"] = len(served) == len(want) and all(served.values())
+    checks["no picture carries its bytes or its file to the page"] = (
+        "data" not in json.dumps(places) and all(set(s) <= {"at", "i", "k", "state", "name", "where", "tool", "about"}
+                                                for s in places))
+    json.dump({"sid": sid, "shot": shot, "gone": gone, "big": big, "fake": fake, "link": link,
+               "unnamed": unnamed, "places": places, "path": path,
+               "bytes": {"shot": base64.b64encode(open(shot, "rb").read()).decode(),
+                         "unnamed": base64.b64encode(open(unnamed, "rb").read()).decode()}},
+              open(os.path.join(base, "fixture.json"), "w"))
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "40a · a paste, a tool's screenshot and a path Claude names are each found where they happened"
+else
+  no "40a · a picture is found in the wrong place, or not at all" "$(grep '^XX' "$WORK/pictures.txt" | tr '\n' ' ')$(tail -2 "$WORK/pictures.txt")"
+fi
+
+python3 - "$MD" "$WORK" >"$WORK/pictures-served.txt" 2>&1 <<'PYEOF'
+import base64, json, os, re, socket, subprocess, sys, time, urllib.error, urllib.request
+md, work = sys.argv[1], sys.argv[2]
+fx = json.load(open(os.path.join(work, "media", "fixture.json")))
+sid, places = fx["sid"], fx["places"]
+repo = os.path.join(work, "media-repo"); os.makedirs(repo, exist_ok=True)
+open(os.path.join(repo, "README.md"), "w").write("# pictures\n")
+
+def free_port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+port = free_port()
+env = dict(os.environ, RUBRICATOR_NO_WINDOW="1", RUBRICATOR_NO_WATCH="1")
+p = subprocess.Popen([md, "serve", "--port", str(port), repo], env=env,
+                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+os.set_blocking(p.stdout.fileno(), False)
+seen, url = "", None
+for _ in range(200):
+    time.sleep(0.1)
+    try: seen += p.stdout.read() or ""
+    except BlockingIOError: pass
+    m = re.search(r"(http://127\.0\.0\.1:%d/[A-Za-z0-9_-]+/)" % port, seen)
+    if m: url = m.group(1); break
+
+def get(q):
+    try:
+        r = urllib.request.urlopen(url + q, timeout=30)
+        return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+def why(body):
+    try: return json.loads(body).get("error", "")
+    except Exception: return ""
+def place(name):
+    return next(s for s in places if s.get("name") == name)
+def at(s, **extra):
+    q = "image?id=%s&at=%d&i=%d" % (sid, s["at"], s["i"])
+    return q + "".join("&%s=%s" % (k, urllib.request.quote(v)) for k, v in extra.items())
+
+checks = {}
+try:
+    checks["the server came up"] = bool(url)
+    shot = base64.b64decode(fx["bytes"]["shot"]); unnamed = base64.b64decode(fx["bytes"]["unnamed"])
+    code, hdr, body = get(at(place("shot-on-disk.png")))
+    checks["a picture is served by its place, as what it is"] = (
+        code == 200 and body == shot and hdr.get("Content-Type") == "image/png")
+    checks["uncached, and inert opened on its own"] = (
+        hdr.get("Cache-Control") == "no-store" and "sandbox" in (hdr.get("Content-Security-Policy") or "")
+        and hdr.get("X-Content-Type-Options") == "nosniff")
+    # a path the page sends is not read: alone it names nothing, beside a place it changes nothing
+    code, _, body = get("image?id=%s&path=%s" % (sid, urllib.request.quote(fx["unnamed"])))
+    checks["refused: a path sent by the page, alone"] = code == 400 and body != unnamed
+    code, _, body = get(at(place("shot-on-disk.png"), path=fx["unnamed"], p=fx["unnamed"], file=fx["unnamed"]))
+    checks["refused: a path sent by the page beside a place — the place decides"] = code == 200 and body == shot
+    # a file the transcript does not name is served from no place in it
+    lines, pos = [], 0
+    for ln in open(fx["path"], "rb"):
+        lines.append(pos); pos += len(ln)
+    reached = [get("image?id=%s&at=%d&i=%d" % (sid, a, i)) for a in lines for i in range(4)]
+    checks["refused: a path not in the transcript, from any place"] = not any(b == unnamed for _, _, b in reached)
+    code, _, body = get(at(place("shot-gone.png")))
+    checks["refused: a missing file, and says so"] = code == 404 and "no longer on disk" in why(body)
+    code, _, body = get(at(place("shot-big.png")))
+    checks["refused: an oversize one"] = code == 413 and "too large" in why(body)
+    code, _, body = get(at(place("shot-fake.png")))
+    checks["refused: a non-image wearing .png"] = code == 415 and "not an image" in why(body)
+    code, _, body = get(at(place("shot-link.png")))
+    checks["refused: a link from a .png to words"] = code == 415 and "not an image" in why(body)
+    req = lines[5]                                   # the logged API request's line
+    code, _, body = get("image?id=%s&at=%d&i=0" % (sid, req))
+    checks["refused: a logged request's line"] = code == 404
+    s = place("shot-on-disk.png")
+    code, _, _ = get("image?id=%s&at=%d&i=%d" % (sid, s["at"] + 1, s["i"]))
+    checks["refused: a place inside a line"] = code == 404
+    checks["refused: a negative place, a word for a place, a place past the end"] = (
+        get("image?id=%s&at=-1&i=0" % sid)[0] == 400 and get("image?id=%s&at=x&i=0" % sid)[0] == 400
+        and get("image?id=%s&at=%d&i=0" % (sid, pos + 10))[0] == 404)
+    checks["refused: a session id that is not one"] = get("image?id=..%2Fetc&at=0&i=0")[0] == 400
+    code, hdr, body = get("")
+    csp = hdr.get("Content-Security-Policy") or ""
+    checks["the page's own policy is the one it was"] = re.fullmatch(
+        r"default-src 'none'; script-src 'nonce-[A-Za-z0-9_-]+' 'unsafe-eval'; style-src 'unsafe-inline'; "
+        r"img-src 'self' data: blob:; font-src data:; connect-src 'self'; base-uri 'none'; "
+        r"form-action 'none'; frame-ancestors 'none'", csp) is not None
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    p.kill()
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "40b · a picture is served by its place in the transcript, and a path the page sends is never read"
+else
+  no "40b · the image route serves what it should not, or refuses what it should serve" "$(grep '^XX' "$WORK/pictures-served.txt" | tr '\n' ' ')$(tail -2 "$WORK/pictures-served.txt")"
+fi
+
+# ── 41 · what a session published, one row per artifact ─────────────────────
+# Claude Code's Artifact tool publishes a page to claude.ai; an update keeps the
+# url, sometimes from another file. The fixture is in the shapes read off this
+# machine's transcripts (transcript.py's comment over `Published`). Pinned:
+#   - one artifact per url, counting its successful publishes: a failed one, a
+#     read, a quickstart, an asset upload, a sidechain's and a logged request's
+#     copy count for nothing, and neither does a url that is not claude.ai's
+#   - a result with no structured part is read from its words
+#   - parallel calls are each answered
+#   - its title is its file's <title>, the published one once the file is gone
+#   - the index counts them on the session, and the route and the source agree
+#   - the source is the file the call named, by number; a path sent is not read
+python3 - "$MD" "$WORK" "$REPO" >"$WORK/artifacts.txt" 2>&1 <<'PYEOF'
+import json, os, re, socket, subprocess, sys, time, urllib.error, urllib.request
+md, work, repo_root = sys.argv[1], sys.argv[2], sys.argv[3]
+home = os.environ["HOME"]
+base = os.path.join(work, "arts"); os.makedirs(base, exist_ok=True)
+sys.path.insert(0, os.path.join(repo_root, "share"))
+import transcript as T
+def page(name, title, body="<p>hello</p>"):
+    d = os.path.join(base, name); os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "index.html")
+    open(p, "w").write("<!doctype html><html><head><title>%s</title></head><body>%s</body></html>" % (title, body))
+    return p
+A1, A2, B = page("a", "Alpha Page"), page("a2", "Alpha &amp; Again"), page("b", "Beta")
+G = os.path.join(base, "gone", "index.html")
+U = {k: "https://claude.ai/artifact/%sXYZ" % k for k in "ABGS"}
+n = [0]
+def ts():
+    n[0] += 1; return "2026-10-28T1%d:%02d:00.000Z" % (n[0] // 60, n[0] % 60)
+def call(tid, inp, side=False, **more):
+    calls = [(tid, inp)] + list(more.get("also", []))
+    return {"type": "assistant", "isSidechain": side, "timestamp": ts(), "cwd": base,
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": t, "name": "Artifact", "input": i}
+                                                          for t, i in calls]}}
+def result(tid, url=None, path=None, title=None, err=False, words=None, side=False):
+    tur = {"url": url, "path": path, "title": title, "seq": 1} if url and words is None else None
+    said = words or ("Published %s at %s (Version 1)" % (path, url) if url else "Done.")
+    return {"type": "user", "isSidechain": side, "timestamp": ts(), "cwd": base, "toolUseResult": tur,
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid, "is_error": err,
+                                                     "content": [{"type": "text", "text": said}]}]}}
+recs = [
+    call("a1", {"file_path": A1, "icon": "chart"}), result("a1", U["A"], A1, "Alpha (published)"),
+    {"type": "api-request", "content": [{"type": "tool_use", "id": "a1", "name": "Artifact", "input": {"file_path": A1}}]},
+    call("a2", {"file_path": A1}), dict(result("a2", err=True, words="Refused: a newer version of %s was "
+                                                "published elsewhere. Nothing was published." % U["A"]),
+                                         toolUseResult={"url": U["A"], "path": A1, "refused": "conflict"}),
+    call("a3", {"file_path": A1}), result("a3", U["A"], A1, "Alpha (published)"),
+    call("q", {"action": "quickstart", "intent": "other"}), result("q", words="Start from the Dashboard type."),
+    call("r", {"action": "read", "url": U["B"]}), result("r", U["B"], B, "Beta"),
+    call("b", {"file_path": B}), result("b", words="Published %s at %s (Version 1, version id 1)" % (B, U["B"])),
+    call("a4", {"action": "publish", "url": U["A"], "file_path": A2}), result("a4", U["A"], A2, "Alpha (published)"),
+    call("g", {"file_path": G}), result("g", U["G"], G, "Gamma (published)"),
+    call("s", {"file_path": B}, side=True), result("s", U["S"], B, "Side", side=True),
+    call("up", {"asset": True, "url": U["A"], "file_path": os.path.join(base, "x.png")}), result("up", U["A"], A1),
+    call("x", {"file_path": B}), result("x", "https://evil.example/artifact/x", B, "Elsewhere"),
+    call("p1", {"file_path": B}, also=[("p2", {"file_path": A2})]),
+    {"type": "user", "timestamp": ts(), "cwd": base, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "p1", "content": "Published %s at %s (Version 2)" % (B, U["B"])},
+        {"type": "tool_result", "tool_use_id": "p2", "content": "Published %s at %s (Version 4)" % (A2, U["A"])}]}},
+]
+sid = "55555555-0000-4000-8000-000000000005"
+pdir = os.path.join(home, ".claude", "projects", "-arts-fixture"); os.makedirs(pdir, exist_ok=True)
+open(os.path.join(pdir, sid + ".jsonl"), "w").write("\n".join(json.dumps(r, separators=(",", ":")) for r in recs) + "\n")
+
+def free_port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+checks, p = {}, None
+try:
+    got = T.artifacts(sid)
+    arts = got["artifacts"]
+    json.dump(dict(got, sid=sid), open(os.path.join(base, "arts.json"), "w"))
+    by = {a["url"]: a for a in arts}
+    checks["one row per artifact, in the order first published"] = [a["url"] for a in arts] == [U["A"], U["B"], U["G"]]
+    checks["each counts its publishes, and nothing else"] = [a["count"] for a in arts] == [4, 2, 1]
+    checks["its title is its file's, the published one once the file has gone"] = (
+        [a["title"] for a in arts] == ["Alpha & Again", "Beta", "Gamma (published)"])
+    checks["whether its source can be opened"] = [a["source"] for a in arts] == ["ok", "ok", "gone"]
+    checks["when it was last published"] = by[U["A"]]["last"] == T.stamp(recs[-1]) and by[U["A"]]["last"] > by[U["A"]]["first"]
+    import workspace as W
+    W.HOME = T.Path(home)
+    _, meta, _ = W.load_sessions()
+    checks["the index counts them on the session"] = meta.get(sid, {}).get("arts") == 3
+
+    port = free_port()
+    repo = os.path.join(work, "arts-repo"); os.makedirs(repo, exist_ok=True)
+    open(os.path.join(repo, "README.md"), "w").write("# arts\n")
+    p = subprocess.Popen([md, "serve", "--port", str(port), repo],
+                         env=dict(os.environ, RUBRICATOR_NO_WINDOW="1", RUBRICATOR_NO_WATCH="1"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    os.set_blocking(p.stdout.fileno(), False)
+    seen, url = "", None
+    for _ in range(200):
+        time.sleep(0.1)
+        try: seen += p.stdout.read() or ""
+        except BlockingIOError: pass
+        m = re.search(r"(http://127\.0\.0\.1:%d/[A-Za-z0-9_-]+/)" % port, seen)
+        if m: url = m.group(1); break
+    def get(q):
+        try:
+            return 200, json.load(urllib.request.urlopen(url + q, timeout=30))
+        except urllib.error.HTTPError as e:
+            return e.code, json.load(e)
+    code, j = get("artifacts?id=" + sid)
+    checks["the route says the same"] = code == 200 and [a["count"] for a in j["artifacts"]] == [4, 2, 1]
+    code, j = get("artifact?id=%s&n=0" % sid)
+    checks["the source is the file its last publish named"] = (
+        code == 200 and "Alpha &amp; Again" in j["text"] and j["kind"] == "html" and j["count"] == 4)
+    code, j = get("artifact?id=%s&n=1&path=%s&file=%s" % (sid, urllib.request.quote(A1), urllib.request.quote(A1)))
+    checks["a path sent beside the number is not read"] = code == 200 and "<title>Beta</title>" in j["text"]
+    code, j = get("artifact?id=%s&n=2" % sid)
+    checks["refused: a source whose file is gone"] = code == 404 and "no longer on disk" in j.get("error", "")
+    checks["refused: a number it did not publish, or none"] = (
+        get("artifact?id=%s&n=3" % sid)[0] == 404 and get("artifact?id=%s&n=-1" % sid)[0] == 400
+        and get("artifact?id=%s&n=x" % sid)[0] == 400 and get("artifact?id=..&n=0")[0] == 400)
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    if p: p.kill()
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "41 · what a session published is one row per artifact, counted, titled, and its source by number"
+else
+  no "41 · a session's artifacts are folded or served wrong" "$(grep '^XX' "$WORK/artifacts.txt" | tr '\n' ' ')$(tail -2 "$WORK/artifacts.txt")"
+fi
+
+# ── 42 · the thumbnails and the lightbox, on the page ───────────────────────
+# Lifted from the shipped source around a stand-in for the DOM, and fed the
+# conversation test 40 read. Pinned:
+#   - a picture is a thumbnail asking for its place, never a path; one that
+#     cannot be shown says why in its place; a tool's line opens its picture
+#   - a thumbnail opens the lightbox on it, with how many the session has
+#   - the arrows step through the session's pictures, round from either end
+#   - Escape closes it, and so does a click anywhere but on its arrows
+#   - while open it has the keys to itself; closed, it takes none
+#   - a thumbnail that would not load says so, and is stepped past
+if command -v node >/dev/null && [ -s "$WORK/media/convo.json" ]; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("function renderConvo(c)", "function didHTML(t)"),
+    sl("function didHTML(t)", "function clock(ts)"),
+    sl("/* ── the lightbox", "/* ── an artifact"),
+]))' "$REPO/share/workspace.js" "$WORK/shots.js"
+  { cat <<'JSEOF'
+var BASE = 'http://127.0.0.1:1/t';
+function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+var marked = { parse: function(t){ return '<p>' + esc(t) + '</p>'; } };
+var MD = { sanitise: function(){} };
+var document = { createElement: function(){ return { set innerHTML(v){ this._h = v; }, get innerHTML(){ return this._h; } }; } };
+function clock(){ return '12:00'; }
+function docBy(){ return null; }
+var toasts = [];
+function toast(m){ toasts.push(m); }
+/* the lightbox's own elements */
+function El(id){ return { id: id, hidden: true, src: '', textContent: '', cls: {},
+  classList: { add: function(c){ this.o.cls[c] = 1; }, remove: function(c){ delete this.o.cls[c]; } },
+  removeAttribute: function(k){ if (k === 'src') this.src = ''; } }; }
+var els = {};
+['shotbox', 'shot-img', 'shot-cap', 'shot-n', 'shot-prev', 'shot-next'].forEach(function(id){
+  els[id] = El(id); els[id].classList.o = els[id]; });
+function $(id){ return els[id]; }
+JSEOF
+    cat "$WORK/shots.js"
+    cat <<'JSEOF'
+
+var c = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+var fx = JSON.parse(require('fs').readFileSync(process.argv[3], 'utf8'));
+var h = renderConvo(c), fail = [];
+function want(ok, why){ if (!ok) fail.push(why); }
+
+/* thumbnails: a place each, never a path */
+var thumbs = [], re = /<button class="shot" data-shot="([^"]*)" data-ref="([^"]*)" data-cap="([^"]*)"/g, m;
+while ((m = re.exec(h))) thumbs.push({ u: m[1].replace(/&amp;/g, '&'), ref: m[2], cap: m[3] });
+want(thumbs.length === 7, 'not every picture that can be shown is a thumbnail: ' + thumbs.length);
+want(thumbs.every(function(t){ return /^http:\/\/127\.0\.0\.1:1\/t\/image\?id=[0-9a-f-]+&at=\d+&i=\d+$/.test(t.u); }),
+     'a thumbnail asks for something other than a place: ' + thumbs.map(function(t){ return t.u; }).join(' '));
+want(/<span class="shot off"[^>]*><i>shot-gone\.png<\/i>no longer on disk<\/span>/.test(h), 'a gone file is not said to be gone');
+want(/<i>shot-big\.png<\/i>too large to show/.test(h), 'an oversize file is not said to be too large');
+want(/<div class="turn you">[^]*?<div class="shots"><button class="shot"/.test(h), 'your paste is not under your prompt');
+want(/<div class="cmark image"><span>you pasted an image<\/span><\/div><div class="shots mid"><button class="shot"/.test(h),
+     'a paste with no image in its prompt is not shown under its mark');
+want(/<span class="n">Read<\/span><span class="b">[^<]*<\/span><button class="shotref" data-ref="\d+\.0">image<\/button>/.test(h),
+     'the tool\'s line does not open its picture');
+
+/* a stand-in for the DOM around them */
+var surf = {
+  querySelectorAll: function(){ return els_.filter(function(e){ return e.dataset.shot; }); },
+  querySelector: function(sel){ var r = /data-ref="([^"]+)"/.exec(sel)[1];
+    return els_.filter(function(e){ return e.dataset.ref === r; })[0] || null; }
+};
+var els_ = thumbs.map(function(t){ var e = { dataset: { shot: t.u, ref: t.ref, cap: t.cap }, title: t.cap, textContent: '',
+  closest: function(sel){ return sel === '.surf' ? surf : /^\.shot/.test(sel) && sel !== '.shotref' && sel !== '.shotnav' &&
+           (sel === '.shot[data-shot]' ? e.dataset.shot : true) ? e : null; } }; return e; });
+function on(target){ return { target: target }; }
+function nowhere(){ return { closest: function(){ return null; } }; }
+var swallowed = 0;
+function key(k){ var e = { key: k, preventDefault: function(){}, stopImmediatePropagation: function(){ swallowed++; } };
+  return shotKey(e); }
+
+want(!key('ArrowRight') && swallowed === 0, 'a closed lightbox took a key');
+shotClick(on(els_[2]));
+want(!els.shotbox.hidden && els['shot-img'].src === thumbs[2].u && els['shot-n'].textContent === '3 of 7' &&
+     els['shot-cap'].textContent === thumbs[2].cap,
+     'a thumbnail did not open the lightbox on itself: ' + els['shot-img'].src + ' ' + els['shot-n'].textContent);
+key('ArrowRight');
+want(els['shot-img'].src === thumbs[3].u && els['shot-n'].textContent === '4 of 7', 'the right arrow did not step on');
+key('ArrowLeft'); key('ArrowLeft'); key('ArrowLeft');
+want(els['shot-img'].src === thumbs[0].u, 'the left arrow did not step back');
+key('ArrowLeft');
+want(els['shot-img'].src === thumbs[6].u && els['shot-n'].textContent === '7 of 7', 'stepping back from the first did not go round');
+key('ArrowRight');
+want(els['shot-img'].src === thumbs[0].u, 'stepping on from the last did not go round');
+var before = swallowed; key('w');
+want(swallowed === before + 1 && !els.shotbox.hidden, 'an open lightbox let a key through to the window');
+key('Escape');
+want(els.shotbox.hidden && !els['shot-img'].src, 'Escape did not close it');
+shotClick(on(els_[1]));
+var navNext = { id: 'shot-next', closest: function(sel){ return sel === '.shotnav' ? navNext : null; } };
+shotClick(on(navNext));
+want(!els.shotbox.hidden && els['shot-img'].src === thumbs[2].u, 'its arrow did not step');
+shotClick(on(nowhere()));
+want(els.shotbox.hidden, 'a click did not close it');
+/* the tool's line opens the thumbnail it names */
+var ref = /data-ref="(\d+\.0)">image</.exec(h)[1];
+var refEl = { dataset: { ref: ref }, closest: function(sel){ return sel === '.shotref' ? refEl : sel === '.surf' ? surf : null; } };
+shotClick(on(refEl));
+want(!els.shotbox.hidden && els_.filter(function(e){ return e.dataset.ref === ref; })[0].dataset.shot === els['shot-img'].src,
+     'the tool\'s image did not open its picture');
+key('Escape');
+/* a thumbnail that would not load says so, and is passed over */
+var img = { tagName: 'IMG', id: '', closest: function(){ return els_[4]; } };
+els_[4].classList = { add: function(){} }; els_[4].removeAttribute = function(k){ delete els_[4].dataset[k === 'data-shot' ? 'shot' : k]; };
+els_[4].innerHTML = '';
+shotFailed(img);
+want(/could not be shown/.test(els_[4].innerHTML), 'a picture that failed does not say so');
+shotClick(on(els_[0]));
+want(els['shot-n'].textContent === '1 of 6', 'a picture that failed is still stepped to');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/shots-run.js"
+  res=$(node "$WORK/shots-run.js" "$WORK/media/convo.json" "$WORK/media/fixture.json" 2>&1)
+  case "$res" in ok*) ok "42 · thumbnails ask by place, and the lightbox opens, steps round and closes" ;;
+                 *)   no "42 · the thumbnails or the lightbox are wrong" "$res" ;; esac
+else
+  skip "42 · the lightbox on the page" "no node, or 40a wrote nothing"
+fi
+
+# ── 43 · the artifacts on the page, and a source that runs nothing ──────────
+# Lifted from the shipped source, fed what test 41 read. Pinned:
+#   - one row per artifact, the latest first, saying how often and when; its
+#     title opens claude.ai in your browser and nothing else is linked; its
+#     source opens by session and number, or it says why not
+#   - a session's row in Sessions counts what it published
+#   - the source view is text: every tag in it is the view's own, whatever the
+#     file holds — no script, no handler, no frame, no image, highlighted or
+#     plain
+if command -v node >/dev/null && [ -s "$WORK/arts/arts.json" ]; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("/* ── what a session published", "/* ── the files a session changed"),
+    sl("/* ── an artifact", "/* ── the navigator"),
+    sl("function navSessions()", "function navNotes()"),
+]))' "$REPO/share/workspace.js" "$WORK/arts-page.js"
+  { cat <<'JSEOF'
+var now = Math.floor(Date.now() / 1000), DAY = 86400;
+var CAPS = { live: 1 };
+function can(c){ return !!CAPS[c]; }
+function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function clip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function shortRepo(p){ return (p || '?').split('/').pop() || '?'; }
+function marks(){} function curSid(){ return ''; } function promptsWithheld(){ return false; }
+function openNow(){ return { html: '', sids: {} }; }
+function dayLabel(){ return 'Earlier'; }
+function inRepo(){ return true; }
+function sessionsOff(){ return ''; }
+var Shell = { nav: function(){}, paint: function(){} };
+var D = { withSessions: 1, sessions: {}, prompts: [] }, RUN = {}, sesScope = 'here', sesLive = false, sesQuery = '';
+function sessionList(){ return Object.keys(D.sessions).map(function(k){ return { sid: k, m: D.sessions[k] }; }); }
+var window = {};
+try {
+  var vm = require('vm'), ctx = { window: {} }; vm.createContext(ctx);
+  vm.runInContext(require('fs').readFileSync(process.argv[3], 'utf8'), ctx);
+  window.hljs = ctx.hljs || ctx.window.hljs;
+} catch(e){}
+var hljs = window.hljs;
+JSEOF
+    cat "$WORK/arts-page.js"
+    cat <<'JSEOF'
+
+var j = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8')), sid = j.sid, fail = [];
+function want(ok, why){ if (!ok) fail.push(why); }
+/* the rows */
+ARTS[sid] = j;
+j.artifacts.push({ n: 3, url: 'https://evil.example/artifact/x', title: 'Elsewhere', count: 1, first: 1, last: 2, source: 'not', file: '' });
+var h = artsHTML(sid);
+var rows = h.split('<div class="tfile art">').slice(1);
+want(rows.length === 4, 'not one row per artifact: ' + rows.length);
+want(/Alpha &amp; Again/.test(rows[0]) && /4 times, last /.test(rows[0]), 'the latest is not first, or does not say how often: ' + rows[0]);
+want(/<a class="nm" href="https:\/\/claude\.ai\/artifact\/AXYZ" target="_blank" rel="noopener noreferrer"/.test(rows[0]),
+     'the title does not open claude.ai outside the window');
+want(/<button class="asrc" data-asrc="55555555-0000-4000-8000-000000000005" data-an="0"[^>]*>open the source<\/button>/.test(rows[0]),
+     'the source is not opened by session and number');
+var gone = rows.filter(function(r){ return /Gamma/.test(r); })[0] || '';
+want(/its file is gone/.test(gone) && !/data-asrc/.test(gone), 'a gone source offers itself');
+var evil = rows.filter(function(r){ return /Elsewhere/.test(r); })[0] || '';
+want(!/<a /.test(evil), 'a url that is not claude.ai\'s is linked');
+want(/^<section class="fsec" data-f="files"><div class="grp">Artifacts it published <span class="c">4 · /.test(h),
+     'the section does not name and count what it holds');
+ARTS.other = { artifacts: [] };
+want(artsHTML('other') === '', 'a session that published nothing shows a list');
+/* the count in Sessions */
+D.sessions = { s1: { t: 'made pages', n: 5, live: 1, b: now, p: '/repo', arts: 3 }, s2: { t: 'made none', n: 2, live: 1, b: now, p: '/repo' } };
+var nav = navSessions().html;
+want(/made pages[^]*?<span class="sub">5p<span class="arts" title="published 3 artifacts to claude\.ai"> · <svg[^]*?<\/svg>3<\/span><\/span>/.test(nav),
+     'a session\'s row does not count what it published');
+want(!/class="arts"/.test((nav.split('data-ses="s2"')[1] || 'class="arts"').split('</div>')[0]),
+     'a session that published nothing carries a count');
+/* the source runs nothing */
+var nasty = '<!doctype html><title>x</title><script>window.ran = 1</script>' +
+  '<img src=x onerror="window.ran = 2"><iframe srcdoc="<script>parent.ran = 3</script>"></iframe>' +
+  '<svg onload="window.ran = 4"></svg><a href="javascript:window.ran = 5">x</a><style>body{}</style>' +
+  '<link rel="stylesheet" href="https://example.com/x.css"><object data="x"></object>';
+var OURS = { section: 1, h3: 1, div: 1, span: 1, a: 1, pre: 1, code: 1 };
+var ATTRS = { 'class': 1, title: 1, href: 1, target: 1, rel: 1 };
+function inert(out, how){
+  var t = /<\s*([a-zA-Z][\w-]*)([^>]*)>/g, m;
+  while ((m = t.exec(out))){
+    if (!OURS[m[1].toLowerCase()]) return want(false, how + ': a <' + m[1] + '> tag from the file is live');
+    var a = /([\w-]+)\s*=/g, n;
+    while ((n = a.exec(m[2]))) if (!ATTRS[n[1].toLowerCase()]) return want(false, how + ': a live ' + n[1] + ' attribute');
+    if (/^a$/i.test(m[1]) && !/href="https:\/\/claude\.ai\//.test(m[2])) return want(false, how + ': a live link from the file');
+  }
+}
+var src = { title: 'x', url: 'https://claude.ai/artifact/AXYZ', file: '~/x/index.html', kind: 'html', count: 1,
+            last: now, bytes: nasty.length, cut: false, text: nasty };
+var shown = sourceHTML(src);
+want(!hljs || /hljs-tag/.test(shown), 'the source was not highlighted');
+inert(shown, 'highlighted');
+SOURCE_HL = 10;
+inert(sourceHTML(src), 'plain');
+want(/&lt;script&gt;window\.ran = 1&lt;\/script&gt;/.test(sourceHTML(src)), 'the script is not there to read');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/arts-run.js"
+  res=$(node "$WORK/arts-run.js" "$WORK/arts/arts.json" "$REPO/share/vendor/highlight.min.js" 2>&1)
+  case "$res" in ok*) ok "43 · a session's artifacts are its rows and its count, and their source is text that runs nothing" ;;
+                 *)   no "43 · the artifacts on the page are wrong, or their source can run" "$res" ;; esac
+else
+  skip "43 · the artifacts on the page" "no node, or 41 wrote nothing"
+fi
+
+# ── 44 · nothing in this run scripted another application ───────────────────
 # The tripwire at the top of this file stands where `osascript` would be found.
 # A test that reached it — the hook closing a window it never opened, a reply
 # that missed the dry seam — wrote its arguments down, and that is a failure
 # whether or not the test that did it noticed.
 if [ ! -s "$WORK/osascript.log" ]; then
-  ok "40 · nothing in the suite reached osascript"
+  ok "44 · nothing in the suite reached osascript"
 else
-  no "40 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
+  no "44 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"

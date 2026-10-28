@@ -947,6 +947,7 @@ function sessionHTML(sid, convo){
       'What survives is below — copy it into a new session instead.</div>', '</section>');
   }
 
+  out.push(artsSlot(sid));
   if (docs.length){
     out.push('<section class="fsec" data-f="files">' +
       '<div class="grp">Documents it bears on <span class="c">by the files they describe</span></div>' +
@@ -990,7 +991,7 @@ function runningHTML(sid, convo){
     '<div class="grp">Running now</div>',
     '<div class="qnote">This session is running in a terminal (pid ' + esc(String(r.pid)) + '), ' +
       '<span data-runstate="' + esc(sid) + '">' + stateHTML(r) + '</span>. ' + answerThere() + ' ' +
-      files + '</div>', '</section>',
+      files + '</div>', '</section>', artsSlot(sid),
     '<section class="fsec" data-f="convo"><div class="convo">' +
       (convo || (r.transcript ? '' : '<div class="qnote">No transcript on disk for this session.</div>')) +
     '</div></section>', replySection(sid)].join('');
@@ -998,6 +999,67 @@ function runningHTML(sid, convo){
 function answerThere(){
   return can('launch') ? 'Answer it there, or on the line at the foot of this view, which types into that terminal.'
                        : 'Answer it there.';
+}
+/* ── what a session published ─────────────────────────────────────────────
+   The pages Claude published to claude.ai with its Artifact tool, one row per
+   artifact however often it was published again. They are read from the
+   whole transcript, apart from the conversation, and fill their slot when
+   they arrive; a session that published nothing shows nothing. A row opens
+   the published page in your browser, where you are signed in to claude.ai —
+   this window could not show it — and *open the source* opens the file it
+   was published from, as text, in a tab here. */
+var ARTS = {};                             // sid → what the server read, or 0 while it reads
+var ARTIFACT_URL = /^https:\/\/claude\.ai\/(code\/)?artifact\/[A-Za-z0-9_-]+$/;
+/* a session that published some says how many on its row in Sessions, beside
+   its prompts: a page with an arrow out of it, the way a published thing reads */
+var ARTICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+  'stroke-linejoin="round" aria-hidden="true"><path d="M13 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/>' +
+  '<path d="M15 4h5v5M20 4l-9 9"/></svg>';
+function artsSlot(sid){
+  var m = (D.sessions && D.sessions[sid]) || {};
+  if (ARTS[sid] === undefined && can('conversation') && (m.live || (RUN[sid] && RUN[sid].transcript)))
+    loadArts(sid);
+  return '<div data-arts="' + esc(sid) + '">' + artsHTML(sid) + '</div>';
+}
+function loadArts(sid){
+  ARTS[sid] = 0;
+  api('artifacts?id=' + encodeURIComponent(sid), undefined, function(j){
+    ARTS[sid] = j || {};
+    [].forEach.call(document.querySelectorAll('[data-arts="' + sid + '"]'), function(el){
+      el.innerHTML = artsHTML(sid);
+    });
+  }, function(){ ARTS[sid] = { artifacts: [] }; });
+}
+function artsHTML(sid){
+  var list = ((ARTS[sid] || {}).artifacts || []).slice();
+  if (!list.length) return '';
+  list.sort(function(a, b){ return b.last - a.last; });
+  return '<section class="fsec" data-f="files"><div class="grp">Artifacts it published <span class="c">' +
+    list.length + ' · open on claude.ai</span></div>' +
+    list.map(function(a){ return artRow(sid, a); }).join('') + '</section>';
+}
+function artRow(sid, a){
+  var title = esc(a.title || 'untitled'), url = ARTIFACT_URL.test(a.url || '') ? a.url : '';
+  var when = (a.count > 1 ? a.count + ' times, last ' : 'once, ') + dayClock(a.last);
+  var src = a.source === 'ok'
+    ? '<button class="asrc" data-asrc="' + esc(sid) + '" data-an="' + (+a.n) + '" title="' +
+        esc(a.file) + '">open the source</button>'
+    : '<span class="sub gone" title="' + esc(a.file) + '">' +
+        ({ gone:'its file is gone', big:'its file is too large' }[a.source] || 'no page file') + '</span>';
+  return '<div class="tfile art">' +
+    (url ? '<a class="nm" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" title="' +
+             esc(url) + ' — opens in your browser">' + title + '</a>'
+         : '<span class="nm">' + title + '</span>') +
+    '<span class="sub">' + esc(when) + '</span>' + src + '</div>';
+}
+/* a moment on this machine's clock: the time today, the day and time before */
+function dayClock(ts){
+  if (!ts) return '';
+  var d = new Date(ts * 1000), t = new Date();
+  var hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  if (d.toDateString() === t.toDateString()) return 'today ' + hm;
+  return d.getDate() + ' ' + 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[d.getMonth()] +
+    (d.getFullYear() !== t.getFullYear() ? ' ' + d.getFullYear() : '') + ', ' + hm;
 }
 /* ── the files a session changed ──────────────────────────────────────────
    A session in a working repository touches hundreds of files across a hundred
@@ -2952,22 +3014,27 @@ function renderConvo(c){
   c.turns.forEach(function(t){
     if (t.who === 'mark'){
       last = '';
-      out.push('<div class="cmark ' + esc(t.kind) + '"><span>' + esc(t.text || t.kind) + '</span></div>');
+      out.push('<div class="cmark ' + esc(t.kind) + '"><span>' + esc(t.text || t.kind) + '</span></div>' +
+               (t.imgs ? shotsHTML(c.id, t.imgs, 'mid') : ''));
       return;
     }
     if (t.who === 'note'){
       last = '';
-      out.push(noteHTML(t));
+      out.push(noteHTML(t, c.id));
       return;
     }
     var mine = t.who === 'you', run = t.who === last;
     last = t.who;
+    /* what a tool showed Claude comes first, as it came first, then what its
+       words name */
+    var shots = mine ? t.imgs || [] : [].concat.apply([], (t.tools || []).map(function(x){
+      return x.imgs || []; })).concat(t.imgs || []);
     /* Claude usually speaks several times before you answer; a run of them is
        one exchange, so only the first carries a clock and the gap tightens */
     out.push('<div class="turn ' + (mine ? 'you' : 'claude') + (run ? ' cont' : '') + '">' +
       (!run && t.t ? '<div class="tm">' + clock(t.t) + '</div>' : '') +
-      '<div class="bub"><div class="md">' + turnHTML(t.text) + '</div>' +
-      (mine ? '' : didHTML(t)) + '</div></div>');
+      '<div class="bub">' + (t.text || !shots.length ? '<div class="md">' + turnHTML(t.text) + '</div>' : '') +
+      shotsHTML(c.id, shots) + (mine ? '' : didHTML(t)) + '</div></div>');
   });
   return out.join('');
 }
@@ -2976,12 +3043,13 @@ function renderConvo(c){
    notes — arrives wearing your role in the transcript. It is drawn between
    the two halves, under a line that says what it is and whom it is from, and
    never on your side. */
-function noteHTML(t){
+function noteHTML(t, sid){
   var from = t.from ? '<b>' + esc(t.from) + '</b> · ' : '';
   var what = t.kind === 'system' ? 'system · ' + esc(t.about || 'a note') : esc(t.about || t.kind);
   return '<div class="turn note ' + esc(t.kind) + '">' +
     '<div class="tm">' + (t.t ? clock(t.t) + ' · ' : '') + from + what + '</div>' +
-    '<div class="bub"><div class="md">' + turnHTML(t.text) + '</div></div></div>';
+    '<div class="bub"><div class="md">' + turnHTML(t.text) + '</div>' +
+    (t.imgs ? shotsHTML(sid, t.imgs) : '') + '</div></div>';
 }
 function turnHTML(text){
   if (!text) return '<p class="nothing">—</p>';
@@ -2989,6 +3057,36 @@ function turnHTML(text){
   try { box.innerHTML = marked.parse(text); } catch(e){ box.textContent = text; }
   MD.sanitise(box);                        // a transcript is untrusted like anything else
   return box.innerHTML;
+}
+/* ── the pictures in a conversation ──────────────────────────────────────
+   A screenshot a tool returned, an image you pasted, a file Claude names:
+   each is a thumbnail where it happened, fetched when it scrolls into view and
+   opened in the lightbox below. The page asks for one by the session and its
+   place in the transcript — the server reads the bytes from there, or from a
+   file the transcript itself names, and never from a path the page sends. A
+   file that has gone says so instead of drawing a broken picture. */
+var SHOTSAID = { gone:'no longer on disk', big:'too large to show', not:'not an image it can show' };
+function shotURL(sid, s){
+  return BASE + '/image?id=' + encodeURIComponent(sid) + '&at=' + (+s.at) + '&i=' + (+s.i);
+}
+function shotCap(s){
+  if (s.k === 'tool') return (s.tool || 'a tool') + (s.about ? ' · ' + s.about : '');
+  if (s.k === 'pasted') return 'you pasted this';
+  return s.where || s.name || 'an image';
+}
+function shotHTML(sid, s){
+  var cap = shotCap(s), ref = (+s.at) + '.' + (+s.i);
+  if (s.state && s.state !== 'ok')
+    return '<span class="shot off" data-ref="' + ref + '" title="' + esc(cap) + '"><i>' +
+      esc(s.name || 'image') + '</i>' + (SHOTSAID[s.state] || SHOTSAID.not) + '</span>';
+  var u = shotURL(sid, s);
+  return '<button class="shot" data-shot="' + esc(u) + '" data-ref="' + ref + '" data-cap="' + esc(cap) +
+    '" title="' + esc(cap) + '"><img src="' + esc(u) + '" loading="lazy" decoding="async" alt=""></button>';
+}
+function shotsHTML(sid, list, cls){
+  if (!list || !list.length) return '';
+  return '<div class="shots' + (cls ? ' ' + cls : '') + '">' +
+    list.map(function(s){ return shotHTML(sid, s); }).join('') + '</div>';
 }
 function didHTML(t){
   var parts = [];
@@ -2998,8 +3096,11 @@ function didHTML(t){
     parts.push('<details class="tools"><summary>' + t.tools.length + ' tool call' +
       (t.tools.length > 1 ? 's' : '') + '</summary>' +
       t.tools.map(function(x){
+        /* the picture it returned is the one under the bubble, opened from here */
+        var im = (x.imgs || []).map(function(s){
+          return '<button class="shotref" data-ref="' + (+s.at) + '.' + (+s.i) + '">image</button>'; }).join('');
         return '<div class="tool"><span class="n">' + esc(x.n) + '</span>' +
-          (x.b ? '<span class="b">' + esc(x.b) + '</span>' : '') +
+          (x.b ? '<span class="b">' + esc(x.b) + '</span>' : '') + im +
           (x.ok === false ? '<span class="err">failed</span>' : '') + '</div>';
       }).join('') + '</details>');
   }
@@ -3017,6 +3118,146 @@ function didHTML(t){
 function clock(ts){
   var d = new Date(ts * 1000);
   return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+}
+
+/* ── the lightbox ─────────────────────────────────────────────────────────
+   A thumbnail opens its picture over the window, at the size the window
+   allows. The arrow keys step through the other pictures of the same session,
+   in the order the conversation shows them; Escape or a click anywhere but on
+   the arrows closes it. While it is open it has the keyboard to itself. */
+var SHOTS = { list: [], at: -1 };
+function shotList(from){
+  var surf = (from && from.closest && from.closest('.surf')) || document, seen = {}, out = [];
+  [].forEach.call(surf.querySelectorAll('.shot[data-shot]'), function(el){
+    var u = el.dataset.shot;
+    if (seen[u]) return;
+    seen[u] = 1;
+    out.push({ u: u, cap: el.dataset.cap || '' });
+  });
+  return out;
+}
+function shotOpen(el){
+  if (!el || !el.dataset.shot) return;
+  SHOTS.list = shotList(el);
+  var i = SHOTS.list.map(function(x){ return x.u; }).indexOf(el.dataset.shot);
+  if (i < 0){ SHOTS.list.push({ u: el.dataset.shot, cap: el.dataset.cap || '' }); i = SHOTS.list.length - 1; }
+  shotShow(i);
+}
+function shotShow(i){
+  var n = SHOTS.list.length;
+  if (!n) return;
+  SHOTS.at = ((i % n) + n) % n;
+  var x = SHOTS.list[SHOTS.at], img = $('shot-img');
+  img.classList.remove('bad');
+  img.src = x.u;
+  $('shot-cap').textContent = x.cap;
+  $('shot-n').textContent = n > 1 ? (SHOTS.at + 1) + ' of ' + n : '';
+  $('shot-prev').hidden = $('shot-next').hidden = n < 2;
+  $('shotbox').hidden = false;
+}
+function shotClose(){
+  var box = $('shotbox');
+  if (!box || box.hidden) return false;
+  box.hidden = true;
+  $('shot-img').removeAttribute('src');
+  SHOTS.at = -1;
+  return true;
+}
+function shotKey(e){
+  var box = $('shotbox');
+  if (!box || box.hidden) return false;
+  if (e.key === 'Escape') shotClose();
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') shotShow(SHOTS.at + 1);
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') shotShow(SHOTS.at - 1);
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  return true;
+}
+/* a click on a thumbnail, on a tool's `image`, or anywhere while it is open */
+function shotClick(e){
+  var box = $('shotbox');
+  if (box && !box.hidden){
+    var nav = e.target.closest('.shotnav');
+    if (nav) shotShow(SHOTS.at + (nav.id === 'shot-prev' ? -1 : 1));
+    else shotClose();
+    return true;
+  }
+  var ref = e.target.closest('.shotref');
+  if (ref){
+    var surf = ref.closest('.surf') || document;
+    var to = surf.querySelector('.shot[data-ref="' + ref.dataset.ref + '"]');
+    if (to && to.dataset.shot) shotOpen(to);
+    else toast(to ? to.title + ' — ' + to.textContent : 'that picture is not shown here');
+    return true;
+  }
+  var sh = e.target.closest('.shot[data-shot]');
+  if (sh){ shotOpen(sh); return true; }
+  return false;
+}
+/* a picture that would not load says so in its place: the file went between
+   the reading and the look, or its bytes were not an image after all */
+function shotFailed(img){
+  if (img.id === 'shot-img'){
+    img.classList.add('bad');
+    $('shot-cap').textContent = ((SHOTS.list[SHOTS.at] || {}).cap || '') + ' — could not be shown';
+    return;
+  }
+  var b = img.closest && img.closest('.shot[data-shot]');
+  if (!b) return;
+  b.classList.add('off');
+  b.removeAttribute('data-shot');
+  b.innerHTML = '<i>' + esc(b.dataset.cap || 'image') + '</i>could not be shown';
+}
+
+/* ── an artifact's source, in a tab ───────────────────────────────────────
+   The file a page was published from is untrusted HTML: Claude wrote it, from
+   whatever it had read. It is shown as its source, highlighted text inside a
+   <pre>, and never rendered, so nothing in it runs, loads or reaches out — a
+   script is words on the screen. The published page itself is on claude.ai,
+   one click away. The page asks for it by the session and the artifact's
+   number there; the server reads the file the Artifact call named. */
+var SOURCE_HL = 400000;                    // past this, plain text: highlighting would stall the tab
+function sourceSurface(id){
+  var cut = id.lastIndexOf('/'), sid = id.slice(0, cut), n = +id.slice(cut + 1);
+  var S = { j: null, err: '', host: null };
+  S.render = function(host){
+    S.host = host;
+    host.innerHTML = '<div class="inner sdet srcv"></div>';
+    S.paint();
+    api('artifact?id=' + encodeURIComponent(sid) + '&n=' + n, undefined, function(j){
+      S.j = j; S.paint(); Shell.paint();
+    }, function(e){
+      S.err = (e && e.body && e.body.error) || 'could not read its source';
+      S.paint(); Shell.paint();
+    });
+  };
+  S.paint = function(){
+    var box = S.host && S.host.querySelector('.inner');
+    if (box) box.innerHTML = sourceHTML(S.j, S.err);
+  };
+  S.label = function(){
+    var t = S.j ? S.j.title : 'artifact';
+    return { title: clip(t, 30), tip: t + (S.j ? ' — ' + S.j.file : ''), kd: 'SRC' };
+  };
+  S.hint = function(){ return 'the source of a page Claude published · read-only, nothing in it runs'; };
+  return S;
+}
+function sourceHTML(j, err){
+  if (err) return '<div class="empty">' + esc(err) + '</div>';
+  if (!j) return '<div class="qnote">Reading its source…</div>';
+  var url = ARTIFACT_URL.test(j.url || '') ? j.url : '';
+  var code = j.text.length <= SOURCE_HL && window.hljs
+    ? hljs.highlight(j.text, { language: j.kind === 'md' ? 'markdown' : 'xml', ignoreIllegals: true }).value
+    : esc(j.text);
+  return '<section class="sabout"><h3>' + esc(j.title) + '</h3><div class="who">' +
+      '<span>the source it was published from</span>' +
+      '<span>' + (j.count > 1 ? 'published ' + j.count + ' times, last ' : 'published ') + esc(dayClock(j.last)) + '</span>' +
+      '<span class="f" title="' + esc(j.file) + '">' + esc(j.file) + '</span>' +
+      '<span>' + Math.max(1, Math.round(j.bytes / 1024)).toLocaleString() + ' KB</span>' +
+      (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">open it on claude.ai</a>' : '') +
+    '</div></section>' +
+    (j.cut ? '<div class="qnote">Its first ' + Math.round(j.text.length / 1048576) + ' MB; the rest is not shown.</div>' : '') +
+    '<pre class="srccode"><code class="hljs">' + code + '</code></pre>';
 }
 
 /* ── the navigator's three modes ─────────────────────────────────────────── */
@@ -3157,7 +3398,9 @@ function navSessions(){
       '<span class="dot ' + (x.m.live ? 'live' : 'arch') + '"></span>' +
       '<span class="ttl">' + esc(x.m.t || '(no prompt recorded)') + '</span>' +
       ((sesScope === 'all' || q) ? '<span class="sub">' + esc(shortRepo(x.m.p)) + '</span>' : '') +
-      '<span class="sub">' + x.m.n + 'p</span></div>');
+      '<span class="sub">' + x.m.n + 'p' + (x.m.arts ? '<span class="arts" title="published ' + x.m.arts +
+        ' artifact' + (x.m.arts > 1 ? 's' : '') + ' to claude.ai"> · ' + ARTICON + x.m.arts + '</span>' : '') +
+      '</span></div>');
   });
   return { html: h.join(''), filter: sesQuery, placeholder: 'Something you said',
            onFilter: function(v){ sesQuery = v; Shell.nav(); },
@@ -3493,6 +3736,8 @@ function openRels(){
 
 function specFor(kind, id){
   if (kind === 'doc') return docBy(id) ? { kind:'doc', id:id, title:id.split('/').pop(), tip:id } : null;
+  if (kind === 'source') return /^[0-9a-fA-F-]{8,64}\/\d+$/.test(id) && can('conversation')
+    ? { kind:'source', id:id, title:'artifact' } : null;
   if (kind === 'session') return (D.sessions && D.sessions[id]) || RUN[id]
     ? { kind:'session', id:id, title:clip(sesTitle(id), 30) } : null;
   if (TITLES[kind]) return { kind:kind, id:'', title:TITLES[kind] };
@@ -3502,6 +3747,7 @@ function specFor(kind, id){
 function makeSurface(spec){
   if (spec.kind === 'doc') return docSurface(spec.id, spec.q, spec.jump, spec.at);
   if (spec.kind === 'session') return sessionSurface(spec.id, spec.q);
+  if (spec.kind === 'source') return sourceSurface(spec.id);
   return listSurface(spec.kind);
 }
 
@@ -3740,6 +3986,7 @@ var NAVVERBS = RB.table({
 
 /* ── everything you can click ───────────────────────────────────────────── */
 document.addEventListener('click', function(e){
+  if (shotClick(e)) return;
   var uf = e.target.closest('.unfold');
   if (uf){
     var body = uf.previousElementSibling;
@@ -3844,6 +4091,9 @@ document.addEventListener('click', function(e){
   }
   var ses = e.target.closest('[data-ses]');
   if (ses) return openSession(ses.dataset.ses, { q: ses.dataset.q || '', where: where });
+  /* an artifact's source opens in a tab of its own, here or in the split */
+  var src = e.target.closest('[data-asrc]');
+  if (src) return Shell.open({ kind:'source', id: src.dataset.asrc + '/' + (+src.dataset.an), title:'artifact' }, where);
 
   var row = e.target.closest('[data-doc]');
   if (row && !e.target.closest('article.md')){
@@ -3853,6 +4103,12 @@ document.addEventListener('click', function(e){
   VIEWVERBS(e);
 });
 
+/* the lightbox, while open, hears every key before anything else does */
+window.addEventListener('keydown', shotKey, true);
+/* a picture that would not load is said so where it was to be */
+document.addEventListener('error', function(e){
+  if (e.target && e.target.tagName === 'IMG') shotFailed(e.target);
+}, true);
 document.addEventListener('keydown', function(e){
   var typing = /^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable;
   if (e.key === 'Escape'){

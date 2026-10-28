@@ -378,6 +378,10 @@ def load_sessions(limit_project=None, deep=False):
     except Exception:
         def harness_text(s):
             return False
+    try:
+        from transcript import Published         # the pages a session published, counted
+    except Exception:
+        Published = None
     if hist.is_file():
         with hist.open(encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -430,6 +434,7 @@ def load_sessions(limit_project=None, deep=False):
         for p in root.glob("*/*.jsonl"):                  # subagent runs live deeper; not ours
             sid = p.stem
             seen, raw, cwd = set(), set(), ""
+            pub = Published() if Published else None
             try:
                 with p.open(encoding="utf-8", errors="replace") as f:
                     for line in f:
@@ -441,6 +446,8 @@ def load_sessions(limit_project=None, deep=False):
                             seen.update(re.findall(r'"file_path":"([^"]+)"', line))
                         if '"name":"Bash"' in line:
                             bash_targets(line, raw)
+                        if pub and (pub.calls or '"name":"Artifact"' in line):
+                            pub.feed(line)
             except Exception:
                 continue
             if deep:
@@ -466,6 +473,8 @@ def load_sessions(limit_project=None, deep=False):
             m["live"] = 1                                 # a transcript exists: resumable
             if cwd and not m["p"]:
                 m["p"] = cwd
+            if pub and pub.arts:
+                m["arts"] = len(pub.arts)                 # artifacts it published, one per page
             m["files"] = sorted(seen)
             for f_ in seen:
                 touches.setdefault(f_, []).append(sid)
@@ -1231,6 +1240,53 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         except Exception as e:
             return S.J({"id": sid, "error": str(e)[:200], "turns": []})
 
+    def image(method, query, body):
+        """One picture from a conversation, by its place in the transcript: the
+        byte its record's line begins at and its ordinal on that line. Nothing
+        the page sends is read as a path. The bytes come from the record
+        itself, or from a file the record's own words name, and only an image
+        file on disk under the size cap — transcript.py's `image`."""
+        sid = (query.get("id") or [""])[0]
+        try:
+            at, i = int((query.get("at") or [""])[0]), int((query.get("i") or [""])[0])
+        except ValueError:
+            return S.J({"error": "an image is named by its place in the transcript"}, 400)
+        if not A.SESSION_ID.match(sid):
+            return S.J({"error": "not a session id"}, 400)
+        import transcript as _T
+        try:
+            data, mime = _T.image(sid, at, i)
+        except _T.Withheld as w:
+            return S.J({"error": w.why}, w.status)
+        # what it is, said rather than sniffed; and inert even opened on its own
+        return 200, mime, data, {"Content-Security-Policy": "default-src 'none'; sandbox",
+                                 "Content-Disposition": "inline"}
+
+    def artifacts_route(method, query, body):
+        """What a session published with the Artifact tool, one row per
+        artifact, read from the whole transcript — a second for a gigabyte."""
+        sid = (query.get("id") or [""])[0]
+        if not A.SESSION_ID.match(sid):
+            return S.J({"error": "not a session id"}, 400)
+        import transcript as _T
+        return S.J(_T.artifacts(sid))
+
+    def artifact_route(method, query, body):
+        """The source of one artifact a session published, as text, by its
+        number in that session: the file is the one its Artifact call named."""
+        sid = (query.get("id") or [""])[0]
+        try:
+            n = int((query.get("n") or [""])[0])
+        except ValueError:
+            return S.J({"error": "an artifact is named by its number in the session"}, 400)
+        if not A.SESSION_ID.match(sid):
+            return S.J({"error": "not a session id"}, 400)
+        import transcript as _T
+        try:
+            return S.J(_T.artifact_source(sid, n))
+        except _T.Withheld as w:
+            return S.J({"error": w.why}, w.status)
+
     def asset(method, query, body):
         rel = (query.get("p") or [""])[0]
         try:
@@ -1504,7 +1560,8 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
               "notes": notes, "act": act, "events": events, "settings": settings,
               "session": session, "sessions": sessions_route, "waiting": waiting_route,
-              "working": working_route}
+              "working": working_route, "image": image, "artifacts": artifacts_route,
+              "artifact": artifact_route}
     srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
     if port:
         srv.httpd.server_close()

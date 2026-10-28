@@ -196,7 +196,8 @@ filter*, because most of the time you are looking for a name.
 **Sessions** is your own agent history as something you can walk through: every session,
 newest first, scoped to this repository by default — with **everywhere** beside it, because
 the repository you are standing in is often not the one you said it in. `⇧⌘K` opens
-find-anything already widened.
+find-anything already widened. A row says how many prompts the session holds and, for one
+that published pages to claude.ai with Claude Code's Artifact tool, how many of those.
 
 At its head is **Open now**: every session running in a terminal at this moment, busy or
 not. A row says what the session is about — its first prompt, as every row does, or the
@@ -240,10 +241,28 @@ opens itself.
 
 Opening one renders the conversation as
 what it was: your turns on the right, Claude's on the left, thinking collapsed to a count,
-tool calls behind a disclosure, files it wrote as chips you can open. Compactions,
-interruptions and pasted images are marked where they happened. Anything longer than a
-screenful folds to a fixed height and says how many lines it is holding back; opening one
-grows it over a duration set by how far it has to travel.
+tool calls behind a disclosure, files it wrote as chips you can open. Compactions and
+interruptions are marked where they happened. Anything longer than a screenful folds to a
+fixed height and says how many lines it is holding back; opening one grows it over a duration
+set by how far it has to travel.
+
+The pictures in a conversation are where they happened, as thumbnails fetched when they
+scroll into view: the image you pasted under your prompt; under Claude's words the
+screenshots its tools returned — a PNG it read, a browser's screenshot — and the image files
+it names by their path; under an agent's report the ones the agent names. A tool's line in
+the disclosure opens the picture that tool returned. A file named by its path that has gone
+since says so in its place, as does one too large to show. A thumbnail opens its picture
+over the window; the arrow keys step through the session's other pictures, and Escape or a
+click closes it.
+
+A session that published pages with the Artifact tool lists them under *Artifacts it
+published*, one row per artifact however often it was published again: its title — the
+page's own `<title>`, or the published one once the file has gone — how many times, and when
+last. The row opens the page on claude.ai, in your browser, since it needs you signed in
+there. *Open the source* opens the file it was published from in a tab of its own, as
+highlighted text: that file is HTML Claude wrote, and shown as its source nothing in it runs,
+loads or reaches out. The list is read from the whole transcript rather than its latest
+turns, about a second for a gigabyte, and a session that published nothing shows none.
 
 Not everything a transcript files under your name is yours. A message from another session,
 an agent's report, a background task's notice and the harness's own notes — a reminder, a
@@ -503,7 +522,13 @@ What crosses the wire is a verb and an id. The page never sends a path and never
 command: every path is resolved on the server against the index it already holds, and every
 argument goes into `argv` directly. A file a session changed is named by that session's id
 and its position in the list the server holds for it, so even the actions that reach past the
-document index reach only what the index already knew about. The page may hand over text in
+document index reach only what the index already knew about. What the page reads, behind no
+switch, is named the same way. A picture from a conversation is its session and its place in
+that session's transcript — the byte its record's line begins at, and which of that line's
+images it is — and the server reads the record there: the bytes it carries, or a file its own
+words name, served only while that is an image file on disk under 25 MB, typed by its first
+bytes and inert even opened on its own. An artifact's source is its session and its number
+in what that session published, and the file is the one its Artifact call named. The page may hand over text in
 two places, and both are data: the prompt for a new session, written to a file and read back
 as a single argument, and a reply to a running one, which reaches the AppleScript that types
 it as an item of its `argv` — the script itself is a constant. Text containing `$(…)`,
@@ -575,13 +600,14 @@ share/workspace.*   the repo index, and what each surface looks like
 share/serve.py      the local server: ephemeral port, per-run token, gone with its window
 share/actions.py    the verb allowlist — the only place the page can cause anything
 share/extract.py    PDF and Word into text, cached on mtime and size
-share/transcript.py one conversation, read from its end on demand
+share/transcript.py one conversation, read from its end on demand; its pictures, and the pages
+                    it published
 share/waiting.py    which sessions are running, which wait on you, and what a working one does
 share/hook.py       blocking review server for --review and --hook
 .claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook
 ```
 
-Twenty-one files, a little under twelve thousand lines, plus five vendored render libraries. No build
+Twenty-one files, about thirteen and a half thousand lines, plus five vendored render libraries. No build
 step, no runtime dependency beyond what macOS ships. `./tests/smoke.sh` drives the whole
 thing from a throwaway install; CI runs it on every push.
 
