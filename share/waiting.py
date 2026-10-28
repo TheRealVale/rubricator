@@ -16,9 +16,9 @@ running at once:
   `idle` again;
 - `waiting` was in neither reading. The binary's code writes it while a
   dialog is open on the human — a permission prompt, a question — with
-  `waitingFor`, the dialog's one-line reason. That is read from the code, not
-  seen on disk, so the list treats it as asking and shows the reason when one
-  is there;
+  `waitingFor`, the dialog's one-line reason. A later reading, 2026-10-28 on
+  2.1.302, found it on disk with `waitingFor` "input needed"; the list treats
+  it as asking and shows the reason as written;
 - a file outlives a crash, and a pid is reused, so a session counts as running
   only while `ps` finds a process called `claude` at that pid.
 
@@ -27,6 +27,13 @@ it. Transcripts on this machine run past a gigabyte, so this reads the tail
 and nothing else: a quarter of a megabyte first, four times as much while no
 reply of Claude's is in what was read, sixteen at most. On the 1.4 GB one that
 is a quarter of a megabyte and two milliseconds.
+
+What a running session is about is its first prompt, taken from
+`~/.claude/history.jsonl` by the rule the history index names every session
+with — the first thing you typed that is not plumbing like `/clear` — so a
+session reads the same in the Sessions list before the index exists as after.
+That file is every prompt ever typed and nothing else: 2.3 MB and 7,800 lines
+here, scanned in 5 ms.
 
 Nothing is cached and nothing is written: the list is built again each time
 the page asks, because a session's state is minutes old at most.
@@ -44,6 +51,7 @@ from pathlib import Path
 HOME = Path(os.path.expanduser("~"))
 SESSIONS = Path(os.environ.get("RUBRICATOR_CLAUDE_SESSIONS", HOME / ".claude/sessions"))
 PROJECTS = Path(os.environ.get("RUBRICATOR_CLAUDE_PROJECTS", HOME / ".claude/projects"))
+HISTORY = Path(os.environ.get("RUBRICATOR_CLAUDE_HISTORY", HOME / ".claude/history.jsonl"))
 
 # what each status means for the human, as measured above
 ON_YOU = {"waiting": "asking", "idle": "done", "shell": "background"}
@@ -58,6 +66,14 @@ try:
 except Exception:                                  # standalone
     def scrub(s):
         return s
+try:
+    from workspace import is_slash_noise           # the index's own rule for a name
+except Exception:                                  # standalone
+    def is_slash_noise(s):
+        return False
+
+SESSION_ID = re.compile(rb'"sessionId"\s*:\s*"([^"\\]{1,80})"')
+FIRST_MAX = 120                                    # what the index keeps of it
 
 
 def _alive(pids):
@@ -144,6 +160,56 @@ def last_reply(recs):
     return scrub(text[:MAX_TEXT]), _when(after[-1].get("timestamp"))
 
 
+def first_prompts(sids):
+    """The first thing you asked in each of these sessions, by the history
+    index's rule, so a running session is named the way the Sessions list
+    names it once its index arrives. A session with nothing typed yet is not
+    in the result, and the page names it by its terminal name instead."""
+    want, out = set(sids), {}
+    if not want:
+        return out
+    try:
+        f = HISTORY.open("rb")
+    except OSError:
+        return out
+    with f:
+        for line in f:
+            m = SESSION_ID.search(line)
+            if not m:
+                continue
+            sid = m.group(1).decode("utf-8", "replace")
+            if sid not in want or sid in out:
+                continue
+            try:
+                txt = json.loads(line).get("display") or ""
+            except Exception:
+                continue                          # a line being written as we read
+            if not isinstance(txt, str) or not txt or is_slash_noise(txt):
+                continue
+            out[sid] = scrub(txt)[:FIRST_MAX]
+            if len(out) == len(want):
+                break
+    return out
+
+
+def signature():
+    """What the session files say, cheap enough to compare every second: which
+    files there are and the status each gives. It compares the status, not when
+    a file was written, so it moves when a session starts, ends, or changes what
+    it is doing — the moments the list on screen goes out of date."""
+    if not SESSIONS.is_dir():
+        return ()
+    out = []
+    for f in sorted(SESSIONS.glob("*.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            out.append((f.name, d.get("sessionId"), d.get("status"),
+                        d.get("statusUpdatedAt"), d.get("waitingFor")))
+        except Exception:
+            out.append((f.name,))                 # a file mid-write, or of another shape
+    return tuple(out)
+
+
 def _inside(path, roots):
     if not path:
         return False
@@ -166,8 +232,10 @@ def _worktrees(roots):
 
 
 def running(roots=(), replies=True):
-    """Every running session, what state it is in, and for each one that waits
-    on you what it last said. `state` says which kind of empty an empty list is."""
+    """Every running session, what state it is in and since when, what it is
+    about, and for each one that waits on you what it last said. `state` says
+    which kind of empty an empty list is. Without `replies` it is only which
+    sessions run, for the guard on resume."""
     t0 = time.time()
     out = {"state": "ok", "sessions": [], "files": 0, "misshapen": 0, "took": 0}
     if not SESSIONS.is_dir():
@@ -190,32 +258,32 @@ def running(roots=(), replies=True):
         return out
 
     live = _alive([d["pid"] for d in rows])
+    rows = [d for d in rows if d["pid"] in live]
     scope = _worktrees([str(r) for r in roots])
+    first = first_prompts([d["sessionId"] for d in rows]) if replies else {}
     now = int(time.time())
     for d in rows:
-        if d["pid"] not in live:
-            continue
         sid, status = d["sessionId"], d["status"]
         row = {"sid": sid, "pid": d["pid"], "status": status,
                "on": ON_YOU.get(status) or ("working" if status in WORKING else "unknown"),
                "name": d.get("name") or "", "cwd": d.get("cwd") or "",
                "since": int((d.get("statusUpdatedAt") or 0) / 1000) or now,
-               "waitingFor": d.get("waitingFor") or ""}
-        if replies and row["on"] != "working":
-            p = _transcript(sid)
-            if p is None:
-                row["transcript"] = False
-            else:
-                try:
-                    recs, n = tail(p)
-                except OSError:
-                    recs, n = [], 0
-                row["transcript"] = True
-                row["read"] = n
-                row["text"], row["said"] = last_reply(recs)
-                row["title"] = next((r.get("aiTitle") for r in reversed(recs)
-                                     if r.get("type") == "ai-title" and r.get("aiTitle")), "")
-                row["here"] = next((r.get("cwd") for r in reversed(recs) if r.get("cwd")), "")
+               "waitingFor": d.get("waitingFor") or "",
+               "first": first.get(sid, "")}
+        # whether there is a conversation to open, for every session; what it
+        # last said, only for the ones that wait on you
+        p = _transcript(sid) if replies else None
+        row["transcript"] = p is not None
+        if p is not None and row["on"] != "working":
+            try:
+                recs, n = tail(p)
+            except OSError:
+                recs, n = [], 0
+            row["read"] = n
+            row["text"], row["said"] = last_reply(recs)
+            row["title"] = next((r.get("aiTitle") for r in reversed(recs)
+                                 if r.get("type") == "ai-title" and r.get("aiTitle")), "")
+            row["here"] = next((r.get("cwd") for r in reversed(recs) if r.get("cwd")), "")
         row["inRepo"] = _inside(row["cwd"], scope) or _inside(row.get("here", ""), scope)
         out["sessions"].append(row)
     out["sessions"].sort(key=lambda r: -r["since"])

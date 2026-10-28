@@ -1454,10 +1454,12 @@ this register does not trust. Q has no plan document of its own.
 
 Several Claude Code sessions run side by side, each finishing at its own
 moment, and coming back to the desk means visiting every terminal to learn which
-one is done and what it said. The answer is already on disk: Claude Code keeps a
-file per running session with its status, and the reply is at the end of the
-transcript. This reads both, each time it is asked, and keeps nothing. No plan
-document of its own; the measurements are in `share/waiting.py`'s header.
+one is done and what it said — and finding one of them again means remembering
+which tab it is in. The answer is already on disk: Claude Code keeps a file per
+running session with its status and its terminal's name, the first prompt is in
+the history, and the reply is at the end of the transcript. This reads them each
+time it is asked, and keeps nothing. No plan document of its own; the
+measurements are in `share/waiting.py`'s header.
 
 - [x] **W1 · The list.** `share/waiting.py` reads `~/.claude/sessions/<pid>.json`,
       counts a session as running only while `ps` finds a process called
@@ -1494,10 +1496,30 @@ document of its own; the measurements are in `share/waiting.py`'s header.
       every window. A per-transcript cache keyed on size and mtime would pay
       only for what changed. *Done when:* a second window with sessions running
       fills the Sessions list in seconds. **M**
-- [ ] **W5 · `waiting` seen on disk.** The `asking` group is built from the
-      binary's code, not from a file seen with that status. Open a permission
-      prompt in a session, read its file, and confirm `status` and
-      `waitingFor` — rule 12. **S**
+- [x] **W5 · `waiting` seen on disk.** Rule 12 asks for the file behind the
+      `asking` group, not the binary's code alone. Read 2026-10-28 on 2.1.302, one
+      of fourteen running sessions: `status` `waiting`, `waitingFor`
+      `"input needed"`, held for a day and 21 hours. Which dialog raised it was
+      not recorded, so the reason is shown as written rather than interpreted.
+- [x] **W6 · Open now.** The Sessions navigator opens on every session running
+      in a terminal, busy or not, above the day groups and not repeated in
+      them, scoped by the same chips. A row is the session's first prompt —
+      read from `history.jsonl` by the index's own rule, 7,800 lines in 5 ms —
+      or its terminal's name until one is typed; the terminal's name, to find
+      the tab by; and its state in a word, a colour and a dot of its own shape
+      (*asking you*, *your turn*, *on its own command*, *working*), with how
+      long it has held. It is W1's reading, not the index's, so it draws with
+      the window: 0.24–0.5 s after the page began loading, headless, with the
+      index still being read; and a running session the index does not hold
+      opens on its session file and its transcript. It is read again when the
+      window comes back to the front, the event stream says `running` whenever
+      a session file's status changes, and the durations count on in place.
+      Its heading carries the count that waits on you and opens Waiting. Every
+      empty says which, in the group itself.
+      *Done when:* the group draws before the index, in each state's own look
+      and order, says which empty it is, and a running session opens before it
+      is indexed; the event stream tells a change of state and nothing without
+      consent — test 30.
 
 ---
 

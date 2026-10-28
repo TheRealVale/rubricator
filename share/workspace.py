@@ -1349,16 +1349,35 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                 out[d["rel"]] = 0
         return out
 
+    def running_now():
+        """What Claude Code's session files say, once the human has agreed to
+        their being read; None until then."""
+        if not (look[0] or want[0]):
+            return None
+        try:
+            import waiting as _W
+            return _W.signature()
+        except Exception:
+            return None
+
     @S.stream
     def events(wfile):
         """Watch mode. The page asked to be told when a document changes, so tell
-        it — one line per change, until the window goes away."""
+        it — one line per change, until the window goes away. A Claude Code
+        session starting, ending or changing state is told the same way, as
+        `running`, and the page looks at the running sessions again."""
         last = snapshot()
+        ran = running_now()
         wfile.write(b": watching\n\n")
         wfile.flush()
         while not srv.stop.is_set():
             if srv.stop.wait(1.0):
                 break
+            now_ran = running_now()
+            if now_ran is not None and ran is not None and now_ran != ran:
+                wfile.write(b'data: {"running": true}\n\n')
+                wfile.flush()
+            ran = now_ran
             now_ = snapshot()
             changed = [r for r, t in now_.items()
                        if t and last.get(r) is not None and t != last[r]]

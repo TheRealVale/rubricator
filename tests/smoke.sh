@@ -1556,5 +1556,288 @@ else
   no "29 · the plan review ran though it was turned off" "exit=$rc got: $(printf '%s' "$offjson" | head -c 120)"
 fi
 
+# ── 30 · Open now: the running sessions head the Sessions list ──────────────
+# The Sessions navigator opens on every session running in a terminal, busy or
+# not, above the history — read from Claude Code's own session files, so it does
+# not wait for the history index, which at 12 GB is a minute and a half. What
+# this pins down, each by a case that goes red without it:
+#
+#   30a, the server:
+#   - a running session is named by its first prompt, by the history index's own
+#     rule: plumbing like /clear skipped, a key in it scrubbed; a session with
+#     nothing typed yet has none, and the page names it by its terminal
+#   - a working session says whether it has a conversation to open, and its
+#     transcript is still not read
+#   - the waiting route answers while the history index is still being read
+#   - the event stream says `running` when a session changes state, compares
+#     the status rather than when the file was written, and reads nothing
+#     before the human has agreed to it
+#
+#   30b, the page, lifted from the shipped source the way tests 22 and 25 are:
+#   - the group draws before the history arrives, with the history off but the
+#     list allowed, and above the day groups once the history is in, where a
+#     running session is not listed twice
+#   - asking you, your turn, its own command, working and an unknown status each
+#     have their class and their word, in that order, with how long they held
+#   - the scope chips scope it; an empty, missing or misshapen list says which
+#   - a running session the index does not hold yet opens, as a running session
+python3 - "$WORK" "$REPO" >"$WORK/open.txt" 2>&1 <<'PYEOF'
+import json, os, re, subprocess, sys, threading, time, urllib.request
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+base = os.path.join(work, "open")
+sdir = os.path.join(base, "sessions"); os.makedirs(sdir, exist_ok=True)
+pdir = os.path.join(base, "projects", "-smoke-open"); os.makedirs(pdir, exist_ok=True)
+hist = os.path.join(base, "history.jsonl")
+os.environ.update(RUBRICATOR_CLAUDE_SESSIONS=sdir, RUBRICATOR_CLAUDE_HISTORY=hist,
+                  RUBRICATOR_CLAUDE_PROJECTS=os.path.join(base, "projects"))
+repo = os.path.join(work, "orepo"); os.makedirs(repo, exist_ok=True)
+def git(*a): subprocess.run(["git", "-C", repo] + list(a), check=True, capture_output=True)
+open(os.path.join(repo, "README.md"), "w").write("# open now\n")
+git("init", "-q"); git("add", "."); git("-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qm", "one")
+
+# the processes are /bin/sleep through a link named `claude`, as in test 28
+bindir = os.path.join(work, "openbin"); os.makedirs(bindir, exist_ok=True)
+fake = os.path.join(bindir, "claude")
+if not os.path.lexists(fake): os.symlink("/bin/sleep", fake)
+procs = []
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+def session(n, status, **extra):
+    p = subprocess.Popen([fake, "300"]); procs.append(p)
+    d = {"pid": p.pid, "sessionId": sid(n), "cwd": repo, "name": "open-%d" % n, "status": status,
+         "statusUpdatedAt": 1790000000000 + n, "updatedAt": 1790000000000 + n}
+    d.update(extra)
+    path = os.path.join(sdir, "%d.json" % p.pid)
+    open(path, "w").write(json.dumps(d))
+    return path, d
+def rewrite(path, d, **change):
+    d = dict(d, **change); open(path, "w").write(json.dumps(d)); return d
+def transcript(n):
+    open(os.path.join(pdir, sid(n) + ".jsonl"), "w").write(json.dumps(
+        {"type": "assistant", "cwd": repo, "message": {"content": [{"type": "text", "text": "SAID-%d" % n}]}}) + "\n")
+
+with open(hist, "w") as f:
+    # Claude Code writes these compact; the reader must not care either way
+    f.write(json.dumps({"display": "/clear", "sessionId": sid(1)}, separators=(",", ":")) + "\n")
+    f.write(json.dumps({"display": "WORKING-FIRST with sk-live00smoketest00000000 in it", "sessionId": sid(1)}) + "\n")
+    f.write(json.dumps({"display": "WORKING-SECOND", "sessionId": sid(1)}) + "\n")
+    f.write(json.dumps({"display": "ASKING-FIRST", "sessionId": sid(3)}, separators=(",", ":")) + "\n")
+transcript(1); transcript(3)
+p1, d1 = session(1, "busy")
+p2, d2 = session(2, "idle")                                    # nothing typed yet
+p3, d3 = session(3, "waiting", waitingFor="input needed")
+
+checks = {}
+srvs = []
+try:
+    sys.path.insert(0, os.path.join(repo_root, "share"))
+    import waiting as Wt
+    rows = {r["sid"]: r for r in Wt.running([repo])["sessions"]}
+    one = rows.get(sid(1), {})
+    checks["the first prompt names it, the plumbing before it skipped"] = one.get("first", "").startswith("WORKING-FIRST")
+    checks["a key in the first prompt is scrubbed"] = "sk-live00smoketest" not in one.get("first", "")
+    checks["a compact history line is read too"] = rows.get(sid(3), {}).get("first") == "ASKING-FIRST"
+    checks["a session with nothing typed has no first prompt"] = rows.get(sid(2), {}).get("first") == ""
+    checks["a working session says its conversation can be opened"] = one.get("transcript") is True
+    checks["and its transcript is still not read"] = "text" not in one
+
+    sig = Wt.signature()
+    d2 = rewrite(p2, d2, updatedAt=d2["updatedAt"] + 5000)
+    checks["a file rewritten in the same state is no change"] = Wt.signature() == sig
+    d2 = rewrite(p2, d2, status="busy", statusUpdatedAt=d2["statusUpdatedAt"] + 5000)
+    checks["a change of state is one"] = Wt.signature() != sig
+
+    # the live tier, in this process, with a history index that takes its time
+    import workspace as W
+    slow = threading.Event()
+    real = W.session_payload
+    W.session_payload = lambda deep=False: (slow.wait(60), real(deep))[1]
+    share = Path(repo_root) / "share"
+    srv = W.serve_workspace([repo], True, share, "", idle=10 ** 9); srvs.append(srv)
+    t0 = time.time()
+    try:
+        j = json.load(urllib.request.urlopen(srv.base + "/waiting", timeout=8))
+    except Exception as e:
+        j = {"error": str(e)}
+    took = time.time() - t0
+    page = urllib.request.urlopen(srv.base + "/", timeout=20).read().decode("utf-8", "replace")
+    checks["the running sessions answer while the history is still being read"] = (
+        j.get("allowed") is True and any(r["sid"] == sid(1) for r in j.get("sessions", []))
+        and took < 5 and re.search(r'"sessionsPending":\s*true', page) is not None)
+
+    def told(url, change, wait):
+        r = urllib.request.urlopen(url, timeout=wait + 2)
+        r.readline()                                  # ": watching" — the stream has its baseline
+        change()
+        end, got = time.time() + wait, False
+        while time.time() < end and not got:
+            try: line = r.readline()
+            except Exception: break
+            got = b'"running": true' in line
+        r.close()
+        return got
+    checks["a session changing state is told on the event stream"] = told(
+        srv.base + "/events", lambda: rewrite(p3, d3, status="idle", statusUpdatedAt=d3["statusUpdatedAt"] + 9), 6)
+
+    # no history, no --waiting, no button pressed: the stream does not look
+    srv2 = W.serve_workspace([repo], False, share, "", idle=10 ** 9); srvs.append(srv2)
+    checks["without consent the stream reads no session file"] = not told(
+        srv2.base + "/events", lambda: rewrite(p1, d1, status="idle", statusUpdatedAt=d1["statusUpdatedAt"] + 9), 3)
+    slow.set()
+except Exception as e:
+    checks["the test ran: %s" % e] = False
+finally:
+    for s_ in srvs:
+        s_.stop.set()
+        try: s_.httpd.shutdown()
+        except Exception: pass
+    for q in procs: q.terminate()
+
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "30a · a running session is named by its first prompt, and is told the moment it changes state"
+else
+  no "30a · the running sessions are read wrong" "$(grep '^XX' "$WORK/open.txt" | tr '\n' ' ')$(tail -2 "$WORK/open.txt")"
+fi
+
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("function waited(ts, short)", "/* a link in a reply leaves this window"),
+    sl("/* What a running session is doing, in the order it needs you", "function waitCard(r)"),
+    sl("function sessionHTML(sid, convo)", "/* ── the files a session changed"),
+    sl("function openSession(sid, opts)", "function curRel()"),
+    sl("function navSessions()", "function navNotes()"),
+]))' "$REPO/share/workspace.js" "$WORK/open.js"
+  { cat <<'JSEOF'
+var now = Math.floor(Date.now() / 1000), DAY = 86400;
+var CAPS = { waiting: 1, live: 1 };
+function can(c){ return !!CAPS[c]; }
+function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function clip(s, n){ s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function shortRepo(p){ return (p || '?').split('/').pop() || '?'; }
+function hits(t, q){ return String(t).toLowerCase().indexOf(q.toLowerCase()) >= 0; }
+function sessionScore(){ return { s: 0 }; }
+function marks(){}
+function curSid(){ return ''; }
+function promptsWithheld(){ return false; }
+function sessionsOff(){ return '<div class="empty">HISTORY-OFF</div>'; }
+function dayLabel(){ return 'Earlier'; }
+function inRepo(p){ return p.indexOf('/repo') === 0; }
+function sessionList(){
+  return Object.keys(D.sessions).filter(function(k){ return sesScope === 'all' || inRepo(D.sessions[k].p); })
+    .map(function(k){ return { sid: k, m: D.sessions[k] }; });
+}
+var loads = 0;
+function loadWaiting(){ loads++; }
+var opened = [];
+var Shell = { nav: function(){}, open: function(spec){ opened.push(spec); return spec; } };
+var D, WAIT, RUN = {}, sesScope = 'here', sesLive = false, sesQuery = '';
+JSEOF
+    cat "$WORK/open.js"
+    cat <<'JSEOF'
+
+var fail = [];
+function want(c, why){ if (!c) fail.push(why); }
+function row(id, on, status, mins, extra){
+  var r = { sid: id, pid: 100, on: on, status: status, name: 'term-' + id, cwd: '/repo', inRepo: true,
+            since: now - mins * 60, first: 'about ' + id, transcript: true };
+  for (var k in extra) r[k] = extra[k];
+  return r;
+}
+function fixture(){
+  WAIT = { allowed: true, state: 'ok', files: 7, misshapen: 0, sessions: [
+    row('w1', 'working', 'busy', 3),
+    row('d1', 'done', 'idle', 12, { first: '' }),
+    row('a1', 'asking', 'waiting', 30),
+    row('b1', 'background', 'shell', 5),
+    row('u1', 'unknown', 'pondering', 1),
+    row('x1', 'done', 'idle', 2, { cwd: '/elsewhere', inRepo: false, name: 'other-x1' })
+  ]};
+  RUN = {}; WAIT.sessions.forEach(function(r){ RUN[r.sid] = r; });
+}
+function nav(){ return navSessions().html; }
+
+/* before anything has been read, with history on */
+D = { withSessions: 1, sessionsPending: 1, sessions: {}, prompts: [] }; WAIT = null; RUN = {};
+var h = nav();
+want(/Open now/.test(h) && /Looking at the running sessions/.test(h) && loads === 1,
+     'the group does not show, or does not look, before the list is read');
+
+/* the history is still being read: the group draws regardless, above the note */
+fixture(); h = nav();
+want(h.indexOf('Open now') >= 0 && h.indexOf('Open now') < h.indexOf('Reading your history'),
+     'the group waits for the history index');
+var pos = ['a1', 'd1', 'b1', 'u1', 'w1'].map(function(s){ return h.indexOf('data-ses="' + s + '"'); });
+want(pos.every(function(p, i){ return p >= 0 && (i === 0 || p > pos[i - 1]); }),
+     'not asking, your turn, own command, unknown, working in that order: ' + pos.join(','));
+[['a1', 'asking', 'asking you'], ['d1', 'done', 'your turn'], ['b1', 'background', 'on its own command'],
+ ['w1', 'working', 'working'], ['u1', 'unknown', 'pondering']].forEach(function(c){
+  var i = h.indexOf('data-ses="' + c[0] + '"'), seg = h.slice(i, h.indexOf('</div>', i));
+  want(seg.indexOf('class="dot ' + c[1] + '"') >= 0 && seg.indexOf('class="rstate ' + c[1] + '">' + c[2] + '<') >= 0,
+       c[0] + ' does not read as ' + c[2]);
+});
+var a = h.slice(h.indexOf('data-ses="a1"'));
+want(/about a1/.test(a.slice(0, 400)) && /term-a1/.test(a.slice(0, 600)) && /30 min/.test(a.slice(0, 700)),
+     'a row lacks its first prompt, its terminal name or how long it has waited');
+var d = h.slice(h.indexOf('data-ses="d1"'));
+want(/class="ttl">term-d1</.test(d.slice(0, 400)), 'a session with nothing typed is not named by its terminal');
+want(/5 · <button data-wopen="1">4 wait on you/.test(h), 'the heading does not count who waits on you');
+want(h.indexOf('data-ses="x1"') < 0, 'a session elsewhere shows under this repo');
+sesScope = 'all'; h = nav(); sesScope = 'here';
+want(h.indexOf('data-ses="x1"') >= 0 && /other-x1/.test(h), 'everywhere does not show the session elsewhere');
+
+/* the history is in: the group sits above the day groups, and is not repeated in them */
+D = { withSessions: 1, sessionsPending: 0, prompts: [], sessions: {
+  a1: { p: '/repo', t: 'about a1', n: 2, a: now - 9000, b: now - 60, live: 1, files: [] },
+  old: { p: '/repo', t: 'an old one', n: 1, a: now - 90000, b: now - 86000, live: 1, files: [] } } };
+h = nav();
+want(h.indexOf('Open now') >= 0 && h.indexOf('Open now') < h.indexOf('Earlier') &&
+     h.split('data-ses="a1"').length === 2 && h.indexOf('data-ses="old"') > h.indexOf('Earlier'),
+     'with the history in, the group is not on top, or a running session is listed twice');
+
+/* history off, the list allowed for this window (--waiting) */
+D = { withSessions: 0, sessionsPending: 0, sessions: {}, prompts: [] };
+h = nav();
+want(/Open now/.test(h) && /HISTORY-OFF/.test(h), 'with history off the allowed list does not show');
+WAIT = { allowed: false }; h = nav();
+want(!/Open now/.test(h), 'the list shows without consent');
+
+/* every empty says which */
+D = { withSessions: 1, sessionsPending: 1, sessions: {}, prompts: [] };
+[['no-dir', /keeps no list of running sessions/], ['unreadable', /none in the shape this reads/],
+ ['failed', /could not be read[\s\S]*data-wlook/]].forEach(function(c){
+  WAIT = { allowed: true, state: c[0], files: 3, error: 'boom', sessions: [] };
+  want(c[1].test(nav()), 'a ' + c[0] + ' list does not say so');
+});
+WAIT = { allowed: true, state: 'ok', files: 0, misshapen: 0, sessions: [] };
+want(/No Claude Code session is running on this machine/.test(nav()), 'an empty list does not say so');
+fixture(); WAIT.misshapen = 2;
+want(/2 files in ~\/.claude\/sessions were not in the shape/.test(nav()), 'misshapen files are not counted');
+
+/* a running session the index does not hold yet still opens, as a running session */
+fixture(); D = { withSessions: 1, sessionsPending: 1, sessions: {}, prompts: [] }; opened = [];
+var spec = openSession('a1', {});
+want(spec && opened.length === 1 && opened[0].kind === 'session' && opened[0].title === 'about a1',
+     'a running session the index does not hold does not open');
+var body = sessionHTML('a1', '');
+want(/running now/.test(body) && /data-runstate="a1"/.test(body) && !/not in the index/.test(body),
+     'its view does not say it is running');
+console.log(fail.filter(Boolean).length ? 'XX ' + fail.filter(Boolean).join('; ') : 'ok');
+JSEOF
+  } > "$WORK/open-run.js"
+  res=$(node "$WORK/open-run.js" 2>&1)
+  case "$res" in ok*) ok "30b · Open now heads the Sessions list before the history, each state in its own look" ;;
+                 *)   no "30b · the Open now group is wrong" "$res" ;; esac
+else
+  skip "30b · Open now group" "no node"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

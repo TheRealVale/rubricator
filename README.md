@@ -197,12 +197,26 @@ newest first, scoped to this repository by default — with **everywhere** besid
 the repository you are standing in is often not the one you said it in. `⇧⌘K` opens
 find-anything already widened.
 
+At its head is **Open now**: every session running in a terminal at this moment, busy or
+not. A row says what the session is about — its first prompt, as every row does, or the
+terminal's name until you have typed one — the terminal's name, so you can find the tab, and
+what it is doing, each in a colour and a shape of its own: *asking you* (a permission or a
+question is open in its terminal), *your turn*, *on its own command* (its turn ended with a
+background command still running), or *working* — and how long it has been so. The group is
+read from Claude Code's own session files, the way **Waiting** is, not from the history index,
+so it is there as soon as the window is and the history fills in under it. It is read again
+when the window comes back to the front and whenever a session starts, ends or changes state.
+Its heading counts the sessions that wait on you and opens Waiting on them. A session in the
+group is not listed again below it, and opens like any other row — without a resume, since it
+is still running.
+
 Indexing it reads every conversation on the machine, not only this project's, so it is off
 until you ask: `md --sessions` for one run, or the switch the empty Sessions list offers,
 which is the same switch as Settings → Indexing and stays on for future windows.
-`--no-sessions` is the way back for a run. Documents are indexed in a tenth of a second and
-transcripts in about two, so the window opens on its documents and history arrives while you
-are looking at them. Each shows what you asked, which files
+`--no-sessions` is the way back for a run. Documents are indexed in a tenth of a second;
+transcripts take seconds, and a minute or more on a machine that holds gigabytes of them, so
+the window opens on its documents and history arrives while you are looking at them. Each
+shows what you asked, which files
 it changed, and which documents it bears on — worked out from the overlap between the files
 a session touched and the files each document names.
 
@@ -264,15 +278,17 @@ command still running, so it will likely carry on by itself) — newest wait fir
 this repository and its worktrees, with *everywhere* beside it. `md --waiting` opens a window
 on it.
 
-It reads two things, each time you look, and keeps neither: Claude Code's own file per
-running session in `~/.claude/sessions`, which says whether a session is working, asking or
-done, and the end of each waiting session's transcript — a quarter of a megabyte of a
-gigabyte transcript, a few milliseconds. A session counts as running only while a `claude`
-process lives at its pid. The session file is Claude Code's, undocumented, and measured
-against 2.1.309; when it is missing or in a shape this does not read, the surface says so
-rather than showing nothing. Reading it is reading your history, so it waits for the same
-consent: history turned on, `--waiting` for its own window, or the surface's button — and
-none of the three starts the full index for it.
+It and the Sessions navigator's Open now are one reading, made each time you look and kept
+nowhere: Claude Code's own file per running session in `~/.claude/sessions`, which says
+whether a session is working, asking or done; the first prompt of each in
+`~/.claude/history.jsonl`, which names it the way the Sessions list does; and the end of each
+waiting session's transcript — a quarter of a megabyte of a gigabyte transcript, a few
+milliseconds. A session counts as running only while a `claude` process lives at its pid. The
+session file is Claude Code's, undocumented, and measured against 2.1.309; when it is missing
+or in a shape this does not read, the surface and the group say so rather than showing
+nothing. Reading it is reading your history, so it waits for the same consent: history turned
+on, `--waiting` for its own window, or the surface's button — and none of these starts the
+full index for it.
 
 **Behind its code** lists documents whose *named* files kept changing after the document
 stopped — counted only in the paths each one mentions in backticks or links, so it says
@@ -492,7 +508,7 @@ share/hook.py       blocking review server for --review and --hook
 .claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook
 ```
 
-Twenty files, under eleven thousand lines, plus five vendored render libraries. No build
+Twenty files, a little over eleven thousand lines, plus five vendored render libraries. No build
 step, no runtime dependency beyond what macOS ships. `./tests/smoke.sh` drives the whole
 thing from a throwaway install; CI runs it on every push.
 

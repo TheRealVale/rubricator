@@ -862,7 +862,13 @@ function relatedDocs(sid){
    section that matched nothing is one attribute, not a tree walk. */
 function sessionHTML(sid, convo){
   var m = D.sessions[sid];
-  if (!m) return '<div class="empty">That session is not in the index.</div>';
+  if (!m){
+    if (RUN[sid]) return runningHTML(sid, convo);
+    /* it ran, ended, and the index is from before it began */
+    return convo ? '<div class="qnote">This session is no longer running, and the history index is from ' +
+                   'before it began; reindex to add it.</div><div class="convo">' + convo + '</div>'
+                 : '<div class="empty">That session is not in the index.</div>';
+  }
   if (promptsWithheld()) return withheldNote();
   var mine = D.prompts.filter(function(p){ return p.sid === sid; })
                       .sort(function(a, b){ return a.t - b.t; });
@@ -878,7 +884,7 @@ function sessionHTML(sid, convo){
   var out = ['<section class="fsec sabout" data-f="about">',
     '<h3>' + esc(m.t || '(no prompt recorded)') + '</h3>',
     '<div class="who">' +
-      '<span><span class="dot ' + (m.live ? 'live' : 'arch') + '"></span> ' +
+      '<span><span class="dot ' + (RUN[sid] ? esc(RUN[sid].on) : m.live ? 'live' : 'arch') + '"></span> ' +
         (RUN[sid] ? 'running now' : m.live ? 'resumable' : 'archived — transcript gone') + '</span>' +
       '<span>' + esc((m.p || 'unknown project').replace(/^\/Users\/[^/]+/, '~')) + '</span>' +
       '<span>' + m.n + ' prompts</span><span>' + span(m) + '</span>' +
@@ -893,8 +899,8 @@ function sessionHTML(sid, convo){
     out.push('<section class="fsec sabout" data-f="about">',
       '<div class="grp">Running now</div>',
       '<div class="qnote">This session is running in a terminal (pid ' + esc(String(RUN[sid].pid)) +
-      ', ' + esc(RUN[sid].status) + '). Answer it there: resuming it from here would start a second ' +
-      'process writing the same transcript.</div>',
+      '), <span data-runstate="' + esc(sid) + '">' + stateHTML(RUN[sid]) + '</span>. Answer it there: ' +
+      'resuming it from here would start a second process writing the same transcript.</div>',
       can('launch') ? '<div class="act"><button class="ghost" data-act="fork" data-id="' + esc(sid) +
         '">Fork it</button></div>' : '',
       '</section>');
@@ -943,6 +949,33 @@ function sessionHTML(sid, convo){
   out.push('<section class="fsec" data-f="convo"><div class="convo">' +
     (convo || promptList(mine)) + '</div></section>');
   return out.join('');
+}
+/* A running session the history index does not hold — the index is still
+   being read, or the session began after it was — opens on what its session
+   file says and on its transcript, which is read the same way either way. */
+function runningHTML(sid, convo){
+  var r = RUN[sid], where = (r.here || r.cwd || '').replace(/^\/Users\/[^/]+/, '~');
+  var files = !D.withSessions ? 'Your history is not indexed, so the files it touched are not listed.'
+    : D.sessionsPending ? 'The files it touched arrive with your history, which is still being read.'
+    : 'It began after this window read your history, so the files it touched are not listed; ' +
+      'reindex to add them.';
+  return ['<section class="fsec sabout" data-f="about">',
+    '<h3>' + esc(runTitle(r)) + '</h3>',
+    '<div class="who">' +
+      '<span><span class="dot ' + esc(r.on) + '"></span> running now</span>' +
+      (r.name ? '<span>' + esc(r.name) + '</span>' : '') +
+      '<span>' + esc(where || 'unknown project') + '</span>' +
+      '<span class="sid" data-copy="' + esc(sid) + '" title="' + esc(sid) + ' — click to copy">' +
+        esc(sid.slice(0, 8)) + '</span>' +
+    '</div>', '</section>',
+    '<section class="fsec sabout" data-f="about">',
+    '<div class="grp">Running now</div>',
+    '<div class="qnote">This session is running in a terminal (pid ' + esc(String(r.pid)) + '), ' +
+      '<span data-runstate="' + esc(sid) + '">' + stateHTML(r) + '</span>. Answer it there. ' +
+      files + '</div>', '</section>',
+    '<section class="fsec" data-f="convo"><div class="convo">' +
+      (convo || (r.transcript ? '' : '<div class="qnote">No transcript on disk for this session.</div>')) +
+    '</div></section>'].join('');
 }
 /* ── the files a session changed ──────────────────────────────────────────
    A session in a working repository touches hundreds of files across a hundred
@@ -1953,25 +1986,53 @@ var WAIT = null, RUN = {}, waitLoading = false;
 function loadWaiting(ask){
   if (!can('waiting') || waitLoading) return;
   waitLoading = true;
+  var was = RUN;
   api('waiting', ask ? {} : undefined, function(j){
     waitLoading = false;
     WAIT = j || {};
     RUN = {};
     (WAIT.sessions || []).forEach(function(r){ RUN[r.sid] = r; });
-    Shell.refresh();
+    afterWaiting(was);
   }, function(){
     waitLoading = false;
     WAIT = { allowed: true, state: 'failed', error: 'the server did not answer', sessions: [] };
-    Shell.refresh();
+    afterWaiting(was);
   });
 }
-function waited(ts){
+/* the list is only as current as the last look, so it looks again whenever
+   that could have changed what it says: the window coming back to the front,
+   and the server telling it a session started, ended or changed state. Only
+   once the list has been allowed: coming back to a window is not consent. */
+function lookAgain(){ if (WAIT && WAIT.allowed) loadWaiting(false); }
+/* Only what shows the running sessions is drawn again. A session's own view is
+   rebuilt when it starts or stops running and not for every turn it takes,
+   which would shut each fold you had opened in it; its state is rewritten in
+   place instead. */
+function afterWaiting(was){
+  Shell.each(function(t, focused, p){
+    if (!t.el) return;
+    var redo = t.kind === 'waiting' ||
+               (t.kind === 'session' && (was[t.id] || {}).pid !== (RUN[t.id] || {}).pid);
+    if (!redo) return;
+    if (p.tabs[p.active] === t && t.surf.refresh){ t.surf.refresh(t.el); t.dirty = false; }
+    else t.dirty = true;
+  });
+  [].forEach.call(document.querySelectorAll('[data-runstate]'), function(el){
+    var r = RUN[el.dataset.runstate];
+    if (r) el.innerHTML = stateHTML(r);
+  });
+  if (Shell.navMode() === 'sessions') Shell.nav();
+  Shell.paint();
+}
+/* how long a session has been in its state; `short` is the navigator's
+   column, which has the width of a date and says it to the nearest unit */
+function waited(ts, short){
   var s = Math.max(0, Math.floor(Date.now() / 1000) - (ts || 0));
-  if (s < 60) return 'a moment';
+  if (s < 60) return short ? 'now' : 'a moment';
   var m = Math.floor(s / 60), h = Math.floor(m / 60);
   if (m < 60) return m + ' min';
-  if (h < 24) return h + ' h ' + (m % 60) + ' min';
-  return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
+  if (h < 24) return short ? h + ' h' : h + ' h ' + (m % 60) + ' min';
+  return short ? Math.floor(h / 24) + ' d' : Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
 }
 /* a link in a reply leaves this window: the window is an app, and following a
    link inside it would replace the workspace with the page it points at */
@@ -1983,31 +2044,153 @@ function linksOut(h){
   });
   return box.innerHTML;
 }
-var WAITGROUPS = [
-  { on:'asking', title:'Asking you', note:'a question or a permission is open in its terminal' },
-  { on:'done', title:'Your turn', note:'its turn is over and nothing else is running' },
-  { on:'background', title:'Waiting on its own command',
+/* What a running session is doing, in the order it needs you: one table for
+   the Waiting surface's groups and the Sessions navigator's rows, so a state
+   has one name and one look wherever it shows. `word` is the navigator's,
+   which has a line where the surface has a heading. */
+var RUNSTATES = [
+  { on:'asking', word:'asking you', title:'Asking you',
+    note:'a question or a permission is open in its terminal' },
+  { on:'done', word:'your turn', title:'Your turn',
+    note:'its turn is over and nothing else is running' },
+  { on:'background', word:'on its own command', title:'Waiting on its own command',
     note:'its turn is over, but a command it started in the background has not reported back, '
        + 'so it will likely carry on by itself' },
-  { on:'unknown', title:'Status not understood',
-    note:'Claude Code wrote a status this was not measured against' }
+  { on:'unknown', word:'', title:'Status not understood',
+    note:'Claude Code wrote a status this was not measured against' },
+  { on:'working', word:'working', title:'Working', note:'a turn is running' }
 ];
+var WAITGROUPS = RUNSTATES.filter(function(g){ return g.on !== 'working'; });
+function runState(r){
+  function is(on){ return RUNSTATES.filter(function(g){ return g.on === on; })[0]; }
+  return is(r.on) || is('unknown');
+}
+/* the state and how long it has held, the duration kept current in place */
+function stateHTML(r){
+  var g = runState(r);
+  return '<span class="rstate ' + esc(g.on) + '">' + esc(g.word || r.status || '?') + '</span> for ' +
+         '<span data-since="' + (+r.since || 0) + '">' + waited(r.since) + '</span>';
+}
 function waitTitle(r){
   var m = D.sessions && D.sessions[r.sid];
   return r.title || (m && m.t) || r.name || r.sid.slice(0, 8);
 }
+/* what a running session is about, as the Sessions list names any session: the
+   first thing you asked in it, and its terminal's name until you have asked
+   anything */
+function runTitle(r){
+  var m = D.sessions && D.sessions[r.sid];
+  return r.first || (m && m.t) || r.name || r.sid.slice(0, 8);
+}
+function sesTitle(sid){
+  var m = D.sessions && D.sessions[sid];
+  return (m && m.t) || (RUN[sid] && runTitle(RUN[sid])) || sid.slice(0, 8);
+}
+/* why the running sessions cannot be listed, when they cannot: one sentence
+   for the Waiting surface and the navigator alike */
+function runTrouble(){
+  if (WAIT.state === 'no-dir')
+    return 'Claude Code keeps no list of running sessions at <span class="f">~/.claude/sessions</span> ' +
+      'on this machine, so which ones run cannot be told.';
+  if (WAIT.state === 'unreadable')
+    return WAIT.files + ' file' + (WAIT.files === 1 ? '' : 's') + ' in ' +
+      '<span class="f">~/.claude/sessions</span>, and none in the shape this reads — a pid, a session ' +
+      'id and a status. Claude Code may have changed it; this was measured against 2.1.309.';
+  if (WAIT.state === 'failed')
+    return 'The running sessions could not be read: ' + esc(WAIT.error || '') +
+      ' <button class="lnk" data-wlook="1">look again</button>';
+  return '';
+}
+function leftOut(){
+  var n = WAIT.misshapen || 0;
+  return n ? n + ' file' + (n === 1 ? '' : 's') + ' in ~/.claude/sessions ' + (n === 1 ? 'was' : 'were') +
+    ' not in the shape this reads, and ' + (n === 1 ? 'is' : 'are') + ' left out.' : '';
+}
+
+/* ── Open now ──────────────────────────────────────────────────────────────
+   Every session running in a terminal at this moment, busy or not, at the
+   head of the Sessions list, because the one you are looking for is usually
+   one of them. They come from the same look as the Waiting surface, not from
+   the history index — which on a machine with gigabytes of transcripts is a
+   minute and more behind the window — so the group is there with the window
+   and the history fills in under it. A session in the group is not listed
+   again below it. */
+function openNow(q, sel){
+  var out = { html:'', sids:{} };
+  if (!can('waiting')) return out;
+  if (WAIT === null){
+    if (!(D.withSessions || D.surface === 'waiting')) return out;
+    loadWaiting(false);
+    out.html = openHead() + '<div class="nvnote">Looking at the running sessions…</div>';
+    return out;
+  }
+  if (!WAIT.allowed) return out;
+  var trouble = runTrouble();
+  if (trouble){ out.html = openHead() + '<div class="nvnote">' + trouble + '</div>'; return out; }
+
+  var all = WAIT.sessions || [];
+  var here = all.filter(function(r){ return sesScope === 'all' || r.inRepo; });
+  var shown = here.filter(function(r){
+    if (!q) return true;
+    var m = D.sessions && D.sessions[r.sid];
+    return hits(runTitle(r) + ' ' + r.name, q) || !!(m && sessionScore(r.sid, m, q).s);
+  }).sort(function(a, b){
+    return RUNSTATES.indexOf(runState(a)) - RUNSTATES.indexOf(runState(b)) || b.since - a.since;
+  });
+  var onYou = here.filter(function(r){ return r.on !== 'working'; }).length;
+  var h = [openHead(here.length, onYou)];
+  if (!all.length) h.push('<div class="nvnote">No Claude Code session is running on this machine.</div>');
+  else if (!here.length)
+    h.push('<div class="nvnote">None is running in this repository; ' + all.length + ' ' +
+           (all.length === 1 ? 'is' : 'are') + ' running elsewhere — ' +
+           '<button data-sscope="all">show everywhere</button></div>');
+  else if (!shown.length)
+    h.push('<div class="nvnote">None of the ' + here.length + ' running here matches that.</div>');
+  shown.forEach(function(r){ out.sids[r.sid] = 1; h.push(openRow(r, q, sel)); });
+  if (WAIT.misshapen) h.push('<div class="nvnote">' + leftOut() + '</div>');
+  out.html = h.join('');
+  return out;
+}
+/* the heading counts the sessions that wait on you, and the count opens the
+   Waiting surface, where what each of them said is */
+function openHead(n, onYou){
+  return '<div class="grp open"><span>Open now</span>' + (n == null ? '' : ' <span class="c">' + n +
+    (onYou ? ' · <button data-wopen="1">' + onYou + ' wait' + (onYou === 1 ? 's' : '') +
+             ' on you</button>' : '') + '</span>') + '</div>';
+}
+function openRow(r, q, sel){
+  var g = runState(r), t = runTitle(r), where = r.here || r.cwd || '';
+  var repo = shortRepo(r.cwd || where);
+  /* a terminal's name already starts with its folder, unless it was renamed */
+  var showRepo = sesScope === 'all' && (r.name || '').toLowerCase().indexOf(repo.toLowerCase()) !== 0;
+  var tip = t + '\n' + (g.word || r.status) + ' for ' + waited(r.since) + ': ' + g.note +
+            (r.waitingFor ? ' (' + r.waitingFor + ')' : '') +
+            '\n' + where.replace(/^\/Users\/[^/]+/, '~') + ' · pid ' + r.pid;
+  /* what it is about gets the whole first line, as on every session row; under
+     it the state, the terminal's name and how long the state has held */
+  return '<div class="srow run' + (sel === r.sid ? ' on' : '') + '" data-ses="' + esc(r.sid) +
+    '" data-q="' + esc(q) + '" title="' + esc(tip) + '">' +
+    '<span class="dot ' + esc(g.on) + '"></span>' +
+    '<span class="ttl">' + esc(t) + '</span>' +
+    '<span class="rst"><span class="rstate ' + esc(g.on) + '">' + esc(g.word || r.status || '?') + '</span>' +
+      (t !== r.name && r.name ? '<span class="nm">' + esc(r.name) + '</span>' : '') +
+      (showRepo ? '<span>' + esc(repo) + '</span>' : '') +
+      '<span class="dur" data-since="' + (+r.since || 0) + '">' + waited(r.since, true) + '</span>' +
+    '</span></div>';
+}
 function waitCard(r){
   var where = r.here || r.cwd || '';
-  var said = r.on === 'asking' ? 'asking for ' + waited(r.since)
-           : r.on === 'unknown' ? esc(r.status) + ' for ' + waited(r.since)
-           : 'waiting ' + waited(r.since);
+  var since = '<span data-since="' + (+r.since || 0) + '">' + waited(r.since) + '</span>';
+  var said = r.on === 'asking' ? 'asking for ' + since
+           : r.on === 'unknown' ? esc(r.status) + ' for ' + since
+           : 'waiting ' + since;
   var body;
   if (r.transcript === false) body = '<div class="qnote">No transcript on disk for this session.</div>';
   else if (r.text) body = '<div class="turn claude"><div class="bub"><div class="md">' +
                           linksOut(turnHTML(r.text)) + '</div></div></div>';
   else body = '<div class="qnote">Nothing Claude said is in the last ' +
               Math.round((r.read || 0) / 1048576) + ' MB of its transcript.</div>';
-  var open = D.sessions && D.sessions[r.sid]
+  var open = r.transcript || (D.sessions && D.sessions[r.sid])
     ? '<button data-ses="' + esc(r.sid) + '">the whole conversation</button>' : '';
   return '<div class="wcard">' +
     '<div class="whead"><span class="dot ' + esc(r.on) + '"></span>' +
@@ -2036,17 +2219,8 @@ function viewWaiting(){
       '<button class="lnk" data-wlook="1">look at them, in this window</button><br><br>' +
       '<span class="f">Nothing is indexed and nothing is kept. <b>md --waiting</b> opens a window ' +
       'on this list; turning history on under Settings shows it in every window.</span></div>';
-  if (WAIT.state === 'no-dir')
-    return '<div class="empty">Claude Code keeps no list of running sessions at ' +
-      '<span class="f">~/.claude/sessions</span> on this machine, so which ones wait on you cannot be ' +
-      'told.</div>';
-  if (WAIT.state === 'unreadable')
-    return '<div class="empty">' + WAIT.files + ' file' + (WAIT.files === 1 ? '' : 's') + ' in ' +
-      '<span class="f">~/.claude/sessions</span>, and none in the shape this reads — a pid, a session ' +
-      'id and a status. Claude Code may have changed it; this was measured against 2.1.309.</div>';
-  if (WAIT.state === 'failed')
-    return '<div class="empty">The running sessions could not be read: ' + esc(WAIT.error || '') +
-      '<br><br><button class="lnk" data-wlook="1">look again</button></div>';
+  var trouble = runTrouble();
+  if (trouble) return '<div class="empty">' + trouble + '</div>';
 
   var all = WAIT.sessions || [];
   var shown = all.filter(function(r){ return sesScope === 'all' || r.inRepo; });
@@ -2082,11 +2256,7 @@ function viewWaiting(){
   if (sesScope === 'here' && awayOn)
     h.push('<div class="nvnote">' + awayOn + ' more wait' + (awayOn === 1 ? 's' : '') +
            ' on you in other repositories — <button data-wscope="all">show everywhere</button></div>');
-  if (WAIT.misshapen)
-    h.push('<div class="qnote">' + WAIT.misshapen + ' file' + (WAIT.misshapen === 1 ? '' : 's') +
-           ' in ~/.claude/sessions ' + (WAIT.misshapen === 1 ? 'was' : 'were') +
-           ' not in the shape this reads, and ' + (WAIT.misshapen === 1 ? 'is' : 'are') +
-           ' left out.</div>');
+  if (WAIT.misshapen) h.push('<div class="qnote">' + leftOut() + '</div>');
   return h.join('');
 }
 /* the list's own controls; the scope is the Sessions navigator's, one scope
@@ -2118,7 +2288,8 @@ function sessionSurface(sid, q){
      transcript, which is read once, on opening, and kept for this tab. */
   S.load = function(){
     var m = D.sessions[sid] || {};
-    if (S.conv || S.err || S.loading || !can('conversation') || !m.live) return;
+    var there = m.live || (RUN[sid] && RUN[sid].transcript);
+    if (S.conv || S.err || S.loading || !can('conversation') || !there) return;
     S.loading = true;
     api('session?id=' + encodeURIComponent(sid), undefined, function(j){
       S.loading = false;
@@ -2157,8 +2328,8 @@ function sessionSurface(sid, q){
   S.focus = function(){ S.fold(); };
   S.find = function(dir){ F.open(dir); };
   S.label = function(){
-    var m = D.sessions[sid] || {};
-    return { title: clip(m.t || sid.slice(0, 8), 30), tip: m.t || sid, kd:'SES' };
+    var t = sesTitle(sid);
+    return { title: clip(t, 30), tip: t, kd:'SES' };
   };
   /* A document tab carries Send to Claude, reveal and copy path; a session tab
      carried nothing, so picking a conversation back up meant opening it,
@@ -2348,25 +2519,26 @@ function navDocs(){
 
 function navSessions(){
   marks();
-  if (!D.withSessions) return { html: sessionsOff(), foot:'' };
-  if (D.sessionsPending) return { html:'<div class="empty">Reading your history…<br><br>' +
-    'Every transcript on this machine, once. The documents are already here.</div>', foot:'' };
-  var q = sesQuery.trim(), all = sessionList(), live = 0, sel = curSid();
-  all.forEach(function(x){ if (x.m.live) live++; });
-  var h = ['<div class="ctl">' +
-    '<div class="seg">' +
+  var q = sesQuery.trim(), sel = curSid();
+  var scope = '<div class="seg">' +
       '<button data-sscope="here" class="' + (sesScope === 'here' ? 'on' : '') + '">this repo</button>' +
       '<button data-sscope="all" class="' + (sesScope === 'all' ? 'on' : '') + '">everywhere</button>' +
-    '</div>' +
+    '</div>';
+  /* the running sessions come first and do not wait for the history, which on
+     a machine with gigabytes of transcripts is a minute and more away */
+  var open = openNow(q, sel);
+  if (!D.withSessions)
+    return { html: (open.html ? '<div class="ctl">' + scope + '</div>' + open.html : '') + sessionsOff(),
+             foot:'' };
+  if (D.sessionsPending) return { html: '<div class="ctl">' + scope + '</div>' + open.html +
+    '<div class="empty">Reading your history…<br><br>' +
+    'Every transcript on this machine, once. The documents are already here.</div>', foot:'' };
+  var all = sessionList(), live = 0;
+  all.forEach(function(x){ if (x.m.live) live++; });
+  var h = ['<div class="ctl">' + scope +
     '<button class="chip' + (sesLive ? ' on' : '') + '" data-slive="1">resumable</button>' +
-    '<span class="sp">' + all.length + (q ? ' matching' : '') + ' · ' + live + ' resumable</span></div>'];
-
-  if (WAIT === null && can('waiting')) loadWaiting(false);
-  var waitingHere = ((WAIT && WAIT.sessions) || []).filter(function(r){
-    return r.on !== 'working' && (sesScope === 'all' || r.inRepo); }).length;
-  if (waitingHere)
-    h.push('<div class="nvnote"><button data-wopen="1">' + waitingHere + ' running ' +
-           (waitingHere === 1 ? 'session waits' : 'sessions wait') + ' on you</button></div>');
+    '<span class="sp">' + all.length + (q ? ' matching' : '') + ' · ' + live + ' resumable</span></div>',
+    open.html];
 
   /* the whole point of this search is not knowing which repo it was in */
   if (q && sesScope === 'here'){
@@ -2381,8 +2553,11 @@ function navSessions(){
     return { html:h.join(''), filter:sesQuery, placeholder:'Something you said',
              onFilter:function(v){ sesQuery = v; Shell.nav(); }, foot:'' };
   }
+  /* a ranked list has no day headings, so under Open now it needs one of its own */
   var group = '';
+  if (q && Object.keys(open.sids).length) h.push('<div class="grp">In your history</div>');
   all.slice(0, 300).forEach(function(x){
+    if (open.sids[x.sid]) return;                     // listed once, under Open now
     var g = q ? '' : dayLabel(x.m.b);
     if (g && g !== group){ group = g; h.push('<div class="grp">' + g + '</div>'); }
     h.push('<div class="srow' + (sel === x.sid ? ' on' : '') + '" data-ses="' + esc(x.sid) +
@@ -2710,10 +2885,10 @@ function openDoc(rel, opts){
 }
 function openSession(sid, opts){
   opts = opts || {};
-  if (!D.sessions || !D.sessions[sid]) return null;
-  var m = D.sessions[sid];
-  return Shell.open({ kind:'session', id:sid, title:clip(m.t || sid.slice(0, 8), 30),
-                      tip:m.t || sid, q:opts.q || '' }, opts.where || 'here');
+  if (!(D.sessions && D.sessions[sid]) && !RUN[sid]) return null;
+  var t = sesTitle(sid);
+  return Shell.open({ kind:'session', id:sid, title:clip(t, 30), tip:t, q:opts.q || '' },
+                    opts.where || 'here');
 }
 function curRel(){ var t = Shell.active(); return t && t.kind === 'doc' ? t.id : ''; }
 function curSid(){ var t = Shell.active(); return t && t.kind === 'session' ? t.id : ''; }
@@ -2725,8 +2900,8 @@ function openRels(){
 
 function specFor(kind, id){
   if (kind === 'doc') return docBy(id) ? { kind:'doc', id:id, title:id.split('/').pop(), tip:id } : null;
-  if (kind === 'session') return (D.sessions && D.sessions[id])
-    ? { kind:'session', id:id, title:clip(D.sessions[id].t || id.slice(0, 8), 30) } : null;
+  if (kind === 'session') return (D.sessions && D.sessions[id]) || RUN[id]
+    ? { kind:'session', id:id, title:clip(sesTitle(id), 30) } : null;
   if (TITLES[kind]) return { kind:kind, id:'', title:TITLES[kind] };
   if (USER_VIEWS.some(function(v){ return v.id === kind; })) return { kind:kind, id:'', title:kind };
   return null;
@@ -2852,6 +3027,9 @@ function indexSessions(ask){
     D.withSessions = 1;
     D.sessionsPending = j.pending ? 1 : 0;
     byS = null;
+    /* history on is consent to the running sessions too: a list refused before
+       is asked for again */
+    if (WAIT && !WAIT.allowed) WAIT = null;
     scopeToWhatExists();
     Shell.nav(); refreshAll();
     if (ask) toast(Object.keys(D.sessions).length + ' sessions indexed');
@@ -2878,6 +3056,8 @@ if (can('watch') && window.EventSource){
     es.onmessage = function(ev){
       var j = {};
       try { j = JSON.parse(ev.data); } catch(e){ return; }
+      /* a Claude Code session started, ended or changed state */
+      if (j.running) return lookAgain();
       var changed = j.changed || [];
       changed.forEach(function(rel){ var d = docBy(rel); if (d) d.text = null; });
       if ((j.added || []).length || (j.gone || []).length) return reindex();
@@ -3137,6 +3317,15 @@ if (D.open) openDoc(D.open, {});
 else if (D.surface && TITLES[D.surface]) Shell.open({ kind:D.surface, id:'', title:TITLES[D.surface] });
 else if (!restored) Shell.open({ kind:'search', id:'', title:'Search' });
 if (D.withSessions && WAIT === null) loadWaiting(false);
+/* the running sessions are looked at again whenever the window comes back to
+   the front, and how long each has been in its state is counted on the spot */
+window.addEventListener('focus', lookAgain);
+document.addEventListener('visibilitychange', function(){ if (!document.hidden) lookAgain(); });
+setInterval(function(){
+  [].forEach.call(document.querySelectorAll('[data-since]'), function(el){
+    el.textContent = waited(+el.dataset.since, el.classList.contains('dur'));
+  });
+}, 30000);
 
 window.__ws = { data: D, dossier: buildDossier, caps: CAPS,
                 reindex: reindex, ensureText: ensureText, ensureAllText: ensureAllText,
