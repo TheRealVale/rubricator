@@ -899,8 +899,8 @@ function sessionHTML(sid, convo){
     out.push('<section class="fsec sabout" data-f="about">',
       '<div class="grp">Running now</div>',
       '<div class="qnote">This session is running in a terminal (pid ' + esc(String(RUN[sid].pid)) +
-      '), <span data-runstate="' + esc(sid) + '">' + stateHTML(RUN[sid]) + '</span>. Answer it there: ' +
-      'resuming it from here would start a second process writing the same transcript.</div>',
+      '), <span data-runstate="' + esc(sid) + '">' + stateHTML(RUN[sid]) + '</span>. ' + answerThere() +
+      ' Resuming it from here would start a second process writing the same transcript.</div>',
       can('launch') ? '<div class="act"><button class="ghost" data-act="fork" data-id="' + esc(sid) +
         '">Fork it</button></div>' : '',
       '</section>');
@@ -948,6 +948,7 @@ function sessionHTML(sid, convo){
   out.push(sesFileGroup(sid, away, 'away', 'Elsewhere', ''));
   out.push('<section class="fsec" data-f="convo"><div class="convo">' +
     (convo || promptList(mine)) + '</div></section>');
+  if (RUN[sid]) out.push(replySection(sid));
   return out.join('');
 }
 /* A running session the history index does not hold — the index is still
@@ -971,11 +972,15 @@ function runningHTML(sid, convo){
     '<section class="fsec sabout" data-f="about">',
     '<div class="grp">Running now</div>',
     '<div class="qnote">This session is running in a terminal (pid ' + esc(String(r.pid)) + '), ' +
-      '<span data-runstate="' + esc(sid) + '">' + stateHTML(r) + '</span>. Answer it there. ' +
+      '<span data-runstate="' + esc(sid) + '">' + stateHTML(r) + '</span>. ' + answerThere() + ' ' +
       files + '</div>', '</section>',
     '<section class="fsec" data-f="convo"><div class="convo">' +
       (convo || (r.transcript ? '' : '<div class="qnote">No transcript on disk for this session.</div>')) +
-    '</div></section>'].join('');
+    '</div></section>', replySection(sid)].join('');
+}
+function answerThere(){
+  return can('launch') ? 'Answer it there, or on the line at the foot of this view, which types into that terminal.'
+                       : 'Answer it there.';
 }
 /* ── the files a session changed ──────────────────────────────────────────
    A session in a working repository touches hundreds of files across a hundred
@@ -1211,6 +1216,10 @@ function viewSettings(){
     'document with your notes as its first prompt, resume or fork a past session, reveal a ' +
     'file, or open your editor. It sends a verb and an id — never a path and never a command. ' +
     'Off is the default, and off means nothing here can start a process.</div>');
+  out.push('<div class="qnote">It also lets you reply to a session running in iTerm: your line is ' +
+    'typed into its own tab, only while Claude waits there for you. That is done over AppleScript, ' +
+    'so the first reply makes macOS ask, once, whether rubricator may control iTerm; System ' +
+    'Settings → Privacy &amp; Security → Automation keeps the answer.</div>');
 
   out.push('<div class="grp">Editor</div>');
   out.push('<div class="ctl"><input class="fld" id="s-editor" value="' + esc(v.editor) +
@@ -1792,6 +1801,7 @@ function refold(el){
 var FSCOPES = [
   { k:'you',    label:'you',     sel:'.turn.you .md, .plist .pitem .tx' },
   { k:'claude', label:'Claude',  sel:'.turn.claude .md' },
+  { k:'others', label:'others',  sel:'.turn.note .md, .turn.note .tm' },
   { k:'files',  label:'files',   sel:'.frow, .tfile, .did .wrote' },
   { k:'tools',  label:'tools',   sel:'.did .tool, .cmark span' },
   { k:'about',  label:'about',   sel:'.sabout' }
@@ -2021,6 +2031,9 @@ function afterWaiting(was){
     var r = RUN[el.dataset.runstate];
     if (r) el.innerHTML = stateHTML(r);
   });
+  [].forEach.call(document.querySelectorAll('[data-rhint]'), function(el){
+    el.textContent = replyState(RUN[el.dataset.rhint]);
+  });
   if (Shell.navMode() === 'sessions') Shell.nav();
   Shell.paint();
 }
@@ -2168,16 +2181,27 @@ function openRow(r, q, sel){
             '\n' + where.replace(/^\/Users\/[^/]+/, '~') + ' · pid ' + r.pid;
   /* what it is about gets the whole first line, as on every session row; under
      it the state, the terminal's name and how long the state has held */
+  var acts = can('launch')
+    ? '<span class="racts">' +
+        '<button data-rreply="' + esc(r.sid) + '" title="Reply — in its view, typed into its terminal">' + RICON.reply + '</button>' +
+        '<button data-rtab="' + esc(r.sid) + '" title="Go to its tab in iTerm">' + RICON.tab + '</button>' +
+      '</span>' : '';
   return '<div class="srow run' + (sel === r.sid ? ' on' : '') + '" data-ses="' + esc(r.sid) +
     '" data-q="' + esc(q) + '" title="' + esc(tip) + '">' +
     '<span class="dot ' + esc(g.on) + '"></span>' +
-    '<span class="ttl">' + esc(t) + '</span>' +
+    '<span class="ttl">' + esc(t) + '</span>' + acts +
     '<span class="rst"><span class="rstate ' + esc(g.on) + '">' + esc(g.word || r.status || '?') + '</span>' +
       (t !== r.name && r.name ? '<span class="nm">' + esc(r.name) + '</span>' : '') +
       (showRepo ? '<span>' + esc(repo) + '</span>' : '') +
       '<span class="dur" data-since="' + (+r.since || 0) + '">' + waited(r.since, true) + '</span>' +
     '</span></div>';
 }
+var RICON = {
+  reply: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" ' +
+         'stroke-linejoin="round"><path d="M9 17l-5-5 5-5"/><path d="M4 12h11a5 5 0 0 1 5 5v2"/></svg>',
+  tab:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" ' +
+         'stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2M12 15h4"/></svg>'
+};
 function waitCard(r){
   var where = r.here || r.cwd || '';
   var since = '<span data-since="' + (+r.since || 0) + '">' + waited(r.since) + '</span>';
@@ -2192,6 +2216,8 @@ function waitCard(r){
               Math.round((r.read || 0) / 1048576) + ' MB of its transcript.</div>';
   var open = r.transcript || (D.sessions && D.sessions[r.sid])
     ? '<button data-ses="' + esc(r.sid) + '">the whole conversation</button>' : '';
+  var acts = can('launch') ? '<button data-rreply="' + esc(r.sid) + '">reply</button>' +
+                              '<button data-rtab="' + esc(r.sid) + '">go to its tab</button>' : '';
   return '<div class="wcard">' +
     '<div class="whead"><span class="dot ' + esc(r.on) + '"></span>' +
       '<b>' + esc(waitTitle(r)) + '</b>' +
@@ -2199,10 +2225,11 @@ function waitCard(r){
         esc(shortRepo(where)) + ' · ' + said + '</span></div>' +
     (r.on === 'asking' && r.waitingFor ? '<div class="qnote wait">' + esc(r.waitingFor) + '</div>' : '') +
     body +
-    '<div class="wfoot">' + open +
+    '<div class="wfoot">' + open + acts +
       '<span>answer it in its terminal · pid ' + esc(String(r.pid)) + '</span>' +
       '<span class="sid" data-copy="' + esc(r.sid) + '" data-copy-note="session id copied" title="' +
         esc(r.sid) + ' — click to copy">' + esc(r.sid.slice(0, 8)) + '</span></div>' +
+    (can('launch') && replyOf(r.sid).open ? replyHTML(r.sid, 'w') : '') +
     '</div>';
 }
 function viewWaiting(){
@@ -2267,8 +2294,151 @@ var WAITVERBS = RB.table({
   wopen:  function(){ Shell.open({ kind:'waiting', id:'', title:TITLES.waiting }); }
 });
 
+/* ── answering a running session in its own terminal ─────────────────────
+   A session running in a terminal has one writer, the claude process there,
+   and a reply goes to it the way your own typing does: into that terminal's
+   tab, where a slash command runs and the words are yours. The page sends the
+   session id and the words; which process, which terminal and which tab are
+   read on the server, which types nothing unless Claude is alive, waits for
+   you, and holds the terminal's foreground — and says which of those failed
+   when one does. One line: a terminal reads a line break as Enter, so line
+   breaks become spaces, here as you paste and again on the server. */
+var REPLY = {};                            // sid → { draft, said, bad, open }
+function replyOf(sid){ return REPLY[sid] || (REPLY[sid] = { draft:'', said:'', bad:false, open:false }); }
+function oneLine(s){
+  return String(s || '').replace(/[ \t]*(?:\r\n|[\r\n\u0085\u2028\u2029])+[ \t]*/g, ' ')
+                        .replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+}
+/* what its state means for a reply, kept current in place as the state moves */
+function replyState(r){
+  if (!r) return 'it is no longer running';
+  if (r.on === 'done') return 'your turn';
+  if (r.on === 'asking') return 'it is asking you something in its terminal' +
+    (r.waitingFor ? ' (' + r.waitingFor + ')' : '') + ', and what you send answers that';
+  if (r.on === 'working') return 'it is working; a reply is refused until its turn is over';
+  if (r.on === 'background') return 'a command of its own is still running; a reply is refused until its turn is over';
+  return 'its status is ' + (r.status || 'unknown') + ', so a reply is refused';
+}
+function replyHTML(sid, where){
+  var R = replyOf(sid), id = 'rin-' + where + '-' + sid;
+  return '<div class="rbox" data-rbox="' + esc(sid) + '">' +
+    '<div class="rrow">' +
+      '<input id="' + esc(id) + '" class="rin" data-rin="' + esc(sid) + '" value="' + esc(R.draft) + '" ' +
+        'placeholder="Reply in its terminal — one line" spellcheck="false" autocomplete="off">' +
+      '<button class="rgo" data-rsend="' + esc(sid) + '">Send</button>' +
+    '</div>' +
+    '<div class="rbar">' +
+      '<button data-rsignoff="' + esc(sid) + '">/signoff</button>' +
+      '<button data-radjust="' + esc(sid) + '">/adjust …</button>' +
+      '<button data-rtab="' + esc(sid) + '">Go to its tab</button>' +
+      '<span class="rhint"><span data-rhint="' + esc(sid) + '">' + esc(replyState(RUN[sid])) + '</span>' +
+        ' · one line: line breaks become spaces · typed into its iTerm tab as if by you</span>' +
+    '</div>' +
+    '<div class="rsay' + (R.bad ? ' bad' : '') + '" data-rsay="' + esc(sid) + '">' + esc(R.said) + '</div>' +
+  '</div>';
+}
+/* at the foot of a running session's view; without the gate, what would open it */
+function replySection(sid){
+  if (!can('launch'))
+    return '<div class="sreply off"><div class="qnote">Replying from here types into its terminal, ' +
+      'which the page may do only with <span class="f">md --allow-launch</span> or Settings → ' +
+      'What the page may start.</div></div>';
+  return '<div class="sreply">' + replyHTML(sid, 's') + '</div>';
+}
+function replySay(sid, text, bad){
+  var R = replyOf(sid);
+  R.said = text; R.bad = !!bad;
+  [].forEach.call(document.querySelectorAll('[data-rsay]'), function(el){
+    if (el.dataset.rsay !== sid) return;
+    el.textContent = text;
+    el.classList.toggle('bad', !!bad);
+    if (text && el.offsetParent) el.scrollIntoView({ block:'nearest' });   // read where it was asked
+  });
+}
+function sendReply(sid, input, fixed){
+  var text = oneLine(fixed != null ? fixed : (input ? input.value : '')).trim();
+  if (!text) return replySay(sid, 'there is nothing to send', true);
+  replySay(sid, 'sending…');
+  api('act', { verb:'reply', id:sid, text:text }, function(j){
+    if (j && j.error) return replySay(sid, j.error, true);
+    if (fixed == null){
+      replyOf(sid).draft = '';
+      [].forEach.call(document.querySelectorAll('[data-rin]'), function(el){
+        if (el.dataset.rin === sid) el.value = '';
+      });
+    }
+    replySay(sid, 'sent to ' + (j.name ? j.name + '\u2019s' : 'its') + ' tab' +
+                  (j.dry ? ' — a dry run, so nothing was typed' : ''));
+  }, function(e){
+    replySay(sid, (e && e.body && e.body.error) ||
+             (e && e.status === 403 ? 'the page may not start things — md --allow-launch' : 'the reply did not reach the server'), true);
+  });
+}
+function showTab(sid){
+  api('act', { verb:'show-tab', id:sid }, function(j){
+    if (j && j.error) return toast(j.error);
+    toast(j.dry ? 'its tab, in ' + j.app + ' — a dry run, so nothing moved' : 'its tab is in front, in ' + j.app);
+  }, function(e){ toast((e && e.body && e.body.error) || 'could not reach its tab'); });
+}
+/* the reply line of a session, in its own view: opened there if need be */
+function focusReply(sid){
+  var t = openSession(sid, {});
+  setTimeout(function(){
+    var el = document.getElementById('rin-s-' + sid);
+    if (!el) return;
+    el.closest('.sreply').scrollIntoView({ block:'end' });
+    el.focus({ preventScroll:true });
+  }, 0);
+  return t;
+}
+var REPLYVERBS = RB.table({
+  rsend:    function(sid, el){
+    var box = el.closest('[data-rbox]');
+    sendReply(sid, box && box.querySelector('[data-rin]'));
+  },
+  rsignoff: function(sid){ sendReply(sid, null, '/signoff'); },
+  radjust:  function(sid, el){
+    var box = el.closest('[data-rbox]'), i = box && box.querySelector('[data-rin]');
+    if (!i) return;
+    if (!/^\/adjust\b/.test(i.value)) i.value = '/adjust ' + i.value.replace(/^\s+/, '');
+    replyOf(sid).draft = i.value;
+    i.focus();
+    i.setSelectionRange(i.value.length, i.value.length);
+  },
+  rtab:     function(sid){ showTab(sid); },
+  /* a Waiting card opens a reply line of its own; an Open now row goes to the
+     session's view, where the reply line is */
+  rreply:   function(sid, el){
+    if (!el.closest('.wcard')) return focusReply(sid);
+    var R = replyOf(sid);
+    R.open = !R.open;
+    Shell.refresh();
+    if (R.open) setTimeout(function(){
+      var i = document.getElementById('rin-w-' + sid);
+      if (i) i.focus();
+    }, 0);
+  }
+});
+document.addEventListener('input', function(e){
+  var i = e.target.closest && e.target.closest('[data-rin]');
+  if (i) replyOf(i.dataset.rin).draft = i.value;
+});
+document.addEventListener('paste', function(e){
+  var i = e.target.closest && e.target.closest('[data-rin]');
+  if (!i || !e.clipboardData) return;
+  e.preventDefault();
+  i.setRangeText(oneLine(e.clipboardData.getData('text/plain')), i.selectionStart, i.selectionEnd, 'end');
+  replyOf(i.dataset.rin).draft = i.value;
+});
+document.addEventListener('keydown', function(e){
+  var i = e.target.closest && e.target.closest('[data-rin]');
+  if (!i || e.key !== 'Enter' || e.isComposing) return;
+  e.preventDefault();
+  sendReply(i.dataset.rin, i);
+});
+
 function sessionSurface(sid, q){
-  var S = { q: q || '', conv: null, err: '', loading: false, host: null };
+  var S = { q: q || '', conv: null, err: '', loading: false, host: null, placed: false };
   var F = makeFind(S);
 
   S.render = function(host){
@@ -2282,7 +2452,20 @@ function sessionSurface(sid, q){
        bar, so the thing you were looking for is the thing you land on */
     if (S.q){ F.q = S.q; F.on = true; }
     /* nothing can be measured or scrolled until the pane is shown */
-    setTimeout(function(){ S.fold(); F.after(); }, 0);
+    setTimeout(function(){ S.fold(); F.after(); S.place(); }, 0);
+  };
+  /* Where it opens, once its body is whole — the conversation arrives after
+     the view does — and the pane is shown, since a pane never shown cannot
+     be scrolled. After that the place is yours: nothing here moves it. */
+  S.whole = function(){
+    var m = D.sessions[sid] || {};
+    var there = m.live || (RUN[sid] && RUN[sid].transcript);
+    return !!(S.conv || S.err) || !there || !can('conversation');
+  };
+  S.place = function(){
+    if (S.placed || !S.host || !S.host.offsetHeight || !S.whole()) return;
+    S.placed = true;
+    landing(S.host, F);
   };
   /* history.jsonl only ever held your half. The other half is in the
      transcript, which is read once, on opening, and kept for this tab. */
@@ -2295,12 +2478,12 @@ function sessionSurface(sid, q){
       S.loading = false;
       if (j && j.turns && j.turns.length) S.conv = j;
       else S.err = (j && j.error) || 'nothing readable in that transcript';
-      if (S.host) S.refresh(S.host);
+      if (S.host){ S.refresh(S.host); S.place(); }
       Shell.paint();                       // the strip can now say how long it is
     }, function(){
       S.loading = false;
       S.err = 'could not read the transcript';
-      if (S.host) S.refresh(S.host);
+      if (S.host){ S.refresh(S.host); S.place(); }
     });
   };
   S.slot = function(){
@@ -2317,15 +2500,16 @@ function sessionSurface(sid, q){
     S.host = host;
     if (!host.querySelector('.inner'))
       host.innerHTML = '<div class="sfind" hidden></div><div class="inner sdet"></div>';
-    var box = host.querySelector('.inner'), y = host.scrollTop;
+    var box = host.querySelector('.inner'), y = host.scrollTop, c = grabCaret(host);
     box.innerHTML = sessionHTML(sid, S.slot());
     S.fold();                              // before the scroll is restored: folding moves everything
     if (y) host.scrollTop = y;
     F.after();
+    putCaret(c);                           // a reply being typed keeps its caret
   };
   /* a pane that was never shown could not be measured, so the folds are cut
-     the first time it is looked at */
-  S.focus = function(){ S.fold(); };
+     the first time it is looked at, and it is placed then */
+  S.focus = function(){ S.fold(); S.place(); };
   S.find = function(dir){ F.open(dir); };
   S.label = function(){
     var t = sesTitle(sid);
@@ -2338,6 +2522,10 @@ function sessionSurface(sid, q){
   S.actions = function(){
     var m = D.sessions[sid] || {}, a = [];
     var cwd = m.p || D.root;
+    if (RUN[sid] && can('launch')){
+      a.push({ label:'reply', cls:'go', fn:function(){ focusReply(sid); }});
+      a.push({ label:'go to its tab', fn:function(){ showTab(sid); }});
+    }
     if (m.live && can('launch')){
       if (!RUN[sid]) a.push({ label:'Resume', cls:'go', fn:function(){
         act('resume', sid, '', 'resuming in a new terminal window'); }});
@@ -2358,10 +2546,32 @@ function sessionSurface(sid, q){
     var f = F.hint();
     if (f) return f;
     if (S.conv) return S.conv.you + ' from you · ' + S.conv.claude + ' from Claude · ⌘F searches it';
-    if (RUN[sid]) return 'running now · answer it in its terminal';
+    if (RUN[sid]) return can('launch') ? 'running now · reply at its foot, or in its terminal'
+                                       : 'running now · answer it in its terminal';
     return m.live ? 'resumable · claude -r ' + sid.slice(0, 8) : 'archived — the transcript is gone';
   };
   return S;
+}
+
+/* Where a session opens. At its end, where the latest turns are — what you
+   open a session for is where it stands now, and a running one's reply line
+   is there. Opened on a match, a search hit or a prompt you jumped to, it
+   opens on that match instead: the first in what you said if any is, since
+   that is what a search of your history found. */
+var LANDING_END = '.sreply, .convo > .turn, .convo > .cmark, .plist .pitem';
+function landing(host, F){
+  if (F.on && F.list.length){
+    var i = 0;
+    for (var k = 0; k < F.list.length; k++){
+      if (F.list[k].closest('.turn.you, .plist .pitem')){ i = k; break; }
+    }
+    F.go(i);
+    return 'match';
+  }
+  var all = host.querySelectorAll(LANDING_END), end = all[all.length - 1];
+  if (end) end.scrollIntoView({ block:'end' });
+  else host.scrollTop = host.scrollHeight;
+  return 'end';
 }
 
 /* ── a conversation, as a conversation ───────────────────────────────────
@@ -2372,12 +2582,21 @@ function sessionSurface(sid, q){
 function renderConvo(c){
   var out = ['<div class="grp">The conversation <span class="c">' +
     c.you + ' from you · ' + c.claude + ' from Claude' +
-    (c.truncated ? ' · too long to show in full' : '') + '</span></div>'];
+    (c.notes ? ' · ' + c.notes + ' from elsewhere' : '') +
+    (c.earlier ? ' · its latest ' + c.turns.length + ' turns' : '') + '</span></div>'];
+  /* the transcript is read from its end, so a long one begins mid-way, and
+     says so rather than passing its latest turns off as all of it */
+  if (c.earlier) out.push('<div class="cmark earlier"><span>the turns before these are not shown</span></div>');
   var last = '';
   c.turns.forEach(function(t){
     if (t.who === 'mark'){
       last = '';
       out.push('<div class="cmark ' + esc(t.kind) + '"><span>' + esc(t.text || t.kind) + '</span></div>');
+      return;
+    }
+    if (t.who === 'note'){
+      last = '';
+      out.push(noteHTML(t));
       return;
     }
     var mine = t.who === 'you', run = t.who === last;
@@ -2390,6 +2609,18 @@ function renderConvo(c){
       (mine ? '' : didHTML(t)) + '</div></div>');
   });
   return out.join('');
+}
+/* What reached the session from somewhere other than you — another session's
+   message, an agent's report, a background task's notice, the harness's own
+   notes — arrives wearing your role in the transcript. It is drawn between
+   the two halves, under a line that says what it is and whom it is from, and
+   never on your side. */
+function noteHTML(t){
+  var from = t.from ? '<b>' + esc(t.from) + '</b> · ' : '';
+  var what = t.kind === 'system' ? 'system · ' + esc(t.about || 'a note') : esc(t.about || t.kind);
+  return '<div class="turn note ' + esc(t.kind) + '">' +
+    '<div class="tm">' + (t.t ? clock(t.t) + ' · ' : '') + from + what + '</div>' +
+    '<div class="bub"><div class="md">' + turnHTML(t.text) + '</div></div></div>';
 }
 function turnHTML(text){
   if (!text) return '<p class="nothing">—</p>';
@@ -3145,6 +3376,7 @@ document.addEventListener('click', function(e){
   }
   if (NAVVERBS(e)) return;
   if (WAITVERBS(e)) return;
+  if (REPLYVERBS(e)) return;
   /* the same move as the Settings toggle, because the empty state promises the
      same thing: on now, and on the next time you open a window */
   if (e.target.closest('[data-wantsessions]'))

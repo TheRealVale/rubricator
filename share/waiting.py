@@ -67,6 +67,11 @@ except Exception:                                  # standalone
     def scrub(s):
         return s
 try:
+    from transcript import harness_text            # what the harness writes, never yours
+except Exception:                                  # standalone
+    def harness_text(s):
+        return False
+try:
     from workspace import is_slash_noise           # the index's own rule for a name
 except Exception:                                  # standalone
     def is_slash_noise(s):
@@ -184,7 +189,7 @@ def first_prompts(sids):
                 txt = json.loads(line).get("display") or ""
             except Exception:
                 continue                          # a line being written as we read
-            if not isinstance(txt, str) or not txt or is_slash_noise(txt):
+            if not isinstance(txt, str) or not txt or is_slash_noise(txt) or harness_text(txt):
                 continue
             out[sid] = scrub(txt)[:FIRST_MAX]
             if len(out) == len(want):
@@ -294,6 +299,25 @@ def running(roots=(), replies=True):
 def ids():
     """The ids of the sessions running now, for the guard on resume."""
     return {r["sid"] for r in running(replies=False)["sessions"]}
+
+
+def session_file(sid):
+    """What Claude Code's own file says of the running session with this id,
+    read now, or None. A crash leaves its file behind and a resume writes a new
+    one, so two files can carry one id; the one whose process lives is it."""
+    if not SESSIONS.is_dir():
+        return None
+    found = []
+    for f in SESSIONS.glob("*.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (isinstance(d, dict) and d.get("sessionId") == sid and isinstance(d.get("pid"), int)
+                and isinstance(d.get("status"), str)):
+            found.append(d)
+    live = _alive([d["pid"] for d in found])
+    return next((d for d in found if d["pid"] in live), None)
 
 
 if __name__ == "__main__":

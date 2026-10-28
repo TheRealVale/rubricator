@@ -373,6 +373,11 @@ def load_sessions(limit_project=None, deep=False):
     the resume button lies."""
     prompts, hist = [], HOME / ".claude/history.jsonl"
     meta = {}
+    try:
+        from transcript import harness_text      # what the harness writes, never yours
+    except Exception:
+        def harness_text(s):
+            return False
     if hist.is_file():
         with hist.open(encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -387,6 +392,12 @@ def load_sessions(limit_project=None, deep=False):
                 # with a path, and there is no reason to lose it. A short
                 # skiplist keeps both.
                 if not txt or is_slash_noise(txt):
+                    continue
+                # Another session's message, an agent's report, a task's
+                # notice: none of them was typed, so none of them names a
+                # session or answers a search for something you said. None is
+                # in the file on 2.1.309; this keeps it so if a build adds one.
+                if harness_text(txt):
                     continue
                 sid = d.get("sessionId") or ""
                 t = int((d.get("timestamp") or 0) / 1000)
@@ -1208,9 +1219,10 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         return S.J({"text": out, "meta": meta})
 
     def session(method, query, body):
-        """The other half of a conversation. Read straight off disk, never
-        indexed: the largest transcript here is 17 MB and parses in 0.05 s,
-        so there is nothing worth caching and nothing to invalidate."""
+        """The other half of a conversation. Read straight off disk, from
+        the end, never indexed: the latest 800 turns of a 1.4 GB transcript
+        are read in under two seconds, so there is nothing worth caching and
+        nothing to invalidate."""
         sid = (query.get("id") or [""])[0]
         try:
             sys.path.insert(0, str(share))
@@ -1286,6 +1298,19 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
             if verb == "launch":
                 d = docs.get(ident)
                 return S.J(A.launch(root, d["abs"] if d else "", b.get("text") or ""))
+            if verb in ("reply", "show-tab"):
+                # A session running in a terminal is answered in that terminal.
+                # The page sends the session id and, for a reply, its words as
+                # data; which process, which terminal and which tab are read
+                # here, and actions.to_terminal's guard decides whether anything
+                # is typed at all.
+                if not A.SESSION_ID.match(ident):
+                    return S.J({"error": "not a session id"}, 400)
+                said = b.get("text") if isinstance(b.get("text"), str) else ""
+                try:
+                    return S.J(A.to_terminal(ident, "write" if verb == "reply" else "show", said))
+                except A.Refused as r:
+                    return S.J({"error": r.why, "refused": r.check}, 409)
             if verb in ("resume", "fork"):
                 m = (state["data"].get("sessions") or {}).get(ident)
                 if not m or not m.get("live"):

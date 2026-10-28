@@ -140,7 +140,10 @@ A day, at the standard the rest of this was built to.
 
 1. **Two writers, one file.** A session open in a terminal and in the window
    would both append, and transcripts are rewritten, not appended atomically.
-   A lock file per session id, plus an honest *open elsewhere* state on the tab.
+   So a session still running in a terminal is not continued this way at all:
+   its turn is typed into that terminal (§6), and what this plan builds is for
+   a session that is not running — with a lock file per session id, so two
+   windows cannot drive one, and an honest *open elsewhere* state on the tab.
 
 2. **A turn in flight when the window closes.** The server dies with the page by
    design — the heartbeat is what stops rubricator leaving processes behind.
@@ -162,7 +165,33 @@ A day, at the standard the rest of this was built to.
 
 ---
 
-## 6. What it is not
+## 6. A session that is still running
+
+A session running in a terminal already has its writer: the `claude` process in
+that terminal. `claude -p --resume` beside it would be a second process
+appending to the same transcript, which §5.1 rules out, and the window would
+have to pretend to be a terminal to show what happens next.
+
+So its turn goes where its turns already go. The window types it into the
+session's own iTerm tab, exactly as you would: the server reads the pid from
+Claude Code's file for the session, the tty from `ps`, and iTerm's tab by that
+tty, and writes the line there over AppleScript. A slash command runs, the
+permission prompts are the terminal's own, and the transcript keeps one writer;
+the event stream that already carries the session's status shows it taking the
+turn. Nothing of §2's worry applies, because nothing here runs Claude — it is
+your keyboard, one tab away.
+
+What makes it safe is what it types into. A terminal whose Claude has exited is
+a shell, so a line is typed only while the `claude` process lives, its status
+says it waits for you, and it holds its terminal's foreground — checked when the
+line is sent and again just before it is typed. The line is data all the way:
+an `argv` item of a constant script, never part of the script, on one line. It
+is iTerm only, behind the same `allow_launch` gate as everything else that
+starts something, and the first one asks macOS's Automation permission once.
+
+---
+
+## 7. What it is not
 
 The desktop app has a permission UI, plan mode, diffs, todo lists, MCP approval,
 model switching and slash commands. This is none of that, and reaching parity is
@@ -172,7 +201,7 @@ This is: **read a conversation, and add one more turn to it.**
 
 ---
 
-## 7. Open
+## 8. Open
 
 1. Should the tool set be configurable in Settings, or fixed? Fixed is safer and
    one fewer way to end up with a shell by accident. *Leaning fixed.*

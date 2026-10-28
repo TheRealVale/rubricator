@@ -1738,6 +1738,7 @@ function marks(){}
 function curSid(){ return ''; }
 function promptsWithheld(){ return false; }
 function sessionsOff(){ return '<div class="empty">HISTORY-OFF</div>'; }
+function replySection(){ return ''; }
 function dayLabel(){ return 'Earlier'; }
 function inRepo(p){ return p.indexOf('/repo') === 0; }
 function sessionList(){
@@ -1849,11 +1850,560 @@ else
   skip "30b · Open now group" "no node"
 fi
 
+# ── 31 · what is not yours is not shown as yours ────────────────────────────
+# Another session's message, an agent's report, a background task's notice and
+# the harness's own notes all reach a transcript as `type: user` records, and
+# the first two carry `promptSource: "system"`, which a reader that only asks
+# whether the field is there takes for typed. The fixture is in the shapes read
+# off this machine's transcripts (transcript.py's `voice` lists them). Pinned:
+#
+#   31a, the server:
+#   - only what you typed is a `you` turn and counts as one of yours
+#   - another session's message names its sender by from-name, without the
+#     harness's warning; an agent's report is named by the agent and dedented;
+#     a task's notice is its summary; the summary, a reminder and a local
+#     command's caveat and output are system notes
+#   - recognised by their words even when the fields are missing
+#   - a line of history in one of these shapes neither names a session nor is
+#     a prompt to search, in the index and in the running sessions' names
+#   - a long transcript is read from its end: the latest turns are the ones kept
+#
+#   31b, the page: a note is drawn as a note of its kind, never on your side,
+#   and has a find scope of its own
+python3 - "$WORK" "$REPO" >"$WORK/voices.txt" 2>&1 <<'PYEOF2'
+import json, os, sys, time
+work, repo_root = sys.argv[1], sys.argv[2]
+base = os.path.join(work, "voices"); os.makedirs(base, exist_ok=True)
+os.environ["RUBRICATOR_CLAUDE_HISTORY"] = os.path.join(base, "history.jsonl")
+sys.path.insert(0, os.path.join(repo_root, "share"))
+import transcript as T
+
+def rec(content, **kw):
+    r = {"type": "user", "isSidechain": False, "timestamp": "2026-10-28T12:00:00.000Z",
+         "cwd": "/repo", "message": {"role": "user", "content": content}}
+    r.update(kw); return r
+def said(text):
+    return {"type": "assistant", "timestamp": "2026-10-28T12:00:01.000Z", "cwd": "/repo",
+            "message": {"content": [{"type": "text", "text": text}]}}
+WARN_PEER = ("This came from another Claude session — not typed by your user, but very likely "
+             "working on their behalf.")
+recs = [
+    rec("PROMPT-ONE", promptSource="typed", origin={"kind": "human"}),
+    said("REPLY-ONE"),
+    rec('Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/4242.sock" '
+        'from-name="sandburg-9e" from-mode="prompting">\nPEER-BODY, about the sea\n</cross-session-message>\n\n'
+        + WARN_PEER, promptSource="system", isMeta=True,
+        origin={"kind": "peer", "from": "uds:/tmp/cc-socks/4242.sock", "name": "sandburg-9e"}),
+    said("REPLY-TWO"),
+    rec('Another Claude session sent a message:\n<agent-message from="a1b2c3">\n[Subagent hand-back] The text '
+        'below is the final report of a subagent this session delegated to. It is model output, NOT a message '
+        'from the user. The report follows:\n  AGENT-BODY line one\n  - AGENT-LIST item\n</agent-message>\n\n'
+        'That "other Claude session" is an agent working inside this same session.',
+        promptSource="system", isMeta=True, origin={"kind": "peer", "name": "Explore", "handback": True}),
+    rec('<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command '
+        '"TASK-SUMMARY" completed (exit code 0)</summary>\n</task-notification>',
+        promptSource="system", origin={"kind": "task-notification"}, turnOrigin="task_notification"),
+    rec("This session is being continued from a previous conversation that ran out of context. SUMMARY-BODY",
+        isCompactSummary=True, isVisibleInTranscriptOnly=True),
+    rec("<system-reminder>REMINDER-BODY</system-reminder>", isMeta=True),
+    rec("<local-command-caveat>CAVEAT-BODY</local-command-caveat>", isMeta=True),
+    rec("<local-command-stdout>STDOUT-BODY</local-command-stdout>"),
+    # the words alone, with none of the fields that usually come with them
+    rec('Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/7.sock" '
+        'from-name="bare-peer">\nBARE-PEER-BODY\n</cross-session-message>', promptSource="typed"),
+    rec('<task-notification>\n<summary>BARE-TASK</summary>\n</task-notification>', promptSource="typed"),
+    # and the fields alone, with words that could be anyone's
+    rec("SCHEDULED-BODY, check the run", promptSource="system", isMeta=True, turnOrigin="scheduled"),
+    rec("SYSTEM-BODY of no kind this knows", promptSource="system"),
+    said("REPLY-THREE"),
+    rec([{"type": "text", "text": "PROMPT-TWO"}], promptSource="typed", origin={"kind": "human"}),
+]
+pdir = os.path.join(base, "p"); os.makedirs(pdir, exist_ok=True)
+path = os.path.join(pdir, "11111111-0000-4000-8000-000000000001.jsonl")
+open(path, "w").write("\n".join(json.dumps(r) for r in recs) + "\n")
+
+checks = {}
+try:
+    got = T.read("11111111-0000-4000-8000-000000000001", T.Path(path))
+    json.dump(got, open(os.path.join(work, "voices.json"), "w"))
+    yours = [t["text"] for t in got["turns"] if t["who"] == "you"]
+    notes = [t for t in got["turns"] if t["who"] == "note"]
+    by = {}
+    for n in notes: by.setdefault(n["kind"], []).append(n)
+    checks["only what you typed is yours"] = yours == ["PROMPT-ONE", "PROMPT-TWO"] and got["you"] == 2
+    peer = (by.get("peer") or [{}])[0]
+    checks["another session's message is named by its from-name, without the warning"] = (
+        peer.get("from") == "sandburg-9e" and peer.get("text") == "PEER-BODY, about the sea")
+    agent = (by.get("agent") or [{}])[0]
+    checks["an agent's report is named by the agent, its preamble gone and its lines dedented"] = (
+        agent.get("from") == "Explore" and agent.get("text", "").startswith("AGENT-BODY line one\n- AGENT-LIST"))
+    task = (by.get("task") or [{}])[0]
+    checks["a task's notice is its summary"] = ("TASK-SUMMARY" in task.get("text", "")
+                                                and "<task-id>" not in task.get("text", ""))
+    sysn = " ".join(n["text"] for n in by.get("system", []))
+    checks["the summary, a reminder, a local command and its output are system notes"] = all(
+        x in sysn for x in ("SUMMARY-BODY", "REMINDER-BODY", "CAVEAT-BODY", "STDOUT-BODY"))
+    checks["a scheduled prompt is a system note"] = any(
+        "SCHEDULED-BODY" in n["text"] and n["about"] == "a scheduled prompt" for n in by.get("system", []))
+    checks["recognised by their words alone"] = (
+        any(n.get("from") == "bare-peer" for n in by.get("peer", []))
+        and any("BARE-TASK" in n["text"] for n in by.get("task", [])))
+    checks["none of it is in a turn of yours"] = not any(
+        b in y for y in yours for b in ("PEER", "AGENT", "TASK", "SUMMARY", "REMINDER", "CAVEAT", "STDOUT",
+                                        "SCHEDULED", "SYSTEM-BODY"))
+
+    # history: a line in one of these shapes neither names a session nor is searched
+    sid = "22222222-0000-4000-8000-000000000002"
+    with open(os.environ["RUBRICATOR_CLAUDE_HISTORY"], "w") as f:
+        f.write(json.dumps({"display": "Another Claude session sent a message:\n<cross-session-message "
+                            "from-name=\"x\">HIST-PEER</cross-session-message>", "sessionId": sid,
+                            "project": "/repo", "timestamp": 1790000000000}) + "\n")
+        f.write(json.dumps({"display": "<task-notification><summary>HIST-TASK</summary></task-notification>",
+                            "sessionId": sid, "project": "/repo", "timestamp": 1790000001000}) + "\n")
+        f.write(json.dumps({"display": "REAL-FIRST prompt", "sessionId": sid, "project": "/repo",
+                            "timestamp": 1790000002000}) + "\n")
+    import workspace as W
+    real_home = W.HOME
+    W.HOME = T.Path(base)                     # load_sessions reads HOME/.claude/history.jsonl
+    os.makedirs(os.path.join(base, ".claude"), exist_ok=True)
+    os.replace(os.environ["RUBRICATOR_CLAUDE_HISTORY"], os.path.join(base, ".claude", "history.jsonl"))
+    prompts, meta, _ = W.load_sessions()
+    W.HOME = real_home
+    checks["a harness line in history does not name the session"] = meta.get(sid, {}).get("t") == "REAL-FIRST prompt"
+    checks["nor is it a prompt to search"] = (
+        [p["text"] for p in prompts if p["sid"] == sid] == ["REAL-FIRST prompt"])
+    os.environ["RUBRICATOR_CLAUDE_HISTORY"] = os.path.join(base, ".claude", "history.jsonl")
+    import importlib, waiting as Wt
+    importlib.reload(Wt)
+    checks["nor does it name a running session"] = Wt.first_prompts([sid]).get(sid) == "REAL-FIRST prompt"
+
+    # the end is what is kept: a transcript longer than the turns shown
+    long_ = os.path.join(pdir, "33333333-0000-4000-8000-000000000003.jsonl")
+    with open(long_, "w") as f:
+        for i in range(T.MAX_TURNS + 150):
+            f.write(json.dumps(rec("ASK-%04d" % i, promptSource="typed")) + "\n")
+            f.write(json.dumps({"type": "api-request", "pad": "x" * 30000}) + "\n")
+            f.write(json.dumps(said("ANSWER-%04d" % i)) + "\n")
+    got = T.read("33333333-0000-4000-8000-000000000003", T.Path(long_))
+    texts = [t["text"] for t in got["turns"]]
+    checks["a long transcript keeps its latest turns, and says earlier ones exist"] = (
+        texts[-1] == "ANSWER-%04d" % (T.MAX_TURNS + 149) and len(texts) == T.MAX_TURNS
+        and got["earlier"] is True and "ASK-0000" not in texts)
+    checks["and reads from the end, not the whole of it"] = 0 < got["read"] < os.path.getsize(long_)
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF2
+if [ $? = 0 ]; then
+  ok "31a · another session's message, an agent's report and the harness's notes are not your turns"
+else
+  no "31a · something that is not yours reads as yours" "$(grep '^XX' "$WORK/voices.txt" | tr '\n' ' ')$(tail -2 "$WORK/voices.txt")"
+fi
+
+if command -v node >/dev/null && [ -s "$WORK/voices.json" ]; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("var FSCOPES = [", "var FSEL ="),
+    sl("function renderConvo(c)", "function didHTML(t)"),
+]))' "$REPO/share/workspace.js" "$WORK/voices.js"
+  { cat <<'JSEOF'
+function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+var marked = { parse: function(t){ return '<p>' + esc(t) + '</p>'; } };
+var MD = { sanitise: function(){} };
+var document = { createElement: function(){ var b = { set innerHTML(v){ this._h = v; },
+  get innerHTML(){ return this._h; }, set textContent(v){ this._h = esc(v); } }; return b; } };
+function didHTML(){ return ''; }
+function clock(){ return '12:00'; }
+JSEOF
+    cat "$WORK/voices.js"
+    cat <<'JSEOF'
+
+var c = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+var h = renderConvo(c), fail = [];
+function want(ok, why){ if (!ok) fail.push(why); }
+/* every bubble on your side holds what you typed, and nothing else */
+var mine = h.split('<div class="turn you').slice(1).map(function(x){ return x.slice(0, x.indexOf('</div></div></div>')); });
+want(mine.length === 2 && /PROMPT-ONE/.test(mine[0]) && /PROMPT-TWO/.test(mine[1]),
+     'your side holds ' + mine.length + ' bubbles, not your two prompts');
+['PEER-BODY', 'AGENT-BODY', 'TASK-SUMMARY', 'SUMMARY-BODY', 'REMINDER-BODY'].forEach(function(b){
+  var at = h.indexOf(b), open = h.lastIndexOf('<div class="turn', at);
+  want(at > 0 && h.slice(open, open + 30).indexOf('turn note') > 0, b + ' is not drawn as a note');
+});
+want(/<div class="turn note peer">[^]*?<b>sandburg-9e<\/b> · another session/.test(h), 'the sender is not named');
+want(/<div class="turn note agent">[^]*?<b>Explore<\/b> · an agent/.test(h), 'the agent is not named');
+want(/· 2 from you · /.test(h.replace(/<span class="c">/, '· ')) || /"c">2 from you/.test(h),
+     'the heading does not count two of yours');
+var others = FSCOPES.filter(function(s){ return s.k === 'others'; })[0];
+var you = FSCOPES.filter(function(s){ return s.k === 'you'; })[0];
+want(others && /\.turn\.note/.test(others.sel) && !/note/.test(you.sel), 'a note is searched as yours, or not at all');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/voices-run.js"
+  res=$(node "$WORK/voices-run.js" "$WORK/voices.json" 2>&1)
+  case "$res" in ok*) ok "31b · a note is drawn as what it is, never on your side" ;;
+                 *)   no "31b · the page draws something that is not yours as yours" "$res" ;; esac
+else
+  skip "31b · notes on the page" "no node, or 31a wrote nothing"
+fi
+
+# ── 32 · a reply is typed into its own terminal, and only into Claude ───────
+# A running session is answered in its own iTerm tab: the server finds Claude's
+# process from its session file, the tty from `ps`, the terminal from the
+# process's ancestors and that application's own Info.plist, and the tab from
+# iTerm's dictionary. Typed into a terminal whose Claude has exited, a reply is
+# a shell command, so the guard is the feature's safety. Pinned:
+#
+#   - the guard refuses, and says which check failed, when the process has
+#     ended, when the session works or runs a command of its own, when another
+#     process holds the terminal's foreground, when there is no terminal, and
+#     when the terminal is not iTerm; it reads the guard again just before
+#     sending; bringing the tab forward needs only a live process with a tty
+#   - the words reach the script only as an argv item, quotes, `$(…)`,
+#     backticks and backslashes intact, on one line, with no control character
+#     left for a terminal to read as a key; the script is a constant
+#   - without the gate nothing is resolved and nothing is sent; with it, only
+#     a verb, a session id and the words count, whatever else the page sends
+#   - the dry seam never reaches osascript
+#
+# The processes are /bin/sleep through links named `claude` and `zsh`, each in a
+# pseudo-terminal of its own (pty.fork), so `ps` gives them a tty and marks the
+# foreground the way it marks a real terminal's. Nothing here talks to iTerm:
+# the iTerm bundle the guard reads is a folder with an Info.plist, and the run
+# is dry, behind the osascript tripwire at the top of this file.
+python3 - "$WORK" "$REPO" >"$WORK/reply.txt" 2>&1 <<'PYEOF2'
+import json, os, plistlib, pty, signal, subprocess, sys, threading, time, urllib.error, urllib.request
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+base = os.path.join(work, "reply"); os.makedirs(base, exist_ok=True)
+sdir = os.path.join(base, "sessions"); os.makedirs(sdir, exist_ok=True)
+os.environ.update(RUBRICATOR_CLAUDE_SESSIONS=sdir, RUBRICATOR_DRY_LAUNCH="1",
+                  RUBRICATOR_CONFIG=os.path.join(base, "config.json"),
+                  RUBRICATOR_CLAUDE_HISTORY=os.path.join(base, "history.jsonl"),
+                  RUBRICATOR_CLAUDE_PROJECTS=os.path.join(base, "projects"))
+os.environ.pop("RUBRICATOR_ALLOW_LAUNCH", None)
+bindir = os.path.join(base, "bin"); os.makedirs(bindir, exist_ok=True)
+for n in ("claude", "zsh"):
+    os.symlink("/bin/sleep", os.path.join(bindir, n))
+def bundle(name, ident, shown):
+    d = os.path.join(base, "Applications", name)
+    os.makedirs(os.path.join(d, "Contents"), exist_ok=True)
+    with open(os.path.join(d, "Contents", "Info.plist"), "wb") as f:
+        plistlib.dump({"CFBundleIdentifier": ident, "CFBundleName": shown}, f)
+    return d
+ITERM = bundle("iTerm.app", "com.googlecode.iterm2", "iTerm2")
+TERMINAL = bundle("Terminal.app", "com.apple.Terminal", "Terminal")
+
+sys.path.insert(0, os.path.join(repo_root, "share"))
+import actions as A
+# nothing in this process may reach osascript: every call through the module
+# is looked at, and one that names osascript is written down and stopped
+scripted, real_run = [], subprocess.run
+def watched(argv, *a, **k):
+    if any("osascript" in str(x) for x in (argv if isinstance(argv, (list, tuple)) else [argv])):
+        scripted.append(list(argv)); raise RuntimeError("osascript reached")
+    return real_run(argv, *a, **k)
+A.subprocess.run = watched
+
+kids = []
+def in_pty(front_is_claude=True):
+    pid, fd = pty.fork()
+    if pid == 0:
+        if front_is_claude:
+            os.execv(os.path.join(bindir, "claude"), ["claude", "300"])
+        g = os.fork()
+        if g == 0:                                   # Claude, put out of the foreground
+            os.setpgid(0, 0)
+            os.execv(os.path.join(bindir, "claude"), ["claude", "300"])
+        os.write(1, ("%d\n" % g).encode())
+        os.execv(os.path.join(bindir, "zsh"), ["-zsh", "300"])
+    kids.append(pid)
+    if front_is_claude:
+        return pid
+    got = b""
+    while not got.endswith(b"\n"): got += os.read(fd, 64)
+    kids.append(int(got.split()[-1]))
+    return kids[-1]
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+pids = {}
+def session(n, pid, status):
+    pids[n] = pid
+    open(os.path.join(sdir, "%d.json" % pid), "w").write(json.dumps(
+        {"pid": pid, "sessionId": sid(n), "status": status, "name": "term-%d" % n, "cwd": base}))
+
+ended = subprocess.Popen([os.path.join(bindir, "claude"), "0"]); ended.wait()
+loose = subprocess.Popen([os.path.join(bindir, "claude"), "300"], stdin=subprocess.DEVNULL,
+                         start_new_session=True); kids.append(loose.pid)
+session(1, in_pty(), "idle")                   # waits for you, in the foreground
+session(2, in_pty(), "busy")                   # working
+session(3, in_pty(), "shell")                  # its own command still running
+session(4, in_pty(False), "idle")              # the shell holds the foreground
+session(5, ended.pid, "idle")                  # its process has ended
+session(6, loose.pid, "idle")                  # no terminal at all
+session(7, in_pty(), "waiting")                # asking you something
+time.sleep(0.4)
+
+checks = {}
+real_host = A._host
+A._host = lambda pid: ITERM
+def refused(n, writing=True, host=None):
+    if host is not None: A._host = lambda pid: host
+    try:
+        A.to_terminal(sid(n), "write" if writing else "show", "hello")
+        return None
+    except A.Refused as r:
+        return r.check, r.why
+    finally:
+        A._host = lambda pid: ITERM
+try:
+    checks["a session that waits for you passes the guard"] = refused(1) is None and refused(7) is None
+    r = refused(5)
+    checks["refused when its process has ended"] = r and r[0] == "running"
+    r = refused(2)
+    checks["refused while it works"] = r and r[0] == "status" and "working" in r[1]
+    r = refused(3)
+    checks["refused while a command of its own runs"] = r and r[0] == "status"
+    r = refused(4)
+    checks["refused when the shell holds the foreground, and says what does"] = (
+        r and r[0] == "foreground" and "zsh" in r[1])
+    r = refused(6)
+    checks["refused without a terminal"] = r and r[0] == "terminal"
+    r = refused(1, host=TERMINAL)
+    checks["only iTerm: another terminal is named"] = r and r[0] == "iterm" and "Terminal" in r[1]
+    r = refused(1, host="")
+    checks["only iTerm: no terminal application is said so"] = r and r[0] == "iterm"
+    checks["its tab can be brought forward while it works"] = refused(2, writing=False) is None
+    r = refused(6, writing=False)
+    checks["but not without a terminal"] = r and r[0] == "terminal"
+    try:
+        A.to_terminal(sid(99), "write", "hello"); r = None
+    except A.Refused as e:
+        r = e.check
+    checks["a session that is not running is refused"] = r == "running"
+
+    # the guard is read again right before the words go: a session that stops
+    # waiting between the two readings gets nothing
+    real_held, seen = A.held, []
+    def turning(s, writing=True):
+        seen.append(writing)
+        if len(seen) == 2: raise A.Refused("status", "it is working")
+        return real_held(s, writing)
+    A.held = turning
+    r = refused(1)
+    A.held = real_held
+    checks["the guard is read again just before sending"] = seen == [True, True] and r and r[0] == "status"
+
+    # the words, as data
+    words = 'it\'s "$(touch /tmp/x)" `id`; echo \\$HOME && /signoff\nnext line\r\n\tand\x03 \x1b[A end'
+    out = A.to_terminal(sid(1), "write", words)
+    argv = out.get("argv") or []
+    line = 'it\'s "$(touch /tmp/x)" `id`; echo \\$HOME && /signoff next line and   [A end'
+    checks["the words reach the script as one argv item, intact"] = (
+        argv[:2] == ["osascript", "-"] and argv[3:4] == ["write"] and argv[4:] == [line])
+    checks["on one line, with no control character left"] = (
+        argv[4:] and not any(ord(c) < 32 or 127 <= ord(c) < 160 for c in argv[4]))
+    tty = real_run(["ps", "-o", "tty=", "-p", str(pids[1])], capture_output=True, text=True).stdout.strip()
+    checks["the tab is found by Claude's own tty"] = argv[2] == "/dev/" + tty
+    checks["the script is the constant, and holds none of the words"] = (
+        out.get("script") == A.ITERM_SCRIPT and "touch" not in A.ITERM_SCRIPT
+        and "item 3 of argv" in A.ITERM_SCRIPT and out.get("app") == "iTerm2")
+    try:
+        A.to_terminal(sid(1), "write", "\n \r\n"); refused_text = None
+    except A.Refused as e:
+        refused_text = e.check
+    checks["a reply that is only line breaks is nothing to send"] = refused_text == "text"
+    out = A.to_terminal(sid(2), "show")
+    checks["bringing its tab forward sends no words"] = out.get("argv", [])[3:] == ["show"]
+
+    # the ancestors: the first .app above the process, read from one ps listing
+    table = ("  100     1 /Applications/iTerm.app/Contents/MacOS/iTerm2\n"
+             "  200   100 /Users/x/Library/Application Support/iTerm2/iTermServer-3.7.6\n"
+             "  300   200 /usr/bin/login\n  400   300 -zsh\n  500   400 claude\n")
+    real_ps = A._ps
+    A._ps = lambda *a: table if a[:1] == ("-A",) else real_ps(*a)
+    checks["the terminal is the first application above the process"] = (
+        real_host(500) == "/Applications/iTerm.app" and real_host(300) == "/Applications/iTerm.app")
+    table = "  300     1 /usr/sbin/sshd\n  400   300 -zsh\n  500   400 claude\n"
+    checks["and nothing when no application is above it"] = real_host(500) == ""
+    A._ps = real_ps
+
+    # the server: the gate first, then only an id and the words count
+    import workspace as W
+    repo = os.path.join(base, "repo"); os.makedirs(repo, exist_ok=True)
+    open(os.path.join(repo, "README.md"), "w").write("# reply\n")
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+    called = []
+    real_to = A.to_terminal
+    def counted(*a, **k):
+        called.append(a); return real_to(*a, **k)
+    A.to_terminal = counted
+    share = Path(repo_root) / "share"
+    srv = W.serve_workspace([repo], False, share, "", idle=10 ** 9)
+    def call(body):
+        r = urllib.request.Request(srv.base + "/act", data=json.dumps(body).encode(),
+                                   headers={"Content-Type": "application/json"})
+        try: return json.load(urllib.request.urlopen(r, timeout=30)), 200
+        except urllib.error.HTTPError as e: return json.load(e), e.code
+    try:
+        got, code = call({"verb": "reply", "id": sid(1), "text": "hello"})
+        checks["without the gate nothing is resolved or sent"] = code == 403 and not called
+        page = urllib.request.urlopen(srv.base + "/", timeout=20).read().decode("utf-8", "replace")
+        checks["and the page is told so"] = '"launch": 0' in page or '"launch":0' in page
+        os.environ["RUBRICATOR_ALLOW_LAUNCH"] = "1"
+        got, code = call({"verb": "reply", "id": sid(1), "text": "from the page",
+                          "tty": "ttys999", "pid": 1, "script": "do shell script \"x\""})
+        checks["with it, the server reads its own way there, whatever else the page sends"] = (
+            code == 200 and got.get("dry") is True and got["argv"][2] != "/dev/ttys999"
+            and got["argv"][4:] == ["from the page"] and got.get("script") == A.ITERM_SCRIPT)
+        got, code = call({"verb": "reply", "id": sid(2), "text": "hello"})
+        checks["a refusal comes back as one, with which check"] = code == 409 and got.get("refused") == "status"
+        got, code = call({"verb": "reply", "id": "../../etc", "text": "hello"})
+        checks["an id that is not a session id is refused"] = code == 400
+        got, code = call({"verb": "show-tab", "id": sid(1)})
+        checks["show-tab is the same door"] = code == 200 and got.get("argv", [])[3:] == ["show"]
+    finally:
+        os.environ.pop("RUBRICATOR_ALLOW_LAUNCH", None)
+        srv.stop.set()
+        try: srv.httpd.shutdown()
+        except Exception: pass
+    checks["the dry seam never reached osascript"] = scripted == []
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    for k in kids:
+        try: os.kill(k, signal.SIGTERM)
+        except Exception: pass
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF2
+if [ $? = 0 ]; then
+  ok "32 · a reply reaches Claude's own terminal only while Claude waits there, as data, behind the gate"
+else
+  no "32 · the reply into a running session's terminal is wrong" "$(grep '^XX' "$WORK/reply.txt" | tr '\n' ' ')$(tail -2 "$WORK/reply.txt")"
+fi
+
+# ── 33 · a session opens at its end, or on the match you came for ───────────
+# Where a session stands, and a running one's reply line, are at the foot of a
+# long view, below its files and its conversation. It opens there, once the
+# transcript has arrived and the pane is shown, and stays where it was put;
+# opened on a match it opens on the match, the first in what you said.
+# sessionSurface and landing are lifted from the shipped source, around a
+# stand-in for the DOM that records where it was asked to scroll.
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("function sessionSurface(sid, q)", "/* Where a session opens."),
+    sl("/* Where a session opens.", "/* ── a conversation, as a conversation"),
+]))' "$REPO/share/workspace.js" "$WORK/land.js"
+  { cat <<'JSEOF'
+var D = { sessions: {} }, RUN = {}, CAPS = { conversation: 1, launch: 1 };
+function can(c){ return !!CAPS[c]; }
+var Shell = { paint: function(){} };
+function grabCaret(){ return null; } function putCaret(){}
+function foldLong(){} function sesTitle(s){ return s; } function clip(s){ return s; }
+function sessionHTML(sid, convo){ return 'ABOUT' + (convo || '') + (RUN[sid] ? '<div class="sreply">' : ''); }
+function renderConvo(c){ return c.turns.map(function(t){ return '<div class="turn ' + t.who + '">'; }).join(''); }
+var pending = [];
+function api(path, body, cb){ pending.push(cb); }
+var timers = [];
+function setTimeout(fn){ timers.push(fn); }
+function flush(){ while (timers.length) timers.shift()(); }
+
+/* a stand-in for the DOM: the elements landing can ask for are made from the
+   markup the surface wrote, and each records where it was scrolled to */
+function Host(shown){
+  var h = { offsetHeight: shown ? 600 : 0, scrollTop: 0, scrollHeight: 5000, moved: [], html: '' };
+  var inner = { set innerHTML(v){ h.html = v; }, get innerHTML(){ return h.html; } };
+  h.querySelector = function(sel){ return /inner/.test(sel) && h.html !== null ? inner : null; };
+  Object.defineProperty(h, 'innerHTML', { set: function(v){ h.html = ''; } });
+  h.querySelectorAll = function(){
+    var out = [], re = /<div class="(turn [a-z]+|sreply)"/g, m, i = 0;
+    while ((m = re.exec(h.html))){
+      (function(name, k){
+        out.push({ name: name, scrollIntoView: function(o){ h.moved.push(name + '#' + k + ':' + o.block); h.scrollTop = 4000; } });
+      })(m[1], i++);
+    }
+    return out;
+  };
+  return h;
+}
+/* a find bar that has run: matches, each in what you said or not */
+var finders = [];
+function makeFind(S){
+  var F = { on: false, q: '', list: [], went: [], after: function(){
+    if (!F.on) return;
+    F.list = (S.conv ? S.conv.hits : []).map(function(you){
+      return { closest: function(sel){ return you && /turn\.you/.test(sel) ? {} : null; } };
+    });
+  }, go: function(i){ F.went.push(i); }, open: function(){}, hint: function(){ return ''; } };
+  finders.push(F);
+  return F;
+}
+JSEOF
+    cat "$WORK/land.js"
+    cat <<'JSEOF'
+
+var fail = [];
+function want(ok, why){ if (!ok) fail.push(why); }
+var conv = { turns: [{ who: 'you' }, { who: 'claude' }, { who: 'you' }, { who: 'claude' }], hits: [] };
+
+/* a running session, no match: it opens at its foot, where the reply line is */
+RUN = { r1: { pid: 1, transcript: true } }; D.sessions = {};
+var S = sessionSurface('r1', ''), host = Host(true);
+S.render(host); flush();
+want(host.moved.length === 0, 'it scrolled before the conversation arrived: ' + host.moved);
+pending.shift()(conv);
+want(host.moved.join() === 'sreply#4:end', 'it did not open at its foot: ' + host.moved);
+/* later, the place is yours */
+host.scrollTop = 1234; S.refresh(host); S.focus();
+want(host.moved.length === 1 && host.scrollTop === 1234, 'a refresh or a second look moved it: ' + host.moved);
+
+/* opened on a match: the first match in what you said, and not the end */
+RUN = {}; D.sessions = { m1: { live: 1 } }; finders = [];
+S = sessionSurface('m1', 'needle'); host = Host(true);
+S.render(host); flush();
+pending.shift()({ turns: conv.turns, hits: [false, false, true, true] });
+var F = finders[0];
+want(F.went.join() === '2' && host.moved.length === 0, 'a match did not keep its place: went ' +
+     F.went + ', moved ' + host.moved);
+
+/* a pane not yet shown is placed when it is first shown, and once */
+D.sessions = { h1: { live: 1 } }; finders = [];
+S = sessionSurface('h1', ''); host = Host(false);
+S.render(host); flush(); pending.shift()(conv);
+want(host.moved.length === 0, 'a hidden pane was scrolled');
+host.offsetHeight = 600; S.focus(); S.focus();
+want(host.moved.join() === 'turn claude#3:end', 'shown, it did not open at its last turn, once: ' + host.moved);
+
+/* nothing to read: an archived session is whole at once, and opens at its end */
+D.sessions = { a1: { live: 0 } }; finders = [];
+S = sessionSurface('a1', ''); host = Host(true);
+S.render(host); flush();
+want(pending.length === 0 && host.scrollTop === host.scrollHeight, 'an archived session did not open at its end');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/land-run.js"
+  res=$(node "$WORK/land-run.js" 2>&1)
+  case "$res" in ok*) ok "33 · a session opens at its end, a match keeps its place, and the place is yours after" ;;
+                 *)   no "33 · a session does not open where it should" "$res" ;; esac
+else
+  skip "33 · where a session opens" "no node"
+fi
+
 # ── 34 · nothing in this run scripted another application ───────────────────
 # The tripwire at the top of this file stands where `osascript` would be found.
-# A test that reached it — the hook closing a window it never opened, say —
-# wrote its arguments down, and that is a failure whether or not the test that
-# did it noticed.
+# A test that reached it — the hook closing a window it never opened, a reply
+# that missed the dry seam — wrote its arguments down, and that is a failure
+# whether or not the test that did it noticed.
 if [ ! -s "$WORK/osascript.log" ]; then
   ok "34 · nothing in the suite reached osascript"
 else

@@ -208,7 +208,8 @@ so it is there as soon as the window is and the history fills in under it. It is
 when the window comes back to the front and whenever a session starts, ends or changes state.
 Its heading counts the sessions that wait on you and opens Waiting on them. A session in the
 group is not listed again below it, and opens like any other row — without a resume, since it
-is still running.
+is still running. With launching allowed, a row offers two more things on hover: *reply*,
+which opens it on its reply line, and *go to its tab*.
 
 Indexing it reads every conversation on the machine, not only this project's, so it is off
 until you ask: `md --sessions` for one run, or the switch the empty Sessions list offers,
@@ -237,9 +238,22 @@ interruptions and pasted images are marked where they happened. Anything longer 
 screenful folds to a fixed height and says how many lines it is holding back; opening one
 grows it over a duration set by how far it has to travel.
 
+Not everything a transcript files under your name is yours. A message from another session,
+an agent's report, a background task's notice and the harness's own notes — a reminder, a
+local command and its output, the summary a compacted session was continued from — arrive
+there as user records too. Each is drawn between the two halves, under a line that says what
+it is and whom it is from: another session by the name it sent under, an agent by its kind.
+None is on your side, none counts as one of your prompts, and none names a session or answers
+a search for something you said.
+
+A session opens at its end, where the latest turns are; opened from a search hit or a prompt
+you jumped to, it opens on that match instead, and wherever it opened, it stays where you
+leave it. The transcript is read from its end, so a session of a gigabyte opens on its latest
+800 turns in a second or two and says that earlier ones are not shown.
+
 `⌘F` searches the session. Every match is counted in each of the parts a session has — what
-you said, what Claude said, the files it touched, the tools it ran, and the session's own
-details — and the chips narrow the search to any of them, so *was it me or Claude who said
+you said, what Claude said, what reached it from others, the files it touched, the tools it
+ran, and the session's own details — and the chips narrow the search to any of them, so *was it me or Claude who said
 that* and *which file was it* are separate questions again. The counts stay true for the
 parts you are not searching, because *nothing here* is only worth reading next to *four over
 there*. `⏎` and `⇧⏎` step through; *only matches* thins the surface to what matched; and a
@@ -249,9 +263,15 @@ A session is **resumable** while its transcript is on disk and **archived** once
 Prompts outlive transcripts, so most of your history can be read and searched but not picked
 up again; the browser says which is which rather than offering a resume command that would
 fail. For the live ones it hands you `cd <project> && claude -r <id>`, ready to paste. A
-session still **running** in a terminal is answered there: the window offers it no resume,
-because a second process on the same session would write the same transcript, and the
-server refuses one whatever the page asks. Forking it stays open.
+session still **running** in a terminal is answered in that terminal, and from the window too:
+its view ends on a reply line whose words are typed into its own iTerm tab, as if you had
+typed them there, so a slash command runs and the turn is yours. Beside the line are
+*/signoff*, */adjust …*, which starts the line for you, and *go to its tab*. A reply is one
+line, line breaks becoming spaces, and it is typed only while Claude waits for you in the
+foreground of that terminal — otherwise nothing is typed and the line says why. The window
+offers a running session no resume, because a second process on the same session would write
+the same transcript, and the server refuses one whatever the page asks. Forking it stays
+open.
 
 **Notes** collects your marks across every document — every open Question, everything marked
 Cut — because what you are hunting is often your own reaction, not the text. Its **copy**
@@ -275,8 +295,9 @@ on you, each with what it said last, rendered, its links opening outside the win
 are grouped by what they wait on — *asking you* (a permission or a question is open in its
 terminal), *your turn*, and *waiting on its own command* (its turn ended with a background
 command still running, so it will likely carry on by itself) — newest wait first, scoped to
-this repository and its worktrees, with *everywhere* beside it. `md --waiting` opens a window
-on it.
+this repository and its worktrees, with *everywhere* beside it. Each can be answered where it
+stands: *reply* opens the same reply line under what it said, and *go to its tab* brings its
+terminal to the front. `md --waiting` opens a window on it.
 
 It and the Sessions navigator's Open now are one reading, made each time you look and kept
 nowhere: Claude Code's own file per running session in `~/.claude/sessions`, which says
@@ -418,11 +439,28 @@ Off by default. With `md --allow-launch` — or `{"allow_launch": true}` in
   and resume only while the session is not running in a terminal.
 - **Reveal** a file in Finder, or open it in your editor — any file a session touched, not
   only the documents this window can read.
+- **Reply** to a session running in iTerm, typed into its own tab, or bring that tab to the
+  front.
 
 Sessions open in **iTerm** if you have it, otherwise Terminal — or whichever terminal you
 pick under Settings. The launcher is a `.command` file handed to that application through
-LaunchServices, which needs no Automation permission, so macOS never interrupts with a
-dialog.
+LaunchServices, which needs no Automation permission, so starting a session never brings up
+a dialog.
+
+A reply cannot go that way, because it goes into a session that is already open. The server
+reads Claude Code's own file for the session, asks `ps` for the terminal its `claude` process
+holds, learns from the process's ancestors and that application's own `Info.plist` that it is
+iTerm, and asks iTerm, over AppleScript, for the tab whose terminal that is. Typed into a tab
+whose Claude has exited, a reply would be a shell command, so before anything is typed — and
+again immediately before — three things must hold: the `claude` process lives, its status
+says it waits for you (`idle`, or `waiting` with a question open — not working, and not
+running a command of its own), and it holds its terminal's foreground. If one does not,
+nothing is typed and the window says which. A session in any other terminal is told that
+replies are iTerm only.
+
+Scripting iTerm is the one thing here that needs macOS's Automation permission: the first
+reply makes macOS ask, once, whether rubricator may control iTerm, and System Settings →
+Privacy & Security → Automation keeps the answer.
 
 The gate exists because a markdown document is untrusted input: it comes from a repository
 you cloned, a plan an agent wrote, a file someone sent you, and markdown carries raw HTML.
@@ -437,9 +475,12 @@ What crosses the wire is a verb and an id. The page never sends a path and never
 command: every path is resolved on the server against the index it already holds, and every
 argument goes into `argv` directly. A file a session changed is named by that session's id
 and its position in the list the server holds for it, so even the actions that reach past the
-document index reach only what the index already knew about. The one thing the page may hand over is the prompt text
-for a new session, written to a file and read back as a single argument, so a prompt
-containing `$(…)`, backticks or `;` arrives as literal text. The server is loopback-only,
+document index reach only what the index already knew about. The page may hand over text in
+two places, and both are data: the prompt for a new session, written to a file and read back
+as a single argument, and a reply to a running one, which reaches the AppleScript that types
+it as an item of its `argv` — the script itself is a constant. Text containing `$(…)`,
+backticks, quotes or `;` arrives as literal text either way, and which session, process,
+terminal or tab a reply goes to is never the page's to say. The server is loopback-only,
 token-gated per run, refuses anything cross-site, and exits when the window closes.
 
 ## What it writes
@@ -502,13 +543,13 @@ share/workspace.*   the repo index, and what each surface looks like
 share/serve.py      the local server: ephemeral port, per-run token, idle exit
 share/actions.py    the verb allowlist — the only place the page can cause anything
 share/extract.py    PDF and Word into text, cached on mtime and size
-share/transcript.py one conversation, parsed on demand
+share/transcript.py one conversation, read from its end on demand
 share/waiting.py    which sessions are running, and which wait on you
 share/hook.py       blocking review server for --review and --hook
 .claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook
 ```
 
-Twenty files, a little over eleven thousand lines, plus five vendored render libraries. No build
+Twenty-one files, a little under twelve thousand lines, plus five vendored render libraries. No build
 step, no runtime dependency beyond what macOS ships. `./tests/smoke.sh` drives the whole
 thing from a throwaway install; CI runs it on every push.
 
@@ -558,7 +599,9 @@ codebase small enough to read in an evening and change the parts you don't like.
   and there is no server, account or locking behind it
 - a conversation can be read but not annotated: the review layer binds to a document, and a
   chat bubble is not one
-- continuing a session from the window is designed but unbuilt
+- a session running in iTerm is answered from the window by typing into its tab; one that is
+  not running cannot be continued in the window — that design, in
+  [`docs/continue-plan.md`](docs/continue-plan.md), is unbuilt
 - a **multi-root workspace is read-only past the first repository** and cannot be reopened —
   deliberately unfinished, measured against how it is actually used
 - the Claude Code hook is Claude Code specific; the clipboard and `--review` paths are not

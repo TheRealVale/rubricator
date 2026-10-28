@@ -23,7 +23,7 @@ Effort: **S** an evening or less · **M** a day or two · **L** about a week
 | [`watch-plan.md`](watch-plan.md) | refresh when a file changes | shipped as E1, over SSE rather than polling |
 | [`conversations-plan.md`](conversations-plan.md) | reading a session | G1 shipped · G2–G3 partly · see its §7b |
 | [`documents-plan.md`](documents-plan.md) | PDF and Word | H1–H4 shipped · H5–H7 open |
-| [`continue-plan.md`](continue-plan.md) | adding a turn to a session from the window | agreed in shape, unbuilt. Two rows of its §1 table were confounded — O3 |
+| [`continue-plan.md`](continue-plan.md) | adding a turn to a session from the window | agreed in shape, unbuilt for a session that is not running; a running one is answered in its own terminal — W7. Two rows of its §1 table were confounded — O3 |
 | [`install-plan.md`](install-plan.md) | the documented install, and how CI keeps it honest — phase K | **shipped 2026-08-26**; its own note records what K5 could not gate on |
 | [`retention-plan.md`](retention-plan.md) | what the tool keeps, and what it must not — phase N | **shipped 2026-08-26** |
 | [`signals-plan.md`](signals-plan.md) | what the surfaces claim and what they can support — phase L | **shipped 2026-08-26**; §3's scoring formula did not work and the correction is recorded in it |
@@ -275,6 +275,12 @@ Both extractors ship with macOS:
 See [`continue-plan.md`](continue-plan.md). Agreed: the window is where you
 think, the terminal is where you work, and they are the same session — a turn
 taken here appends to the same transcript, verified.
+
+This is for a session that is not running. One still running in a terminal
+already has its writer, the `claude` process there, and `claude -p --resume`
+beside it would be a second process appending to the same transcript; it is
+answered by typing into its own terminal instead, which keeps the writer one
+and the turn yours (W7).
 
 - [ ] **J1 · `converse.py`.** One long-lived `claude -p --resume --input-format
       stream-json` per session, a lock file so two windows cannot drive one, and
@@ -1520,6 +1526,54 @@ measurements are in `share/waiting.py`'s header.
       and order, says which empty it is, and a running session opens before it
       is indexed; the event stream tells a change of state and nothing without
       consent — test 30.
+- [x] **W7 · A reply, typed into its own terminal.** A running session's view
+      ends on a one-line reply, with */signoff*, */adjust …* (which starts the
+      line) and *go to its tab*; a Waiting card and an Open now row offer *reply*
+      and *go to its tab* too. The page sends a verb, a session id and the words;
+      the server reads the pid from Claude Code's session file, the tty from
+      `ps`, the terminal from the process's ancestors and that application's
+      `Info.plist` (iTerm is `com.googlecode.iterm2`, named *iTerm2* by its
+      bundle), and the tab from iTerm's dictionary, where every session has a
+      `tty`. `write text` there is your typing: a slash command runs and the
+      turn is yours, with one writer on the transcript. The guard, read before
+      and again just before: the `claude` process lives, its status is `idle` or
+      `waiting`, and it holds its terminal's foreground (`ps -t`, the `+`) —
+      otherwise nothing is typed and the answer names the check. The words reach
+      `osascript -` as an `argv` item of a constant script, on one line, with
+      every control character a space; they are written without a line ending
+      and followed by a carriage return of their own. Behind `allow_launch`; the
+      first reply asks macOS's Automation permission for iTerm, once, and
+      `RUBRICATOR_DRY_LAUNCH` stops short of osascript and returns what would
+      have run. Tested on pseudo-terminals, never on iTerm: whether `write text`
+      followed by a carriage return submits in Claude Code, and the wording of
+      the permission dialog, are for the first real reply to show.
+      *Done when:* each failing check refuses and says which; the words reach the
+      script only as an argv item, quotes and `$(…)` intact; nothing is resolved
+      without the gate; the dry seam never reaches osascript — test 32, and test
+      34 finds no call to osascript anywhere in the suite.
+- [x] **W8 · What is not yours is not drawn as yours.** A transcript files
+      another session's message (`<cross-session-message from-name=…>`), an
+      agent's report (`<agent-message>`, *[Subagent hand-back]*), a background
+      task's notice (`<task-notification>`), and the harness's reminders, local
+      commands and compaction summaries as user records, and the first three
+      carry `promptSource: "system"`, so whether the field is there does not say
+      whether you typed it. Each is a note of its kind, drawn between the halves
+      and named by its sender, with a find scope of its own; none counts as a
+      prompt of yours. None is in `history.jsonl` (zero of each in this
+      machine's), so none names a session, and the index and the running
+      sessions' names skip one should a build write it there.
+      *Done when:* only typed records are your turns, each kind is recognised by
+      its fields and by its words alone, and a history line in one of these
+      shapes names nothing — test 31.
+- [x] **W9 · A session opens at its end.** Where a session stands, and a
+      running one's reply line, are at the foot of a long view, below its files
+      and its conversation. It opens there once the transcript has arrived and
+      the pane is shown, or on the match it was opened for — the first in what
+      you said — and keeps the place after. The transcript is read backwards for
+      its latest 800 turns: the last 686 MB of this machine's 1.4 GB one, in
+      1.6 s; read from the start, its first 800 would be all it held.
+      *Done when:* it lands at its end, on a match, or when first shown, once —
+      test 33; a long transcript keeps its latest turns — test 31.
 
 ---
 
@@ -1692,8 +1746,10 @@ What is deliberately still missing, and why:
   path.
 - **No agent loop in the window.** A session can be read here and continued
   here (J1–J4), but only for thinking — the tools that change your repo stay in
-  the terminal. See [`continue-plan.md`](continue-plan.md) for why that is a
-  decision rather than a gap.
+  the terminal. A session running in iTerm is answered from here by typing into
+  its own tab (W7), which is your keyboard, not a loop. See
+  [`continue-plan.md`](continue-plan.md) for why that is a decision rather than
+  a gap.
 - **A conversation is not annotatable.** The review layer binds to a document
   and a chat bubble is not one; §7b of the conversations plan says what it would
   take.

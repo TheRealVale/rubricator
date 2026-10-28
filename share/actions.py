@@ -10,8 +10,12 @@ a new session, and that is written to a file and read back as a single argument.
 
 Off unless asked for: `md --allow-launch`, or `{"allow_launch": true}` in
 ~/.config/rubricator/config.json. A fresh install can start nothing.
+
+A session running in a terminal is answered in that terminal: a reply is typed
+into its own iTerm tab, the way you would type it, and only while Claude waits
+there for input — see "a running session's own terminal" below.
 """
-import json, os, re, shlex, subprocess, time
+import json, os, plistlib, re, shlex, subprocess, time
 from pathlib import Path
 
 HOME    = Path.home()
@@ -336,3 +340,214 @@ def edit(path):
         subprocess.run(["open", "-t", str(path)], check=True, timeout=15,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"ok": True}
+
+
+# ── a running session's own terminal ─────────────────────────────────────────
+# A session running in a terminal already has a writer: the `claude` process in
+# that terminal. Resuming it from here would be a second process on the same
+# transcript (the guard on `resume` refuses that), so a reply goes the other way
+# in: it is typed into the session's own tab, exactly as you would type it. A
+# slash command runs, the words count as yours, and the one writer stays one.
+#
+# The way there is read, never taken from the page: Claude Code's file for the
+# session gives its pid (waiting.session_file); `ps` gives that process's tty;
+# the process's ancestors give the terminal application it runs under, and that
+# application's own Info.plist says whether it is iTerm. iTerm's AppleScript
+# dictionary has every session's `tty`, so the session to type into is the one
+# whose tty is Claude's. Only iTerm, whose dictionary this is written against;
+# a session in any other terminal is told so, with that terminal's name.
+#
+# What makes typing safe is what is typed into. A terminal whose Claude has
+# exited is a shell, and a reply typed there is a shell command. So before
+# anything is sent, and again immediately before it is, three things must hold,
+# and if one does not, nothing is sent and the answer says which:
+#
+#   - the session's `claude` process lives;
+#   - its status says it waits for input — `idle`, or `waiting` with a question
+#     open — not `busy`, and not `shell`, whose turn ended with a command of its
+#     own still running;
+#   - `claude` is in its terminal's foreground: `ps` marks the foreground
+#     process group with `+`, and a shell that took the terminal back after
+#     Claude exited, or was suspended, holds the `+` instead.
+#
+# The script is a constant, and what it is given travels as `argv` to its `run`
+# handler, never inside its text: `osascript -` reads the script from stdin and
+# hands every argument after it to `on run argv` as a string. The reply is one
+# line — line breaks become spaces, and every other control character, which a
+# terminal would read as a key (^C, ^D, escape), becomes a space too. It is
+# written without a line ending and followed, a moment later, by a carriage
+# return of its own: the Return key, which is what sends a prompt in Claude
+# Code, where a line feed may be taken for a line break inside it.
+#
+# The first reply makes macOS ask, once, whether rubricator may control iTerm
+# (System Settings → Privacy & Security → Automation keeps the answer). Until it
+# is given, osascript waits on the dialog, so the call allows two minutes.
+# RUBRICATOR_DRY_LAUNCH stops short of osascript and says what would have run.
+ITERM_ID = "com.googlecode.iterm2"
+MAX_REPLY = 8000
+WAITS_FOR_YOU = {"idle", "waiting"}
+TTY = re.compile(r"^tty[a-z]*\d{1,5}$")
+
+ITERM_SCRIPT = '''on run argv
+  set theTTY to item 1 of argv
+  set theVerb to item 2 of argv
+  set theText to ""
+  if (count of argv) > 2 then set theText to item 3 of argv
+  tell application id "com.googlecode.iterm2"
+    repeat with aWindow in windows
+      repeat with aTab in tabs of aWindow
+        repeat with aSession in sessions of aTab
+          if tty of aSession is theTTY then
+            if theVerb is "write" then
+              tell aSession to write text theText newline no
+              delay 0.15
+              tell aSession to write text (character id 13) newline no
+              return "sent"
+            end if
+            tell aSession to select
+            tell aTab to select
+            tell aWindow to select
+            activate
+            return "shown"
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+  return "none"
+end run
+'''
+
+
+class Refused(Exception):
+    """Why nothing was sent: which check failed, in words for the page."""
+    def __init__(self, check, why):
+        super().__init__(why)
+        self.check, self.why = check, why
+
+
+def one_line(text):
+    """A reply as the one line typed: line breaks are spaces, every other
+    control character is a space, and nothing else changes."""
+    s = re.sub(r"[ \t]*(?:\r\n|[\r\n\u0085\u2028\u2029])+[ \t]*", " ", str(text or ""))
+    return re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", s).strip()
+
+
+def _ps(*args):
+    try:
+        return subprocess.run(["ps"] + list(args), capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return ""
+
+
+def held(sid, writing=True):
+    """The guard, read now: the running session with this id, its pid, its tty
+    and its status, or Refused saying which check failed. `writing` adds the
+    two checks that only typing needs; bringing its tab forward needs a live
+    process with a terminal and nothing more."""
+    import waiting as _W
+    d = _W.session_file(sid)
+    if not d:
+        raise Refused("running", "it is not running: no live Claude process has that session")
+    pid = d["pid"]
+    row = _ps("-o", "tty=,stat=,comm=", "-p", str(pid)).split(None, 2)
+    if len(row) < 3 or os.path.basename(row[2].strip()) != "claude":
+        raise Refused("running", "its Claude process (pid %d) has ended" % pid)
+    tty, stat = row[0], row[1]
+    if not TTY.match(tty):
+        raise Refused("terminal", "it has no terminal to type into")
+    status = d.get("status") or ""
+    if writing:
+        if status not in WAITS_FOR_YOU:
+            raise Refused("status", {"busy": "it is working — a reply waits until its turn is over",
+                                     "shell": "its turn ended with a command of its own still running, "
+                                              "so it will likely carry on by itself"}
+                          .get(status, "its status is %r, not one that waits for you" % status))
+        front = [ln.split(None, 2) for ln in _ps("-t", tty, "-o", "pid=,stat=,comm=").splitlines()]
+        front = [r for r in front if len(r) == 3 and "+" in r[1]]
+        if not any(r[0] == str(pid) for r in front) or "+" not in stat:
+            who = ", ".join(sorted({os.path.basename(r[2].strip()).lstrip("-") for r in front})) or "nothing"
+            raise Refused("foreground", "Claude is not in its terminal's foreground (%s is), "
+                                        "so what is typed would not reach it" % who)
+    return {"sid": sid, "pid": pid, "tty": tty, "status": status, "name": d.get("name") or ""}
+
+
+def _host(pid):
+    """The application bundle a process runs under: the first of its ancestors
+    whose program lives inside an .app — for a session in iTerm, iTerm itself,
+    above its server, `login` and the shell."""
+    table = {}
+    for ln in _ps("-A", "-o", "pid=,ppid=,comm=").splitlines():
+        parts = ln.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = (int(parts[1]), parts[2].strip())
+    seen, cur = set(), table.get(pid, (0, ""))[0]
+    while cur > 1 and cur not in seen:
+        seen.add(cur)
+        ppid, comm = table.get(cur, (0, ""))
+        m = re.match(r"^(/.+?\.app)/Contents/MacOS/", comm)
+        if m:
+            return m.group(1)
+        cur = ppid
+    return ""
+
+
+def _bundle(path):
+    """What an application's Info.plist says it is, read from disk."""
+    try:
+        with open(os.path.join(path, "Contents", "Info.plist"), "rb") as f:
+            info = plistlib.load(f)
+        return info.get("CFBundleIdentifier") or "", info.get("CFBundleName") or os.path.basename(path)
+    except Exception:
+        return "", os.path.basename(path)
+
+
+def iterm_of(pid):
+    """The iTerm a session runs under, by name as its bundle gives it, or
+    Refused naming the terminal it runs under instead."""
+    app = _host(pid)
+    ident, name = _bundle(app) if app else ("", "")
+    if ident != ITERM_ID:
+        raise Refused("iterm", "only iTerm: this session runs in " +
+                      (name.replace(".app", "") if app else "no terminal application this can tell — tmux, ssh or the like"))
+    return name                                    # "iTerm2", from CFBundleName
+
+
+def to_terminal(sid, verb, text=""):
+    """Type a reply into a running session's own tab (`write`), or bring that
+    tab forward (`show`). The page sends the session id and, for a reply, the
+    words; everything else is read here."""
+    if verb not in ("write", "show"):
+        raise ValueError("unknown verb")
+    writing = verb == "write"
+    line = one_line(text) if writing else ""
+    if writing and not line:
+        raise Refused("text", "there is nothing to send")
+    if writing and len(line) > MAX_REPLY:
+        raise Refused("text", "a reply is one line of at most %d characters" % MAX_REPLY)
+    g = held(sid, writing)
+    app = iterm_of(g["pid"])
+    if writing:
+        again = held(sid, True)                    # read again, as late as it can be
+        if (again["pid"], again["tty"]) != (g["pid"], g["tty"]):
+            raise Refused("running", "the session changed terminals while this was sent")
+    argv = ["osascript", "-", "/dev/" + g["tty"], verb] + ([line] if writing else [])
+    out = {"ok": True, "session": sid, "name": g["name"], "tty": g["tty"], "app": app,
+           "verb": verb, "text": line}
+    if _dry():                                     # resolved and checked; nothing is scripted
+        return dict(out, dry=True, argv=argv, script=ITERM_SCRIPT)
+    try:
+        r = subprocess.run(argv, input=ITERM_SCRIPT, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise Refused("iterm", "iTerm did not answer within two minutes — if macOS asked whether "
+                               "rubricator may control it, answer and send again")
+    said = (r.stdout or "").strip()
+    if r.returncode != 0:
+        err = (r.stderr or "").strip()
+        if "-1743" in err or "not allowed" in err.lower() or "not authorized" in err.lower():
+            raise Refused("iterm", "macOS does not let rubricator control iTerm — allow it under "
+                                   "System Settings → Privacy & Security → Automation")
+        raise Refused("iterm", "iTerm refused: " + (err[:200] or "no reason given"))
+    if said == "none":
+        raise Refused("iterm", "no iTerm tab has its terminal (%s)" % g["tty"])
+    return out
