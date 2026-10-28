@@ -156,7 +156,8 @@ keeps its own tabs and history. `⌘\` splits the window; ⌘-click opens in the
 at the top of each pane rather than along the bottom of the window, because with two panes a
 single strip cannot say which pane a tab belongs to. A tab owns its DOM for as long as it
 lives, so leaving a document and coming back keeps its marks, its diagrams and where you
-were reading.
+were reading. A link in a document to another one the workspace holds opens that one in a
+tab of its own, at the heading its `#fragment` names — ⌘-click in the split, as anywhere.
 
 The **tray follows focus**: one tray showing whichever document you are looking at, named in
 its header, rather than one per pane.

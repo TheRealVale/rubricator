@@ -1556,8 +1556,8 @@ function listSurface(kind){
    The reader, the review layer and the outline all came for free the moment
    this stopped being a full-screen overlay and became one surface among
    others: it renders into its own div and keeps it. */
-function docSurface(rel, q, jump){
-  var S = { rel:rel, q:q || '', jump:jump || 0, out:null, premapped:false, host:null };
+function docSurface(rel, q, jump, at){
+  var S = { rel:rel, q:q || '', jump:jump || 0, at:at || '', out:null, premapped:false, host:null };
 
   S.render = function(host){
     S.host = host;
@@ -1613,9 +1613,10 @@ function docSurface(rel, q, jump){
     setTimeout(Shell.paint, 0);            // the tab shows the note count
 
     var target = S.q ? S.docEl.querySelector('mark.hit')
-                     : (S.jump ? blockAtLine(S.docEl, S.jump) : null);
-    if (target) setTimeout(function(){ target.scrollIntoView({ block:'center' }); }, 60);
-    S.jump = 0;
+                     : (S.jump ? blockAtLine(S.docEl, S.jump) : headingAt(S.docEl, S.at));
+    var how = S.q || S.jump ? 'center' : 'start';
+    if (target) setTimeout(function(){ target.scrollIntoView({ block:how }); }, 60);
+    S.jump = 0; S.at = '';
   };
 
   /* the tray follows focus: whichever document you are looking at is the one
@@ -1623,11 +1624,12 @@ function docSurface(rel, q, jump){
   S.focus = function(){ mountReview(S); };
   S.refresh = function(){ if (S.headEl){ var d = docBy(rel); if (d) S.headEl.textContent = d.rel; } };
   S.reload = function(){ if (S.host) S.paint(); };
-  S.goto = function(line, q){
+  S.goto = function(line, q, at){
     S.q = q || '';
     if (q && S.docEl){ markHits(S.docEl, q); }
-    var t = line ? blockAtLine(S.docEl, line) : (q ? S.docEl.querySelector('mark.hit') : null);
-    if (t) t.scrollIntoView({ block:'center' });
+    var t = line ? blockAtLine(S.docEl, line)
+                 : (q ? S.docEl.querySelector('mark.hit') : headingAt(S.docEl, at));
+    if (t) t.scrollIntoView({ block: line || q ? 'center' : 'start' });
   };
   S.label = function(){
     var d = docBy(rel), n = d ? noteCount(d) : 0;
@@ -1659,6 +1661,33 @@ function blockAtLine(root, line){
     if (+el.dataset.lineStart <= line && line <= +(el.dataset.lineEnd || el.dataset.lineStart)) out = el;
   });
   return out;
+}
+/* the heading a link's #fragment names. The renderer makes ids GitHub's way
+   but for folding a run of spaces or hyphens into one, so a fragment written
+   for GitHub — `#guides--the-look`, from "Guides — the look" — finds its
+   heading too */
+function headingAt(root, id){
+  if (!root || !id) return null;
+  var want = [id, id.toLowerCase().replace(/-+/g, '-')];
+  return [].filter.call(root.querySelectorAll('h1,h2,h3,h4,h5,h6'), function(h){
+    return want.indexOf(h.id) >= 0;
+  })[0] || null;
+}
+
+/* ── a link from one document to another ─────────────────────────────────
+   The renderer resolves a document's links against its own folder, into
+   file:// addresses the window cannot follow: served, a local page may not
+   open a file, and a static page would leave the workspace for a file the
+   browser shows as text. A link to a document the workspace holds opens it
+   in a tab, as its row in the navigator would, at the heading its #fragment
+   names. Any other link is left to the browser. */
+function docLink(a){
+  var u;
+  try { u = new URL(a.href); } catch(e){ return null; }
+  if (u.protocol !== 'file:') return null;
+  var path = decodeURIComponent(u.pathname);
+  return { path: path, at: decodeURIComponent(u.hash.slice(1)),
+           doc: D.docs.filter(function(x){ return x.abs === path; })[0] || null };
 }
 
 /* the review layer is one chrome for many documents — it is re-pointed, never
@@ -3108,10 +3137,11 @@ function openDoc(rel, opts){
   var d = docBy(rel);
   if (!d) return null;
   var t = Shell.open({ kind:'doc', id:rel, title:rel.split('/').pop(), tip:rel,
-                       q:opts.q || '', jump:opts.jump || 0 },
+                       q:opts.q || '', jump:opts.jump || 0, at:opts.at || '' },
                      opts.where || 'here');
   /* already open: re-point it at what you asked for rather than opening a copy */
-  if (t && t.surf.goto && (opts.q || opts.jump) && t.surf.out) t.surf.goto(opts.jump, opts.q);
+  if (t && t.surf.goto && (opts.q || opts.jump || opts.at) && t.surf.out)
+    t.surf.goto(opts.jump, opts.q, opts.at);
   return t;
 }
 function openSession(sid, opts){
@@ -3138,7 +3168,7 @@ function specFor(kind, id){
   return null;
 }
 function makeSurface(spec){
-  if (spec.kind === 'doc') return docSurface(spec.id, spec.q, spec.jump);
+  if (spec.kind === 'doc') return docSurface(spec.id, spec.q, spec.jump, spec.at);
   if (spec.kind === 'session') return sessionSurface(spec.id, spec.q);
   return listSurface(spec.kind);
 }
@@ -3461,6 +3491,15 @@ document.addEventListener('click', function(e){
     return toast(cmd.dataset.copyNote || 'copied — paste it into a terminal'); }
 
   var where = (e.metaKey || e.ctrlKey) ? 'split' : 'here';
+  var ln = e.target.closest('article.md a[href]'), to = ln && docLink(ln);
+  if (to && to.doc){
+    e.preventDefault();
+    return openDoc(to.doc.rel, { where: where, at: to.at });
+  }
+  if (to && /\.(md|markdown)$/i.test(to.path)){
+    e.preventDefault();
+    return toast(to.path.replace(D.root + '/', '') + ' is not in this workspace');
+  }
   var ses = e.target.closest('[data-ses]');
   if (ses) return openSession(ses.dataset.ses, { q: ses.dataset.q || '', where: where });
 

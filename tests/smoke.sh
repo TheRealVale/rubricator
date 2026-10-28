@@ -39,7 +39,7 @@ echo "rubricator smoke tests"
 # A run of this suite happens on a desk where terminals hold live sessions, and
 # one AppleScript that reached them would type into one or switch its tabs. So
 # `osascript` on the PATH is a tripwire: it scripts nothing, writes down that it
-# was called, and fails. Test 34 reads what it wrote, which has to be nothing.
+# was called, and fails. Test 35 reads what it wrote, which has to be nothing.
 TRIP="$WORK/tripwire"; mkdir -p "$TRIP"
 printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s"\nexit 1\n' "$WORK/osascript.log" > "$TRIP/osascript"
 chmod +x "$TRIP/osascript"
@@ -2402,15 +2402,86 @@ else
   skip "33 · where a session opens" "no node"
 fi
 
-# ── 34 · nothing in this run scripted another application ───────────────────
+# ── 34 · a link to another document opens it in a tab ──────────────────────
+# The renderer resolves a document's links into file:// addresses, which the
+# window cannot follow. A click on one that names a document of the workspace
+# opens that document instead, at the heading its fragment names, ⌘ in the
+# split; one to markdown the workspace does not hold says so; every other link
+# is the browser's. The click's branch, docLink and headingAt are lifted from
+# the shipped source.
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("/* the heading a link", "/* the review layer is one chrome"),
+    "function click(e, where){",
+    sl("  var ln = e.target.closest(\"article.md a[href]\")".replace(chr(34), chr(39)),
+       "  var ses = e.target.closest("),
+    "}",
+]))' "$REPO/share/workspace.js" "$WORK/links.js"
+  { cat <<'JSEOF'
+var D = { root: '/r', docs: [{ rel: 'README.md', abs: '/r/README.md' },
+                             { rel: 'docs/00 vision.md', abs: '/r/docs/00 vision.md' }] };
+var opened = [], toasts = [];
+function openDoc(rel, opts){ opened.push(rel + '|' + opts.where + '|' + (opts.at || '')); return {}; }
+function toast(m){ toasts.push(m); }
+JSEOF
+    cat "$WORK/links.js"
+    cat <<'JSEOF'
+
+var fail = [];
+function want(ok, why){ if (!ok) fail.push(why); }
+/* a click on a link, in a document or outside one */
+function on(href, inDoc, where){
+  var a = { href: href, closest: function(sel){ return inDoc && sel === 'article.md a[href]' ? a : null; } };
+  var e = { target: a, stopped: false, preventDefault: function(){ e.stopped = true; } };
+  opened = []; toasts = [];
+  click(e, where || 'here');
+  return (e.stopped ? 'kept ' : 'left ') + opened.join() + (toasts.length ? ' toast:' + toasts.join() : '');
+}
+var r;
+r = on('file:///r/docs/00%20vision.md#guides--the-look', true);
+want(r === 'kept docs/00 vision.md|here|guides--the-look', 'a link to a document did not open it here: ' + r);
+r = on('file:///r/README.md', true, 'split');
+want(r === 'kept README.md|split|', 'a ⌘-click did not open it in the split: ' + r);
+r = on('file:///r/notes/gone.md', true);
+want(r === 'kept  toast:notes/gone.md is not in this workspace', 'markdown the workspace lacks: ' + r);
+r = on('file:///r/src/a.ts', true);
+want(r === 'left ', 'a link to code was taken from the browser: ' + r);
+r = on('https://example.com/a.md', true);
+want(r === 'left ', 'a web link was taken from the browser: ' + r);
+r = on('http://127.0.0.1:1/#intro', true);
+want(r === 'left ', 'a heading anchor was taken from the browser: ' + r);
+r = on('file:///r/README.md', false);
+want(r === 'left ', 'a link outside a document was taken: ' + r);
+
+/* the fragment finds its heading, written our way or GitHub's */
+var hs = [{ id: 'intro' }, { id: 'guides-the-look' }];
+var root = { querySelectorAll: function(){ return hs; } };
+want(headingAt(root, 'guides--the-look') === hs[1], 'a GitHub fragment missed its heading');
+want(headingAt(root, 'Intro') === hs[0], 'a fragment in capitals missed its heading');
+want(headingAt(root, 'nowhere') === null && headingAt(root, '') === null, 'a fragment found what is not there');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/links-run.js"
+  res=$(node "$WORK/links-run.js" 2>&1)
+  case "$res" in ok*) ok "34 · a link to another document opens it in a tab, at its heading" ;;
+                 *)   no "34 · a link to another document does not open where it should" "$res" ;; esac
+else
+  skip "34 · links between documents" "no node"
+fi
+
+# ── 35 · nothing in this run scripted another application ───────────────────
 # The tripwire at the top of this file stands where `osascript` would be found.
 # A test that reached it — the hook closing a window it never opened, a reply
 # that missed the dry seam — wrote its arguments down, and that is a failure
 # whether or not the test that did it noticed.
 if [ ! -s "$WORK/osascript.log" ]; then
-  ok "34 · nothing in the suite reached osascript"
+  ok "35 · nothing in the suite reached osascript"
 else
-  no "34 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
+  no "35 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
