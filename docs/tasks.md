@@ -1536,8 +1536,10 @@ measurements are in `share/waiting.py`'s header.
       bundle), and the tab from iTerm's dictionary, where every session has a
       `tty`. `write text` there is your typing: a slash command runs and the
       turn is yours, with one writer on the transcript. The guard, read before
-      and again just before: the `claude` process lives, its status is `idle` or
-      `waiting`, and it holds its terminal's foreground (`ps -t`, the `+`) —
+      and again just before: the `claude` process lives, its status is `idle` (one
+      asking you something, whose question or permission dialog would take the
+      reply's Return as its answer, is answered in its tab), and it holds its
+      terminal's foreground (`ps -t`, the `+`) —
       otherwise nothing is typed and the answer names the check. The words reach
       `osascript -` as an `argv` item of a constant script, on one line, with
       every control character a space; they are written without a line ending

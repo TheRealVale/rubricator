@@ -2314,7 +2314,7 @@ function replyState(r){
   if (!r) return 'it is no longer running';
   if (r.on === 'done') return 'your turn';
   if (r.on === 'asking') return 'it is asking you something in its terminal' +
-    (r.waitingFor ? ' (' + r.waitingFor + ')' : '') + ', and what you send answers that';
+    (r.waitingFor ? ' (' + r.waitingFor + ')' : '') + ': answer it in its tab, where you see what you choose';
   if (r.on === 'working') return 'it is working; a reply is refused until its turn is over';
   if (r.on === 'background') return 'a command of its own is still running; a reply is refused until its turn is over';
   return 'its status is ' + (r.status || 'unknown') + ', so a reply is refused';

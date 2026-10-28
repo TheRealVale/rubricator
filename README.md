@@ -453,8 +453,9 @@ holds, learns from the process's ancestors and that application's own `Info.plis
 iTerm, and asks iTerm, over AppleScript, for the tab whose terminal that is. Typed into a tab
 whose Claude has exited, a reply would be a shell command, so before anything is typed — and
 again immediately before — three things must hold: the `claude` process lives, its status
-says it waits for you (`idle`, or `waiting` with a question open — not working, and not
-running a command of its own), and it holds its terminal's foreground. If one does not,
+says it is your turn (`idle` — not working, not running a command of its own, and not
+asking you something, whose question or permission dialog would take the reply's Return as
+its answer: that is answered in its tab), and it holds its terminal's foreground. If one does not,
 nothing is typed and the window says which. A session in any other terminal is told that
 replies are iTerm only.
 

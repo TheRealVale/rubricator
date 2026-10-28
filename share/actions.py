@@ -363,9 +363,11 @@ def edit(path):
 # and if one does not, nothing is sent and the answer says which:
 #
 #   - the session's `claude` process lives;
-#   - its status says it waits for input — `idle`, or `waiting` with a question
-#     open — not `busy`, and not `shell`, whose turn ended with a command of its
-#     own still running;
+#   - its status says it is your turn — `idle` — not `busy`; not `shell`, whose
+#     turn ended with a command of its own still running; and not `waiting`,
+#     whose question or permission dialog would take the reply's Return as its
+#     answer, choosing whatever option is highlighted: that is answered in its
+#     tab;
 #   - `claude` is in its terminal's foreground: `ps` marks the foreground
 #     process group with `+`, and a shell that took the terminal back after
 #     Claude exited, or was suspended, holds the `+` instead.
@@ -385,7 +387,7 @@ def edit(path):
 # RUBRICATOR_DRY_LAUNCH stops short of osascript and says what would have run.
 ITERM_ID = "com.googlecode.iterm2"
 MAX_REPLY = 8000
-WAITS_FOR_YOU = {"idle", "waiting"}
+WAITS_FOR_YOU = {"idle"}
 TTY = re.compile(r"^tty[a-z]*\d{1,5}$")
 
 ITERM_SCRIPT = '''on run argv
@@ -461,7 +463,9 @@ def held(sid, writing=True):
         if status not in WAITS_FOR_YOU:
             raise Refused("status", {"busy": "it is working — a reply waits until its turn is over",
                                      "shell": "its turn ended with a command of its own still running, "
-                                              "so it will likely carry on by itself"}
+                                              "so it will likely carry on by itself",
+                                     "waiting": "it is asking you something in its terminal, a question or a "
+                                                "permission whose Return would choose for you: answer it in its tab"}
                           .get(status, "its status is %r, not one that waits for you" % status))
         front = [ln.split(None, 2) for ln in _ps("-t", tty, "-o", "pid=,stat=,comm=").splitlines()]
         front = [r for r in front if len(r) == 3 and "+" in r[1]]

@@ -2161,7 +2161,10 @@ def refused(n, writing=True, host=None):
     finally:
         A._host = lambda pid: ITERM
 try:
-    checks["a session that waits for you passes the guard"] = refused(1) is None and refused(7) is None
+    checks["a session whose turn it is passes the guard"] = refused(1) is None
+    r = refused(7)
+    checks["a session asking you something is refused, its question answered in its tab"] = r and r[0] == "status" and "its tab" in r[1]
+    checks["its tab can be brought forward while it asks"] = refused(7, writing=False) is None
     r = refused(5)
     checks["refused when its process has ended"] = r and r[0] == "running"
     r = refused(2)
