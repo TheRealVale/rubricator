@@ -255,11 +255,20 @@ def _script(cwd, argv, prompt_file=None):
     return f
 
 
+def _dry():
+    """Every door this module can open, held shut by one switch. `edit` falls
+    back to `open -t` when no editor is configured, and that is the default, so
+    a caller who only wants to know whether a verb resolves its target has to be
+    able to ask without a text editor and a Finder window arriving on the
+    reader's screen to answer it."""
+    return bool(os.environ.get("RUBRICATOR_DRY_LAUNCH"))
+
+
 def _open_window(script):
     """LaunchServices, not AppleScript. Every terminal here runs a .command file
     when it is opened with one, so nothing needs Automation permission — and the
     permission dialog, which blocks, never appears."""
-    if os.environ.get("RUBRICATOR_DRY_LAUNCH"):     # build the launcher, open nothing
+    if _dry():                                     # build the launcher, open nothing
         return terminal()
     app = terminal()
     r = subprocess.run(["open", "-a", app, str(script)], timeout=25,
@@ -310,12 +319,16 @@ def resume(cwd, sid, fork=False):
 
 
 def reveal(path):
+    if _dry():
+        return {"ok": True, "dry": "reveal"}
     subprocess.run(["open", "-R", str(path)], check=True, timeout=15,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"ok": True}
 
 
 def edit(path):
+    if _dry():
+        return {"ok": True, "dry": "edit"}
     ed = os.environ.get("RUBRICATOR_EDITOR") or config().get("editor") or ""
     if ed:
         _open_window(_script(Path(path).parent, [ed, str(path)]))
