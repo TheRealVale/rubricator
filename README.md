@@ -345,6 +345,11 @@ Nothing here can wedge a session. Missing plan, malformed input, no `python3`, c
 runner: every failure exits quietly and leaves the normal flow untouched. Closing the window
 is never read as consent.
 
+A project that uses plan mode only to carry work on, into a fresh context say, turns the
+window off for itself with `"env": {"RUBRICATOR_PLAN_REVIEW": "off"}` in its
+`.claude/settings.json`: the hook then gives no decision, and Claude Code's own approval menu
+shows.
+
 For any other agent:
 
 ```bash

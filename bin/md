@@ -397,6 +397,9 @@ case "${1:-}" in
     PY="$(command -v python3 2>/dev/null || true)"
     [ -x "$PY" ] || PY=/usr/bin/python3
     MODE="$1"; shift
+    # A project that turns the plan review off for itself (RUBRICATOR_PLAN_REVIEW=off
+    # in its settings' env) gets no decision, so Claude Code's own approval menu shows
+    [ "$MODE" = "--hook" ] && [ "${RUBRICATOR_PLAN_REVIEW:-}" = off ] && exit 0
     if [ ! -x "$PY" ]; then
       # never break the caller: emit no decision and leave the normal flow alone
       [ "$MODE" = "--hook" ] && printf '%s' '{"systemMessage":"md: python3 not found - review skipped"}'

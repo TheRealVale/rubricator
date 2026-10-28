@@ -1543,5 +1543,18 @@ else
   no "28 · the waiting list is wrong" "$(grep '^XX' "$WORK/waiting.txt" | tr '\n' ' ')$(tail -2 "$WORK/waiting.txt")"
 fi
 
+# ── 29 · a project can turn the plan review off ─────────────────────────────
+# With RUBRICATOR_PLAN_REVIEW=off the hook gives no decision, at once, and
+# Claude Code's own menu shows. The same plan without it gets an answer (test 5).
+t0=$(date +%s)
+offjson="$(printf '{"tool_name":"ExitPlanMode","tool_input":{"plan":"# a plan\\n\\n## step\\n\\ndo the thing\\n"}}' \
+  | RUBRICATOR_PLAN_REVIEW=off RUBRICATOR_NO_WINDOW=1 RUBRICATOR_TIMEOUT=3 "$MD" --hook plan 2>/dev/null)"
+rc=$?
+if [ "$rc" = 0 ] && [ -z "$offjson" ] && [ $(( $(date +%s) - t0 )) -lt 3 ]; then
+  ok "29 · RUBRICATOR_PLAN_REVIEW=off leaves the plan to Claude Code's own menu"
+else
+  no "29 · the plan review ran though it was turned off" "exit=$rc got: $(printf '%s' "$offjson" | head -c 120)"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
