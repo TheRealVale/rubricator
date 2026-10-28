@@ -200,17 +200,23 @@ find-anything already widened.
 
 At its head is **Open now**: every session running in a terminal at this moment, busy or
 not. A row says what the session is about — its first prompt, as every row does, or the
-terminal's name until you have typed one — the terminal's name, so you can find the tab, and
-what it is doing, each in a colour and a shape of its own: *asking you* (a permission or a
-question is open in its terminal), *your turn*, *on its own command* (its turn ended with a
-background command still running), or *working* — and how long it has been so. The group is
-read from Claude Code's own session files, the way **Waiting** is, not from the history index,
-so it is there as soon as the window is and the history fills in under it. It is read again
-when the window comes back to the front and whenever a session starts, ends or changes state.
-Its heading counts the sessions that wait on you and opens Waiting on them. A session in the
-group is not listed again below it, and opens like any other row — without a resume, since it
-is still running. With launching allowed, a row offers two more things on hover: *reply*,
-which opens it on its reply line, and *go to its tab*.
+terminal's name until you have typed one — and under it, on one line, what it is doing, the
+terminal's name, so you can find the tab, and how long it has been so. What it is doing has a
+colour and a shape of its own: *asking you* (a permission or a question is open in its
+terminal), *your turn*, *on its own command* (its turn ended with a background command still
+running), or *working*, whose dot is the quill — a pilcrow, the rubricator's own mark, inked
+in rubric red stroke by stroke and lifted off again. In a narrow navigator the names give way
+first and end in an ellipsis, so a row keeps its two lines. A session counts as this
+repository's when it was started in it or one of its worktrees, or when it works there: one
+started in the folder above, whose latest tool calls work mostly in this repository, is listed
+here and says *started in ~/Repositories, works here*. The group is read from Claude Code's own
+session files, the way **Waiting** is, not from the history index, so it is there as soon as
+the window is and the history fills in under it. It is read again when the window comes back
+to the front and whenever a session starts, ends or changes state. Its heading counts the
+sessions that wait on you and opens Waiting on them. A session in the group is not listed again
+below it, and opens like any other row — without a resume, since it is still running. With
+launching allowed, a row offers two more things on hover: *reply*, which opens it on its reply
+line, and *go to its tab*.
 
 Indexing it reads every conversation on the machine, not only this project's, so it is off
 until you ask: `md --sessions` for one run, or the switch the empty Sessions list offers,
@@ -268,11 +274,24 @@ session still **running** in a terminal is answered in that terminal, and from t
 its view ends on a reply line whose words are typed into its own iTerm tab, as if you had
 typed them there, so a slash command runs and the turn is yours. Beside the line are
 */signoff*, */adjust …*, which starts the line for you, and *go to its tab*. A reply is one
-line, line breaks becoming spaces, and it is typed only while Claude waits for you in the
-foreground of that terminal — otherwise nothing is typed and the line says why. The window
-offers a running session no resume, because a second process on the same session would write
-the same transcript, and the server refuses one whatever the page asks. Forking it stays
-open.
+line, line breaks becoming spaces, and it is typed only while Claude is in the foreground of
+that terminal and either waits for you or works — otherwise nothing is typed and the line
+says why. The window offers a running session no resume, because a second process on the
+same session would write the same transcript, and the server refuses one whatever the page
+asks. Forking it stays open.
+
+While a session works, the foot of its view says so the way Claude Code's own line does: a
+band above the reply line, with the quill turning; how long the turn has run, counted to the
+second from the moment its status turned busy; what it is doing now — the tool call still
+waiting on its result, named by a command's own description, the file a file tool works on,
+or an agent's task, or *thinking*, after the last call that came back — and how many tool
+calls and output tokens the turn has taken. It is read from the end of the transcript, and is
+read again every few seconds only while the band is on screen in a window in front, each look
+reading only what was written since the last. The reply line stays usable: Send turns into
+*Send while it works? Send · Cancel*, and what you send waits in Claude Code's queue for the
+turn. Beside the band is **Stop**, which asks the same way — *Stop it? Stop · Cancel* — and
+sends the Escape key to its tab, which is how a turn is stopped in Claude Code. Neither asks
+in a dialog, and Escape puts either question away.
 
 **Notes** collects your marks across every document — every open Question, everything marked
 Cut — because what you are hunting is often your own reaction, not the text. Its **copy**
@@ -296,7 +315,8 @@ on you, each with what it said last, rendered, its links opening outside the win
 are grouped by what they wait on — *asking you* (a permission or a question is open in its
 terminal), *your turn*, and *waiting on its own command* (its turn ended with a background
 command still running, so it will likely carry on by itself) — newest wait first, scoped to
-this repository and its worktrees, with *everywhere* beside it. Each can be answered where it
+this repository and its worktrees, and the sessions started elsewhere that work here, with
+*everywhere* beside it. Each can be answered where it
 stands: *reply* opens the same reply line under what it said, and *go to its tab* brings its
 terminal to the front. `md --waiting` opens a window on it.
 
@@ -305,7 +325,8 @@ nowhere: Claude Code's own file per running session in `~/.claude/sessions`, whi
 whether a session is working, asking or done; the first prompt of each in
 `~/.claude/history.jsonl`, which names it the way the Sessions list does; and the end of each
 waiting session's transcript — a quarter of a megabyte of a gigabyte transcript, a few
-milliseconds. A session counts as running only while a `claude` process lives at its pid. The
+milliseconds — which also says where a session started elsewhere works. A session counts as
+running only while a `claude` process lives at its pid. The
 session file is Claude Code's, undocumented, and measured against 2.1.309; when it is missing
 or in a shape this does not read, the surface and the group say so rather than showing
 nothing. Reading it is reading your history, so it waits for the same consent: history turned
@@ -440,8 +461,9 @@ Off by default. With `md --allow-launch` — or `{"allow_launch": true}` in
   and resume only while the session is not running in a terminal.
 - **Reveal** a file in Finder, or open it in your editor — any file a session touched, not
   only the documents this window can read.
-- **Reply** to a session running in iTerm, typed into its own tab, or bring that tab to the
-  front.
+- **Reply** to a session running in iTerm, typed into its own tab — while it works too, once
+  you confirm that — or bring that tab to the front.
+- **Stop** a working session, with the Escape key in its tab, once you confirm.
 
 Sessions open in **iTerm** if you have it, otherwise Terminal — or whichever terminal you
 pick under Settings. The launcher is a `.command` file handed to that application through
@@ -453,12 +475,16 @@ reads Claude Code's own file for the session, asks `ps` for the terminal its `cl
 holds, learns from the process's ancestors and that application's own `Info.plist` that it is
 iTerm, and asks iTerm, over AppleScript, for the tab whose terminal that is. Typed into a tab
 whose Claude has exited, a reply would be a shell command, so before anything is typed — and
-again immediately before — three things must hold: the `claude` process lives, its status
-says it is your turn (`idle` — not working, not running a command of its own, and not
-asking you something, whose question or permission dialog would take the reply's Return as
-its answer: that is answered in its tab), and it holds its terminal's foreground. If one does not,
-nothing is typed and the window says which. A session in any other terminal is told that
-replies are iTerm only.
+again immediately before — three things must hold: the `claude` process lives, it holds its
+terminal's foreground, and its status is one the keys are for. A reply goes in on your turn
+(`idle`), and while it works (`busy`) only when the page sends the flag that your answer to
+*Send while it works?* sets — Claude Code queues what is typed during a turn. The Escape key
+of a stop goes in only while it works, written by the script itself, once, with no line
+ending and no words. Neither goes into a session asking you something, whose question or
+permission dialog would take the Return or the Escape as its answer — that is answered in its
+tab — nor into one whose turn ended with a command of its own still running. If one check
+fails, nothing is typed and the window says which. A session in any other terminal is told
+that replies are iTerm only.
 
 Scripting iTerm is the one thing here that needs macOS's Automation permission: the first
 reply makes macOS ask, once, whether rubricator may control iTerm, and System Settings →
@@ -522,8 +548,12 @@ history only when that flag asks for it, never from the setting.
 Two tiers. A single file opens as a static page — self-contained, shareable, no server. A
 workspace starts a small local server instead, which is what lets it fetch documents as you
 open them, reindex without regenerating, and write marks into the repository. It listens on
-127.0.0.1 with a per-run token, refuses anything cross-site, and exits when you close the
-window. `md --static` opts out; `-o` and `-n` always do.
+127.0.0.1 with a per-run token, refuses anything cross-site, and lives as long as its window:
+the window holds an event stream open to it, which stays open with the window in the
+background and the Mac asleep, and the server exits once no stream is open and nothing has
+asked anything for two minutes — at once when you close the window. A window whose server has
+gone says so on its status line: *md's server has stopped; run md again*. `md --static` opts
+out; `-o` and `-n` always do.
 
 The two tiers do not share a browser store, and cannot: a workspace is served from
 `http://127.0.0.1:<port>` on a fresh port each run, a static page is `file://`, and
@@ -542,11 +572,11 @@ share/review.*      annotation layer — anchors, verbs, storage, export
 share/ui.*          outline modes, search, resizable panel, shortcuts (reader only)
 share/shell.*       the window: navigator, panes, tabs, palette, status strip
 share/workspace.*   the repo index, and what each surface looks like
-share/serve.py      the local server: ephemeral port, per-run token, idle exit
+share/serve.py      the local server: ephemeral port, per-run token, gone with its window
 share/actions.py    the verb allowlist — the only place the page can cause anything
 share/extract.py    PDF and Word into text, cached on mtime and size
 share/transcript.py one conversation, read from its end on demand
-share/waiting.py    which sessions are running, and which wait on you
+share/waiting.py    which sessions are running, which wait on you, and what a working one does
 share/hook.py       blocking review server for --review and --hook
 .claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook
 ```

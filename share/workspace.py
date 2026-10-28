@@ -1298,19 +1298,23 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
             if verb == "launch":
                 d = docs.get(ident)
                 return S.J(A.launch(root, d["abs"] if d else "", b.get("text") or ""))
-            if verb in ("reply", "show-tab"):
+            if verb in ("reply", "show-tab", "stop"):
                 # A session running in a terminal is answered in that terminal.
                 # The page sends the session id and, for a reply, its words as
-                # data; which process, which terminal and which tab are read
-                # here, and actions.to_terminal's guard decides whether anything
-                # is typed at all.
+                # data, with `whileWorking: true` once you confirmed sending
+                # while it works; which process, which terminal and which tab
+                # are read here, and actions.to_terminal's guard decides
+                # whether anything is typed at all. A stop carries no words: the
+                # one key it sends is the script's own.
                 if not A.SESSION_ID.match(ident):
                     return S.J({"error": "not a session id"}, 400)
-                said = b.get("text") if isinstance(b.get("text"), str) else ""
+                to = {"reply": "write", "show-tab": "show", "stop": "stop"}[verb]
+                said = b.get("text") if to == "write" and isinstance(b.get("text"), str) else ""
                 try:
-                    return S.J(A.to_terminal(ident, "write" if verb == "reply" else "show", said))
+                    return S.J(A.to_terminal(ident, to, said,
+                                             working=to == "write" and b.get("whileWorking") is True))
                 except A.Refused as r:
-                    return S.J({"error": r.why, "refused": r.check}, 409)
+                    return S.J({"error": r.why, "refused": r.check, "status": r.status}, 409)
             if verb in ("resume", "fork"):
                 m = (state["data"].get("sessions") or {}).get(ident)
                 if not m or not m.get("live"):
@@ -1390,14 +1394,22 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         """Watch mode. The page asked to be told when a document changes, so tell
         it — one line per change, until the window goes away. A Claude Code
         session starting, ending or changing state is told the same way, as
-        `running`, and the page looks at the running sessions again."""
+        `running`, and the page looks at the running sessions again. The open
+        stream is what keeps the server for its window, so it says something
+        every few seconds even when nothing changed: the write that fails is
+        how a window that went away is noticed."""
         last = snapshot()
         ran = running_now()
         wfile.write(b": watching\n\n")
         wfile.flush()
+        said = time.time()
         while not srv.stop.is_set():
             if srv.stop.wait(1.0):
                 break
+            if time.time() - said >= srv.beat():
+                wfile.write(b": here\n\n")
+                wfile.flush()
+                said = time.time()
             now_ran = running_now()
             if now_ran is not None and ran is not None and now_ran != ran:
                 wfile.write(b'data: {"running": true}\n\n')
@@ -1471,9 +1483,28 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         got["allowed"] = True
         return S.J(got)
 
+    def working_route(method, query, body):
+        """What one working session is doing now, for the band at the foot of
+        its view, which asks every few seconds while it is shown: read from the
+        end of its transcript, and after the first look only what was written
+        since. The same consent as the list it comes from."""
+        if not (look[0] or want[0]):
+            return S.J({"allowed": False})
+        sid = (query.get("id") or [""])[0]
+        if not A.SESSION_ID.match(sid):
+            return S.J({"error": "not a session id"}, 400)
+        try:
+            import waiting as _W
+            got = _W.doing(sid)
+        except Exception as e:
+            got = {"sid": sid, "error": str(e)[:200]}
+        got["allowed"] = True
+        return S.J(got)
+
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
               "notes": notes, "act": act, "events": events, "settings": settings,
-              "session": session, "sessions": sessions_route, "waiting": waiting_route}
+              "session": session, "sessions": sessions_route, "waiting": waiting_route,
+              "working": working_route}
     srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
     if port:
         srv.httpd.server_close()

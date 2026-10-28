@@ -18,18 +18,35 @@ function api(path, body, cb, fail){
   if (body !== undefined) o.body = JSON.stringify(body);
   fetch(BASE + '/' + path, o)
     /* the body of a refusal is the reason for it — a server that answers 409
-       with an explanation is no use if the page throws the explanation away */
+       with an explanation is no use if the page throws the explanation away;
+       and a request that reached no server at all is a server that has gone */
     .then(function(r){
       if (r.ok) return r.json();
       return r.json().then(
         function(j){ return Promise.reject({ status: r.status, body: j }); },
         function(){ return Promise.reject({ status: r.status }); });
-    })
+    }, function(){ return Promise.reject({ gone: true }); })
     /* two-argument then, not .catch: a bug thrown inside cb must not be
        reported back as "the server failed" and run the failure path too */
-    .then(function(j){ try { cb && cb(j); } catch(e){ console.error('rubricator:', e); } },
-          function(e){ try { fail && fail(e || {}); } catch(err){} });
+    .then(function(j){ if (GONE) serverBack(); try { cb && cb(j); } catch(e){ console.error('rubricator:', e); } },
+          function(e){ if (e && e.gone) serverGone(); try { fail && fail(e || {}); } catch(err){} });
 }
+/* The server stops once no window holds its event stream open and nothing has
+   asked anything for its idle time, and a window outlives it when md is ended
+   in its terminal, or when the window's stream was lost. A page whose requests
+   reach nothing says so plainly, on the status line and wherever it shows the
+   running sessions, rather than that something did not answer; the first
+   answer after that clears it. */
+var GONE = 0;
+function serverGone(){ if (!GONE){ GONE = Date.now(); afterGone(); } }
+function serverBack(){ GONE = 0; afterGone(); }
+/* the bands of working sessions say nothing they cannot know: they go while
+   the server is gone, and come back with it */
+function afterGone(){
+  if (typeof stat === 'function') stat();
+  if (typeof paintBands === 'function') paintBands();
+}
+var GONE_SAID = 'md\u2019s server has stopped; run md again';
 
 /* document bodies are left on disk in the live tier and pulled in when a
    document is actually opened — or all at once, the first time you search */
@@ -884,7 +901,7 @@ function sessionHTML(sid, convo){
   var out = ['<section class="fsec sabout" data-f="about">',
     '<h3>' + esc(m.t || '(no prompt recorded)') + '</h3>',
     '<div class="who">' +
-      '<span><span class="dot ' + (RUN[sid] ? esc(RUN[sid].on) : m.live ? 'live' : 'arch') + '"></span> ' +
+      '<span>' + runDot(RUN[sid] ? RUN[sid].on : m.live ? 'live' : 'arch', RUN[sid] && sid) + ' ' +
         (RUN[sid] ? 'running now' : m.live ? 'resumable' : 'archived — transcript gone') + '</span>' +
       '<span>' + esc((m.p || 'unknown project').replace(/^\/Users\/[^/]+/, '~')) + '</span>' +
       '<span>' + m.n + ' prompts</span><span>' + span(m) + '</span>' +
@@ -963,7 +980,7 @@ function runningHTML(sid, convo){
   return ['<section class="fsec sabout" data-f="about">',
     '<h3>' + esc(runTitle(r)) + '</h3>',
     '<div class="who">' +
-      '<span><span class="dot ' + esc(r.on) + '"></span> running now</span>' +
+      '<span>' + runDot(r.on, sid) + ' running now</span>' +
       (r.name ? '<span>' + esc(r.name) + '</span>' : '') +
       '<span>' + esc(where || 'unknown project') + '</span>' +
       '<span class="sid" data-copy="' + esc(sid) + '" title="' + esc(sid) + ' — click to copy">' +
@@ -2021,22 +2038,41 @@ function makeFind(surf){
    of each waiting session's transcript, every time this asks. `RUN` is the
    same answer by session id: a session running in a terminal is never offered
    a resume, because a second process would write the same transcript. */
-var WAIT = null, RUN = {}, waitLoading = false;
+var WAIT = null, RUN = {}, waitLoading = 0, waitSeq = 0;
+/* One look at a time, but a look that never came back does not hold the next
+   off for good: after a quarter of a minute the next one goes, and the late
+   answer, should it come, is not used. A failed look keeps when it was made,
+   so looking again says what happened even when it is what happened before. */
 function loadWaiting(ask){
-  if (!can('waiting') || waitLoading) return;
-  waitLoading = true;
-  var was = RUN;
+  if (!can('waiting') || (waitLoading && Date.now() - waitLoading < 15000)) return;
+  waitLoading = Date.now();
+  var was = RUN, seq = ++waitSeq;
   api('waiting', ask ? {} : undefined, function(j){
-    waitLoading = false;
+    if (seq !== waitSeq) return;
+    waitLoading = 0;
     WAIT = j || {};
+    WAIT.at = Date.now();
     RUN = {};
     (WAIT.sessions || []).forEach(function(r){ RUN[r.sid] = r; });
     afterWaiting(was);
-  }, function(){
-    waitLoading = false;
-    WAIT = { allowed: true, state: 'failed', error: 'the server did not answer', sessions: [] };
+  }, function(e){
+    if (seq !== waitSeq) return;
+    waitLoading = 0;
+    WAIT = e && e.status
+      ? { allowed: true, state: 'failed', sessions: [], at: Date.now(),
+          error: (e.body && e.body.error) || 'the server answered ' + e.status }
+      : { allowed: true, state: 'gone', sessions: [], at: Date.now() };
     afterWaiting(was);
   });
+}
+/* look again, from a list that could not be read: it says it is looking, and
+   then what came of it */
+function lookAgainNow(){
+  if (WAIT && (WAIT.state === 'gone' || WAIT.state === 'failed')){
+    WAIT.looking = true;
+    afterWaiting(RUN);
+  }
+  loadWaiting(true);
 }
 /* the list is only as current as the last look, so it looks again whenever
    that could have changed what it says: the window coming back to the front,
@@ -2063,6 +2099,11 @@ function afterWaiting(was){
   [].forEach.call(document.querySelectorAll('[data-rhint]'), function(el){
     el.textContent = replyState(RUN[el.dataset.rhint]);
   });
+  [].forEach.call(document.querySelectorAll('[data-rundot]'), function(el){
+    var r = RUN[el.dataset.rundot];
+    if (r && !el.classList.contains(r.on)) el.outerHTML = runDot(r.on, el.dataset.rundot);
+  });
+  paintBands(was);
   if (Shell.navMode() === 'sessions') Shell.nav();
   Shell.paint();
 }
@@ -2138,10 +2179,18 @@ function runTrouble(){
     return WAIT.files + ' file' + (WAIT.files === 1 ? '' : 's') + ' in ' +
       '<span class="f">~/.claude/sessions</span>, and none in the shape this reads — a pid, a session ' +
       'id and a status. Claude Code may have changed it; this was measured against 2.1.309.';
+  if (WAIT.looking) return 'Looking again…';
+  if (WAIT.state === 'gone')
+    return esc(GONE_SAID) + '. ' + lookedAt('no answer');
   if (WAIT.state === 'failed')
-    return 'The running sessions could not be read: ' + esc(WAIT.error || '') +
-      ' <button class="lnk" data-wlook="1">look again</button>';
+    return 'The running sessions could not be read: ' + esc(WAIT.error || '') + '. ' + lookedAt('looked');
   return '';
+}
+function lookedAt(what){
+  var t = new Date(WAIT.at || Date.now());
+  function two(n){ return (n < 10 ? '0' : '') + n; }
+  return '<button class="lnk" data-wlook="1">look again</button> <span class="when">· ' + what + ' at ' +
+    two(t.getHours()) + ':' + two(t.getMinutes()) + ':' + two(t.getSeconds()) + '</span>';
 }
 function leftOut(){
   var n = WAIT.misshapen || 0;
@@ -2207,9 +2256,11 @@ function openRow(r, q, sel){
   var showRepo = sesScope === 'all' && (r.name || '').toLowerCase().indexOf(repo.toLowerCase()) !== 0;
   var tip = t + '\n' + (g.word || r.status) + ' for ' + waited(r.since) + ': ' + g.note +
             (r.waitingFor ? ' (' + r.waitingFor + ')' : '') +
-            '\n' + where.replace(/^\/Users\/[^/]+/, '~') + ' · pid ' + r.pid;
+            '\n' + where.replace(/^\/Users\/[^/]+/, '~') + ' · pid ' + r.pid +
+            (r.worksHere ? '\n' + startedIn(r) + ': ' + worksWhy(r) : '');
   /* what it is about gets the whole first line, as on every session row; under
-     it the state, the terminal's name and how long the state has held */
+     it the state, the terminal's name and how long the state has held; and for
+     a session started elsewhere that works here, where it began, under that */
   var acts = can('launch')
     ? '<span class="racts">' +
         '<button data-rreply="' + esc(r.sid) + '" title="Reply — in its view, typed into its terminal">' + RICON.reply + '</button>' +
@@ -2217,13 +2268,53 @@ function openRow(r, q, sel){
       '</span>' : '';
   return '<div class="srow run' + (sel === r.sid ? ' on' : '') + '" data-ses="' + esc(r.sid) +
     '" data-q="' + esc(q) + '" title="' + esc(tip) + '">' +
-    '<span class="dot ' + esc(g.on) + '"></span>' +
+    runDot(g.on) +
     '<span class="ttl">' + esc(t) + '</span>' + acts +
     '<span class="rst"><span class="rstate ' + esc(g.on) + '">' + esc(g.word || r.status || '?') + '</span>' +
-      (t !== r.name && r.name ? '<span class="nm">' + esc(r.name) + '</span>' : '') +
-      (showRepo ? '<span>' + esc(repo) + '</span>' : '') +
+      '<span class="nms">' + [t !== r.name && r.name ? '<span class="nm">' + esc(r.name) + '</span>' : '',
+                              showRepo ? '<span>' + esc(repo) + '</span>' : '']
+                             .filter(Boolean).join(' · ') + '</span>' +
       '<span class="dur" data-since="' + (+r.since || 0) + '">' + waited(r.since, true) + '</span>' +
-    '</span></div>';
+    '</span>' +
+    (r.worksHere ? '<span class="rwhere">' + esc(startedIn(r)) + '</span>' : '') + '</div>';
+}
+/* ── the quill ─────────────────────────────────────────────────────────────
+   What a working session wears wherever it shows: a pilcrow, the rubricator's
+   own mark, inked in rubric red stroke by stroke — its bowl, then its stems —
+   left to dry and lifted off, inside a sweep of the same red and a ring of
+   prickings, the holes a scribe pricked down the margin to rule a page by.
+   CSS draws it, with no script, and holds it still for reduced motion. Every
+   animation in it repeats within QUILL_CYCLE, and each copy starts as far into
+   that as the wall clock is, so a row or a view drawn again picks up where it
+   was rather than starting over, and every quill on the page is at the same
+   stroke. `mini` is the navigator's: the mark alone, as large as a row lets
+   it be, inked the same way. */
+var QUILL_CYCLE = 14000;
+function quill(cls){
+  var mini = cls === 'mini';
+  return '<span class="quill' + (cls ? ' ' + cls : '') + '" aria-hidden="true" style="--q:-' +
+      (Date.now() % QUILL_CYCLE) + 'ms"><svg viewBox="' + (mini ? '13 11 15 18' : '0 0 40 40') + '" focusable="false">' +
+    (mini ? '' : '<circle class="q-prick" cx="20" cy="20" r="18.5" pathLength="28"/>' +
+      '<g class="q-sweep"><circle class="q-glow" cx="20" cy="20" r="15" pathLength="100"/>' +
+      '<circle class="q-arc" cx="20" cy="20" r="15" pathLength="100"/></g>') +
+    '<g class="q-mark"><path class="q-bowl" pathLength="1" d="M21.6 13.2H18.7A3.9 3.9 0 0 0 18.7 21H21.6Z"/>' +
+      '<path class="q-stem q-bar" pathLength="1" d="M21.6 13.2H25.9"/>' +
+      '<path class="q-stem q-s1" pathLength="1" d="M21.6 13.2V27.4"/>' +
+      '<path class="q-stem q-s2" pathLength="1" d="M25 13.2V27.4"/></g></svg></span>';
+}
+/* a running session's dot, the quill while it works; with an id it is redrawn
+   in place when the session's state moves */
+function runDot(on, sid){
+  return '<span class="dot ' + esc(on) + '"' + (sid ? ' data-rundot="' + esc(sid) + '"' : '') + '>' +
+    (on === 'working' ? quill('mini') : '') + '</span>';
+}
+/* a session started elsewhere that works here says where it began */
+function startedIn(r){
+  return 'started in ' + (r.began || (r.cwd || '?').replace(/^\/Users\/[^/]+/, '~')) + ', works here';
+}
+function worksWhy(r){
+  var n = r.named || [0, 0];
+  return n[0] + ' of the ' + (n[0] + n[1]) + ' places its latest tool calls work in are in this repository';
 }
 var RICON = {
   reply: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" ' +
@@ -2250,8 +2341,9 @@ function waitCard(r){
   return '<div class="wcard">' +
     '<div class="whead"><span class="dot ' + esc(r.on) + '"></span>' +
       '<b>' + esc(waitTitle(r)) + '</b>' +
-      '<span class="sub" title="' + esc(where) + '">' + esc(r.name || '') + ' · ' +
-        esc(shortRepo(where)) + ' · ' + said + '</span></div>' +
+      '<span class="sub" title="' + esc(where + (r.worksHere ? '\n' + worksWhy(r) : '')) + '">' +
+        esc(r.name || '') + ' · ' + esc(r.worksHere ? startedIn(r) : shortRepo(where)) + ' · ' + said +
+      '</span></div>' +
     (r.on === 'asking' && r.waitingFor ? '<div class="qnote wait">' + esc(r.waitingFor) + '</div>' : '') +
     body +
     '<div class="wfoot">' + open + acts +
@@ -2318,7 +2410,7 @@ function viewWaiting(){
 /* the list's own controls; the scope is the Sessions navigator's, one scope
    behind both, so changing it here redraws the navigator too */
 var WAITVERBS = RB.table({
-  wlook:  function(){ loadWaiting(true); },
+  wlook:  function(){ lookAgainNow(); },
   wscope: function(v){ sesScope = v; Shell.refresh(); },
   wopen:  function(){ Shell.open({ kind:'waiting', id:'', title:TITLES.waiting }); }
 });
@@ -2328,12 +2420,17 @@ var WAITVERBS = RB.table({
    and a reply goes to it the way your own typing does: into that terminal's
    tab, where a slash command runs and the words are yours. The page sends the
    session id and the words; which process, which terminal and which tab are
-   read on the server, which types nothing unless Claude is alive, waits for
-   you, and holds the terminal's foreground — and says which of those failed
-   when one does. One line: a terminal reads a line break as Enter, so line
-   breaks become spaces, here as you paste and again on the server. */
-var REPLY = {};                            // sid → { draft, said, bad, open }
-function replyOf(sid){ return REPLY[sid] || (REPLY[sid] = { draft:'', said:'', bad:false, open:false }); }
+   read on the server, which types nothing unless Claude is alive and holds
+   the terminal's foreground, and says which failed when one does. A reply
+   goes in on your turn; while it works, Send asks first — the button turns
+   into the question, never a dialog — and only the answer sends it, flagged
+   as confirmed, into Claude Code's queue for the turn. One line: a terminal
+   reads a line break as Enter, so line breaks become spaces, here as you
+   paste and again on the server. */
+var REPLY = {};                            // sid → { draft, said, bad, open, ask }
+function replyOf(sid){
+  return REPLY[sid] || (REPLY[sid] = { draft:'', said:'', bad:false, open:false, ask:null });
+}
 function oneLine(s){
   return String(s || '').replace(/[ \t]*(?:\r\n|[\r\n\u0085\u2028\u2029])+[ \t]*/g, ' ')
                         .replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
@@ -2344,7 +2441,7 @@ function replyState(r){
   if (r.on === 'done') return 'your turn';
   if (r.on === 'asking') return 'it is asking you something in its terminal' +
     (r.waitingFor ? ' (' + r.waitingFor + ')' : '') + ': answer it in its tab, where you see what you choose';
-  if (r.on === 'working') return 'it is working; a reply is refused until its turn is over';
+  if (r.on === 'working') return 'it is working: Send asks first, and what you send waits in its queue';
   if (r.on === 'background') return 'a command of its own is still running; a reply is refused until its turn is over';
   return 'its status is ' + (r.status || 'unknown') + ', so a reply is refused';
 }
@@ -2354,7 +2451,7 @@ function replyHTML(sid, where){
     '<div class="rrow">' +
       '<input id="' + esc(id) + '" class="rin" data-rin="' + esc(sid) + '" value="' + esc(R.draft) + '" ' +
         'placeholder="Reply in its terminal — one line" spellcheck="false" autocomplete="off">' +
-      '<button class="rgo" data-rsend="' + esc(sid) + '">Send</button>' +
+      '<span class="rsend" data-rsendbox="' + esc(sid) + '">' + sendHTML(sid) + '</span>' +
     '</div>' +
     '<div class="rbar">' +
       '<button data-rsignoff="' + esc(sid) + '">/signoff</button>' +
@@ -2366,13 +2463,32 @@ function replyHTML(sid, where){
     '<div class="rsay' + (R.bad ? ' bad' : '') + '" data-rsay="' + esc(sid) + '">' + esc(R.said) + '</div>' +
   '</div>';
 }
-/* at the foot of a running session's view; without the gate, what would open it */
+/* Send, or the question it turns into while the session works */
+function sendHTML(sid){
+  var a = replyOf(sid).ask;
+  if (!a) return '<button class="rgo" data-rsend="' + esc(sid) + '">Send</button>';
+  return '<span class="rask">' + (a.fixed ? 'Send <b>' + esc(a.fixed) + '</b> while it works?'
+                                          : 'Send while it works?') + '</span>' +
+    '<button class="rgo" data-rsendok="' + esc(sid) + '">Send</button>' +
+    '<span class="rsep">·</span><button class="rno" data-rsendno="' + esc(sid) + '">Cancel</button>';
+}
+function paintSend(sid){
+  [].forEach.call(document.querySelectorAll('[data-rsendbox]'), function(el){
+    if (el.dataset.rsendbox === sid) el.innerHTML = sendHTML(sid);
+  });
+}
+function askSend(sid, fixed){
+  replyOf(sid).ask = { fixed: fixed == null ? '' : fixed };
+  paintSend(sid);
+}
+/* at the foot of a running session's view: the band while it works, and the
+   reply line; without the gate, what would open the reply line */
 function replySection(sid){
   if (!can('launch'))
-    return '<div class="sreply off"><div class="qnote">Replying from here types into its terminal, ' +
-      'which the page may do only with <span class="f">md --allow-launch</span> or Settings → ' +
-      'What the page may start.</div></div>';
-  return '<div class="sreply">' + replyHTML(sid, 's') + '</div>';
+    return '<div class="sreply off">' + bandHTML(sid) + '<div class="qnote">Replying from here types into ' +
+      'its terminal, which the page may do only with <span class="f">md --allow-launch</span> or ' +
+      'Settings → What the page may start.</div></div>';
+  return '<div class="sreply">' + bandHTML(sid) + replyHTML(sid, 's') + '</div>';
 }
 function replySay(sid, text, bad){
   var R = replyOf(sid);
@@ -2384,11 +2500,19 @@ function replySay(sid, text, bad){
     if (text && el.offsetParent) el.scrollIntoView({ block:'nearest' });   // read where it was asked
   });
 }
-function sendReply(sid, input, fixed){
+function whose(j){ return j && j.name ? j.name + '\u2019s' : 'its'; }
+/* `sure` is the answer to the question Send asked while it worked, and the
+   only thing that sends the flag the server wants before typing into a turn */
+function sendReply(sid, input, fixed, sure){
   var text = oneLine(fixed != null ? fixed : (input ? input.value : '')).trim();
   if (!text) return replySay(sid, 'there is nothing to send', true);
+  var r = RUN[sid];
+  if (!sure && r && r.on === 'working') return askSend(sid, fixed);
+  if (replyOf(sid).ask){ replyOf(sid).ask = null; paintSend(sid); }
   replySay(sid, 'sending…');
-  api('act', { verb:'reply', id:sid, text:text }, function(j){
+  var body = { verb:'reply', id:sid, text:text };
+  if (sure) body.whileWorking = true;
+  api('act', body, function(j){
     if (j && j.error) return replySay(sid, j.error, true);
     if (fixed == null){
       replyOf(sid).draft = '';
@@ -2396,18 +2520,27 @@ function sendReply(sid, input, fixed){
         if (el.dataset.rin === sid) el.value = '';
       });
     }
-    replySay(sid, 'sent to ' + (j.name ? j.name + '\u2019s' : 'its') + ' tab' +
+    replySay(sid, (j.status === 'busy' ? 'typed into ' + whose(j) + ' tab while it works, where it waits in its queue'
+                                       : 'sent to ' + whose(j) + ' tab') +
                   (j.dry ? ' — a dry run, so nothing was typed' : ''));
   }, function(e){
-    replySay(sid, (e && e.body && e.body.error) ||
-             (e && e.status === 403 ? 'the page may not start things — md --allow-launch' : 'the reply did not reach the server'), true);
+    var b = e && e.body;
+    /* it began working after this page last looked: Send asks, as it would have */
+    if (!sure && b && b.refused === 'status' && b.status === 'busy'){
+      replySay(sid, '');
+      lookAgain();
+      return askSend(sid, fixed);
+    }
+    replySay(sid, (b && b.error) || (e && e.gone ? GONE_SAID :
+             e && e.status === 403 ? 'the page may not start things — md --allow-launch' :
+             'the reply did not reach the server'), true);
   });
 }
 function showTab(sid){
   api('act', { verb:'show-tab', id:sid }, function(j){
     if (j && j.error) return toast(j.error);
     toast(j.dry ? 'its tab, in ' + j.app + ' — a dry run, so nothing moved' : 'its tab is in front, in ' + j.app);
-  }, function(e){ toast((e && e.body && e.body.error) || 'could not reach its tab'); });
+  }, function(e){ toast((e && e.body && e.body.error) || (e && e.gone ? GONE_SAID : 'could not reach its tab')); });
 }
 /* the reply line of a session, in its own view: opened there if need be */
 function focusReply(sid){
@@ -2420,14 +2553,204 @@ function focusReply(sid){
   }, 0);
   return t;
 }
+
+/* ── a working session, at its foot ─────────────────────────────────────────
+   While a session works, the foot of its view says so the way Claude Code's
+   own line does: the quill; how long the turn has run, counted on the spot
+   from the moment its status turned busy; what it is doing now — the tool call
+   whose result has not come back, by a command's own description, the file a
+   file tool works on, an agent's task — or that it is thinking, after what;
+   and how many tool calls and tokens the turn has taken. The server reads that
+   from the end of its transcript (`working`), the first time from the end and
+   after that only what was written since. It is asked when the band shows,
+   when the session changes state, and every few seconds while the band is on
+   screen in a window in front: never for a band nobody can see, and never
+   twice at once. Stop sends the Escape key to its tab, which is how a turn is
+   stopped in Claude Code, once you answer the question it turns into. */
+var DOING = {}, DOING_EVERY = 4000;        // sid → { j, at, out }
+var STOPASK = {};                          // sid → Stop asked and not yet answered
+function bandHTML(sid){
+  var on = !GONE && !!(RUN[sid] && RUN[sid].on === 'working');
+  return '<div class="wband" data-wband="' + esc(sid) + '"' + (on ? '' : ' hidden') + '>' +
+    quill('') + '<div class="wtext">' + bandText(sid) + '</div>' +
+    '<span class="wstop' + (STOPASK[sid] ? ' asking' : '') + '" data-wstopbox="' + esc(sid) + '">' +
+      stopHTML(sid) + '</span></div>';
+}
+/* how long the turn has run, to the second, the way Claude Code counts it */
+function clockFor(since){
+  var s = Math.max(0, Math.floor(Date.now() / 1000) - (since || 0)), m = Math.floor(s / 60);
+  function two(n){ return (n < 10 ? '0' : '') + n; }
+  if (s < 60) return s + 's';
+  if (m < 60) return m + 'm ' + two(s % 60) + 's';
+  return Math.floor(m / 60) + 'h ' + two(m % 60) + 'm';
+}
+function tokensFor(n){
+  return n < 1000 ? String(n) : n < 100000 ? (n / 1000).toFixed(1) + 'k'
+       : n < 1000000 ? Math.round(n / 1000) + 'k' : (n / 1000000).toFixed(1) + 'M';
+}
+/* a tool by the name it is known by; one from an MCP server by both names */
+function toolName(t){
+  var m = /^mcp__(.+?)__(.+)$/.exec(t || '');
+  return m ? m[1].replace(/_/g, ' ') + ' · ' + m[2].replace(/_/g, ' ') : (t || '?');
+}
+/* a long path keeps its end, which is where the file is named */
+function whatFor(x){
+  var w = x.what || '';
+  if (/^(Read|Edit|Write|MultiEdit|NotebookEdit)$/.test(x.tool) && w.length > 64 && w.indexOf('/') >= 0)
+    return '…/' + w.split('/').slice(-3).join('/');
+  return w;
+}
+function bandText(sid){
+  var r = RUN[sid] || {}, o = DOING[sid] || {}, j = o.j || {};
+  var fresh = !!o.j && j.status === 'busy' && (!r.since || !j.since || j.since === r.since);
+  if (!fresh) j = {};
+  var since = j.since || r.since || 0;
+  var l1 = ['<span class="wword">Working</span>',
+            '<span class="wclock" data-wclock="' + (+since || 0) + '">' + clockFor(since) + '</span>'];
+  if (j.counted){
+    l1.push('<span>' + (j.whole ? '' : 'at least ') + j.calls + ' tool call' + (j.calls === 1 ? '' : 's') + '</span>');
+    if (j.tokens) l1.push('<span>' + tokensFor(j.tokens) + ' tokens written</span>');
+  }
+  var now = j.now || [], l2;
+  if (!fresh) l2 = '<span class="wthink">reading what it is doing…</span>';
+  else if (j.transcript === false) l2 = '<span class="wthink">no transcript on disk says what it is doing</span>';
+  else if (now.length){
+    var t = now[now.length - 1];
+    l2 = '<span class="wtool">' + esc(toolName(t.tool)) + '</span>' +
+      '<span class="wwhat" title="' + esc(t.what) + '">' + esc(whatFor(t)) + '</span>' +
+      (now.length > 1 ? '<span class="wmore">and ' + (now.length - 1) + ' more at once</span>' : '');
+  } else {
+    l2 = '<span class="wthink">thinking</span>' + (j.last
+      ? '<span class="wafter" title="' + esc(j.last.what) + '">after ' + esc(toolName(j.last.tool)) +
+        (j.last.what ? ' · ' + esc(whatFor(j.last)) : '') + '</span>' : '');
+  }
+  return '<div class="wl1">' + l1.join('') + '</div><div class="wl2">' + l2 + '</div>';
+}
+var STOPICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.2" ' +
+               'fill="currentColor"/></svg>';
+function stopHTML(sid){
+  if (!can('launch')) return '';
+  if (STOPASK[sid]) return '<span class="wask">Stop it?</span>' +
+    '<button class="wyes" data-rstopok="' + esc(sid) + '">Stop</button><span class="rsep">·</span>' +
+    '<button class="wno" data-rstopno="' + esc(sid) + '">Cancel</button>';
+  return '<button class="wbtn" data-rstop="' + esc(sid) + '" title="Stop this turn: the Escape key, typed ' +
+    'into its iTerm tab once you confirm">' + STOPICON + 'Stop</button>';
+}
+/* the band's words are rewritten in place, and the quill is left alone, so
+   it never skips a stroke; Stop is redrawn only when it changes, so it keeps
+   the keyboard's focus */
+function paintBand(sid){
+  var on = !GONE && !!(RUN[sid] && RUN[sid].on === 'working');
+  if (!on) STOPASK[sid] = false;
+  [].forEach.call(document.querySelectorAll('[data-wband]'), function(b){
+    if (b.dataset.wband !== sid) return;
+    b.hidden = !on;
+    var t = b.querySelector('.wtext');
+    if (t) t.innerHTML = bandText(sid);
+    var x = b.querySelector('[data-wstopbox]'), asking = !!STOPASK[sid];
+    if (x && x.classList.contains('asking') !== asking){
+      x.classList.toggle('asking', asking);
+      x.innerHTML = stopHTML(sid);
+    }
+  });
+}
+function bandShown(b){ return !b.hidden && !!b.offsetParent && !document.hidden; }
+function lookDoing(sid){
+  var o = DOING[sid] || (DOING[sid] = {});
+  if (o.out || GONE || !can('waiting')) return;
+  o.out = true; o.at = Date.now();
+  api('working?id=' + encodeURIComponent(sid), undefined, function(j){
+    o.out = false; o.j = j || {};
+    var r = RUN[sid];
+    /* the session moved on before the list heard of it */
+    if (o.j.running === false || (r && o.j.status && o.j.status !== r.status)) lookAgain();
+    paintBand(sid);
+  }, function(){ o.out = false; });
+}
+/* after a look at the running sessions: each band shows or goes with its
+   session's state, a new turn is read at once, and a question asked of a
+   session that is no longer working is put away */
+function paintBands(was){
+  var seen = {};
+  [].forEach.call(document.querySelectorAll('[data-wband]'), function(b){
+    var sid = b.dataset.wband, r = RUN[sid], w = (was || {})[sid];
+    if (seen[sid]) return;
+    seen[sid] = 1;
+    if (!r || r.on !== 'working') delete DOING[sid];
+    else if (w && w.since !== r.since && DOING[sid]) DOING[sid].at = 0;
+    paintBand(sid);
+    if (r && r.on === 'working' && bandShown(b) && Date.now() - ((DOING[sid] || {}).at || 0) > 1000)
+      lookDoing(sid);
+  });
+  Object.keys(REPLY).forEach(function(sid){
+    var r = RUN[sid];
+    if (REPLY[sid].ask && !(r && r.on === 'working')){ REPLY[sid].ask = null; paintSend(sid); }
+  });
+}
+/* the clock counts every second, and what it does is asked every few, for
+   the bands on screen and no other */
+function tickBands(){
+  if (document.hidden) return;
+  var asked = {};
+  [].forEach.call(document.querySelectorAll('[data-wband]'), function(b){
+    if (!bandShown(b)) return;
+    var c = b.querySelector('[data-wclock]');
+    if (c) c.textContent = clockFor(+c.dataset.wclock);
+    var sid = b.dataset.wband;
+    if (!asked[sid] && Date.now() - ((DOING[sid] || {}).at || 0) >= DOING_EVERY){
+      asked[sid] = 1;
+      lookDoing(sid);
+    }
+  });
+}
+function stopIt(sid){
+  STOPASK[sid] = false;
+  paintBand(sid);
+  replySay(sid, 'stopping…');
+  api('act', { verb:'stop', id:sid }, function(j){
+    if (j && j.error) return replySay(sid, j.error, true);
+    replySay(sid, j.dry ? 'Escape would have gone to ' + whose(j) + ' tab — a dry run, so nothing was typed'
+                        : 'Escape sent to ' + whose(j) + ' tab, which stops its turn');
+    lookAgain();
+  }, function(e){
+    replySay(sid, (e && e.body && e.body.error) || (e && e.gone ? GONE_SAID : 'the stop did not reach the server'), true);
+    lookAgain();
+  });
+}
+function inputOf(el){
+  var box = el.closest('.sreply, .wcard, [data-rbox]');
+  return box && box.querySelector('[data-rin]');
+}
+function putAway(sid){
+  replyOf(sid).ask = null;
+  STOPASK[sid] = false;
+  paintSend(sid);
+  paintBand(sid);
+}
+
 var REPLYVERBS = RB.table({
-  rsend:    function(sid, el){
-    var box = el.closest('[data-rbox]');
-    sendReply(sid, box && box.querySelector('[data-rin]'));
+  rsend:    function(sid, el){ sendReply(sid, inputOf(el)); },
+  rsendok:  function(sid, el){
+    var a = replyOf(sid).ask || {};
+    sendReply(sid, inputOf(el), a.fixed || null, true);
   },
+  rsendno:  function(sid, el){
+    var i = inputOf(el);
+    replyOf(sid).ask = null;
+    paintSend(sid);
+    if (i) i.focus();
+  },
+  rstop:    function(sid, el){
+    STOPASK[sid] = true;
+    paintBand(sid);
+    var b = el.closest('[data-wband]'), no = b && b.querySelector('[data-rstopno]');
+    if (no) no.focus();
+  },
+  rstopok:  function(sid){ stopIt(sid); },
+  rstopno:  function(sid){ STOPASK[sid] = false; paintBand(sid); },
   rsignoff: function(sid){ sendReply(sid, null, '/signoff'); },
   radjust:  function(sid, el){
-    var box = el.closest('[data-rbox]'), i = box && box.querySelector('[data-rin]');
+    var i = inputOf(el);
     if (!i) return;
     if (!/^\/adjust\b/.test(i.value)) i.value = '/adjust ' + i.value.replace(/^\s+/, '');
     replyOf(sid).draft = i.value;
@@ -2459,11 +2782,21 @@ document.addEventListener('paste', function(e){
   i.setRangeText(oneLine(e.clipboardData.getData('text/plain')), i.selectionStart, i.selectionEnd, 'end');
   replyOf(i.dataset.rin).draft = i.value;
 });
+/* Enter sends, or asks; a question that is open is answered by its own
+   buttons and not by a second Enter, and Escape puts it away */
 document.addEventListener('keydown', function(e){
-  var i = e.target.closest && e.target.closest('[data-rin]');
-  if (!i || e.key !== 'Enter' || e.isComposing) return;
+  var box = e.target.closest && e.target.closest('[data-rbox], [data-wband]');
+  if (!box || e.isComposing) return;
+  var sid = box.dataset.rbox || box.dataset.wband;
+  if (e.key === 'Escape' && (replyOf(sid).ask || STOPASK[sid])){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return putAway(sid);
+  }
+  var i = e.target.closest('[data-rin]');
+  if (!i || e.key !== 'Enter') return;
   e.preventDefault();
-  sendReply(i.dataset.rin, i);
+  if (!replyOf(sid).ask) sendReply(sid, i);
 });
 
 function sessionSurface(sid, q){
@@ -3213,6 +3546,8 @@ function stat(){
      counted from history.jsonl, which outlives the transcripts. */
   var R = D.retention;
   if (R && R.lost) bits.push(R.readable + '/' + R.known + ' readable');
+  if (GONE) bits.push('<b class="warn" title="The page asked its server something and nothing ' +
+      'answered: md has stopped, and what this window shows is as it was then.">' + esc(GONE_SAID) + '</b>');
   if (noteFail) bits.push('<b class="warn" title="' + esc(noteWhy ||
       'The server refused the write. Your marks are in this browser only until it succeeds.') +
       '">notes for ' + esc(noteFail) + ' are not on disk</b>');
@@ -3261,8 +3596,10 @@ if (can('live')){
   document.querySelector('.bar').insertBefore(rb, $('navbtn'));
   rb.addEventListener('click', function(){ reindex(); });
 
-  /* the server exits when this stops, so closing the window cleans up after
-     itself and a crashed page cannot leave a process behind */
+  /* the server lives while this window holds its event stream open, or asks
+     it something within its idle time; the heartbeat is the asking, for a
+     page that watches nothing. Closing the window says goodbye, and a page
+     that crashed stops both, so no process is left behind */
   setInterval(function(){ api('ping', {}); }, 30000);
   addEventListener('pagehide', function(){
     try { navigator.sendBeacon(BASE + '/bye', new Blob(['{}'], {type:'application/json'})); } catch(e){}
@@ -3310,9 +3647,15 @@ function scopeToWhatExists(){
 }
 
 /* ── E1 · watch: the server tells us when a document changed on disk ─────── */
+/* The open stream is also what keeps the server for this window, through a
+   window left in the background and a Mac that slept, when the heartbeat's
+   timer is held back. A stream that breaks is retried by the browser on its
+   own; whether there is still a server to retry is asked once per break. */
 if (can('watch') && window.EventSource){
   try {
     var es = new EventSource(BASE + '/events');
+    es.onerror = function(){ api('ping', {}); };
+    es.onopen = function(){ if (GONE) serverBack(); };
     es.onmessage = function(ev){
       var j = {};
       try { j = JSON.parse(ev.data); } catch(e){ return; }
@@ -3596,6 +3939,7 @@ setInterval(function(){
     el.textContent = waited(+el.dataset.since, el.classList.contains('dur'));
   });
 }, 30000);
+setInterval(tickBands, 1000);
 
 window.__ws = { data: D, dossier: buildDossier, caps: CAPS,
                 reindex: reindex, ensureText: ensureText, ensureAllText: ensureAllText,

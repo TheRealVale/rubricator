@@ -12,8 +12,9 @@ Off unless asked for: `md --allow-launch`, or `{"allow_launch": true}` in
 ~/.config/rubricator/config.json. A fresh install can start nothing.
 
 A session running in a terminal is answered in that terminal: a reply is typed
-into its own iTerm tab, the way you would type it, and only while Claude waits
-there for input — see "a running session's own terminal" below.
+into its own iTerm tab, the way you would type it, while Claude waits there for
+input or, once you confirm it, while it works; and a working one is stopped with
+the Escape key in that tab — see "a running session's own terminal" below.
 """
 import json, os, plistlib, re, shlex, subprocess, time
 from pathlib import Path
@@ -363,11 +364,14 @@ def edit(path):
 # and if one does not, nothing is sent and the answer says which:
 #
 #   - the session's `claude` process lives;
-#   - its status says it is your turn — `idle` — not `busy`; not `shell`, whose
-#     turn ended with a command of its own still running; and not `waiting`,
-#     whose question or permission dialog would take the reply's Return as its
-#     answer, choosing whatever option is highlighted: that is answered in its
-#     tab;
+#   - its status is one the keys are meant for. A reply goes in on your turn —
+#     `idle` — and, when you confirmed it on the page, while it works — `busy` —
+#     where Claude Code queues what is typed during a turn and reads it when it
+#     can. The Escape key, which interrupts a turn, goes in only while it works.
+#     Neither goes into `waiting`, whose question or permission dialog would
+#     take the Return as its answer, choosing whatever option is highlighted, or
+#     the Escape as a refusal: that is answered in its tab; nor into `shell`,
+#     whose turn ended with a command of its own still running;
 #   - `claude` is in its terminal's foreground: `ps` marks the foreground
 #     process group with `+`, and a shell that took the terminal back after
 #     Claude exited, or was suspended, holds the `+` instead.
@@ -379,7 +383,9 @@ def edit(path):
 # terminal would read as a key (^C, ^D, escape), becomes a space too. It is
 # written without a line ending and followed, a moment later, by a carriage
 # return of its own: the Return key, which is what sends a prompt in Claude
-# Code, where a line feed may be taken for a line break inside it.
+# Code, where a line feed may be taken for a line break inside it. A stop is
+# one key and no words: `character id 27`, the Escape key, written once with
+# no line ending, by the script's own text — the page sends no key.
 #
 # The first reply makes macOS ask, once, whether rubricator may control iTerm
 # (System Settings → Privacy & Security → Automation keeps the answer). Until it
@@ -387,7 +393,9 @@ def edit(path):
 # RUBRICATOR_DRY_LAUNCH stops short of osascript and says what would have run.
 ITERM_ID = "com.googlecode.iterm2"
 MAX_REPLY = 8000
-WAITS_FOR_YOU = {"idle"}
+WAITS_FOR_YOU = frozenset({"idle"})
+WHILE_WORKING = frozenset({"idle", "busy"})      # a reply you confirmed while it works
+STOPPABLE = frozenset({"busy"})                  # what the Escape key is sent into
 TTY = re.compile(r"^tty[a-z]*\d{1,5}$")
 
 ITERM_SCRIPT = '''on run argv
@@ -406,6 +414,10 @@ ITERM_SCRIPT = '''on run argv
               tell aSession to write text (character id 13) newline no
               return "sent"
             end if
+            if theVerb is "stop" then
+              tell aSession to write text (character id 27) newline no
+              return "stopped"
+            end if
             tell aSession to select
             tell aTab to select
             tell aWindow to select
@@ -422,10 +434,29 @@ end run
 
 
 class Refused(Exception):
-    """Why nothing was sent: which check failed, in words for the page."""
-    def __init__(self, check, why):
+    """Why nothing was sent: which check failed, in words for the page, and for
+    a status, which status it was."""
+    def __init__(self, check, why, status=""):
         super().__init__(why)
-        self.check, self.why = check, why
+        self.check, self.why, self.status = check, why, status
+
+
+def _not_now(status, allow):
+    """Why the keys are not for a session in this status, for what was asked."""
+    if allow == STOPPABLE:
+        return {"idle": "its turn is over: there is nothing to stop",
+                "shell": "its turn is over, and the command of its own still running is not "
+                         "stopped by Escape: stop that in its tab",
+                "waiting": "it is asking you something in its terminal, a question or a permission "
+                           "that Escape would answer for you: answer it in its tab"}.get(
+                    status, "its status is %r, not one that is working" % status)
+    return {"busy": "it is working — a line sent now waits in its queue, and is sent only "
+                    "once you confirm that",
+            "shell": "its turn ended with a command of its own still running, "
+                     "so it will likely carry on by itself",
+            "waiting": "it is asking you something in its terminal, a question or a "
+                       "permission whose Return would choose for you: answer it in its tab"}.get(
+                status, "its status is %r, not one that waits for you" % status)
 
 
 def one_line(text):
@@ -445,8 +476,10 @@ def _ps(*args):
 def held(sid, writing=True):
     """The guard, read now: the running session with this id, its pid, its tty
     and its status, or Refused saying which check failed. `writing` adds the
-    two checks that only typing needs; bringing its tab forward needs a live
-    process with a terminal and nothing more."""
+    two checks that only typing needs, the status against what the keys are
+    for — True is a reply on your turn, or the statuses themselves — and the
+    foreground; bringing its tab forward needs a live process with a terminal
+    and nothing more."""
     import waiting as _W
     d = _W.session_file(sid)
     if not d:
@@ -460,13 +493,9 @@ def held(sid, writing=True):
         raise Refused("terminal", "it has no terminal to type into")
     status = d.get("status") or ""
     if writing:
-        if status not in WAITS_FOR_YOU:
-            raise Refused("status", {"busy": "it is working — a reply waits until its turn is over",
-                                     "shell": "its turn ended with a command of its own still running, "
-                                              "so it will likely carry on by itself",
-                                     "waiting": "it is asking you something in its terminal, a question or a "
-                                                "permission whose Return would choose for you: answer it in its tab"}
-                          .get(status, "its status is %r, not one that waits for you" % status))
+        allow = writing if isinstance(writing, frozenset) else WAITS_FOR_YOU
+        if status not in allow:
+            raise Refused("status", _not_now(status, allow), status)
         front = [ln.split(None, 2) for ln in _ps("-t", tty, "-o", "pid=,stat=,comm=").splitlines()]
         front = [r for r in front if len(r) == 3 and "+" in r[1]]
         if not any(r[0] == str(pid) for r in front) or "+" not in stat:
@@ -517,11 +546,13 @@ def iterm_of(pid):
     return name                                    # "iTerm2", from CFBundleName
 
 
-def to_terminal(sid, verb, text=""):
-    """Type a reply into a running session's own tab (`write`), or bring that
-    tab forward (`show`). The page sends the session id and, for a reply, the
-    words; everything else is read here."""
-    if verb not in ("write", "show"):
+def to_terminal(sid, verb, text="", working=False):
+    """Type a reply into a running session's own tab (`write`), send it the
+    Escape key that stops a turn (`stop`), or bring that tab forward (`show`).
+    The page sends the session id and, for a reply, the words, and says with
+    `working` that you confirmed a reply while it works; everything else is
+    read here."""
+    if verb not in ("write", "show", "stop"):
         raise ValueError("unknown verb")
     writing = verb == "write"
     line = one_line(text) if writing else ""
@@ -529,15 +560,24 @@ def to_terminal(sid, verb, text=""):
         raise Refused("text", "there is nothing to send")
     if writing and len(line) > MAX_REPLY:
         raise Refused("text", "a reply is one line of at most %d characters" % MAX_REPLY)
-    g = held(sid, writing)
+    # what the keys are for: a tab brought forward types nothing; a reply goes
+    # in on your turn, or while it works when you confirmed that, and only the
+    # boolean says so; the Escape key goes in only while it works
+    if verb == "show":
+        keys = False
+    elif verb == "stop":
+        keys = STOPPABLE
+    else:
+        keys = WHILE_WORKING if working is True else True
+    g = held(sid, keys)
     app = iterm_of(g["pid"])
-    if writing:
-        again = held(sid, True)                    # read again, as late as it can be
+    if keys:
+        again = held(sid, keys)                    # read again, as late as it can be
         if (again["pid"], again["tty"]) != (g["pid"], g["tty"]):
             raise Refused("running", "the session changed terminals while this was sent")
     argv = ["osascript", "-", "/dev/" + g["tty"], verb] + ([line] if writing else [])
     out = {"ok": True, "session": sid, "name": g["name"], "tty": g["tty"], "app": app,
-           "verb": verb, "text": line}
+           "verb": verb, "text": line, "status": g["status"]}
     if _dry():                                     # resolved and checked; nothing is scripted
         return dict(out, dry=True, argv=argv, script=ITERM_SCRIPT)
     try:

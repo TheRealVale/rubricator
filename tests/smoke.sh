@@ -39,7 +39,7 @@ echo "rubricator smoke tests"
 # A run of this suite happens on a desk where terminals hold live sessions, and
 # one AppleScript that reached them would type into one or switch its tabs. So
 # `osascript` on the PATH is a tripwire: it scripts nothing, writes down that it
-# was called, and fails. Test 35 reads what it wrote, which has to be nothing.
+# was called, and fails. Test 40 reads what it wrote, which has to be nothing.
 TRIP="$WORK/tripwire"; mkdir -p "$TRIP"
 printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s"\nexit 1\n' "$WORK/osascript.log" > "$TRIP/osascript"
 chmod +x "$TRIP/osascript"
@@ -2467,15 +2467,735 @@ else
   skip "34 · links between documents" "no node"
 fi
 
-# ── 35 · nothing in this run scripted another application ───────────────────
+# ── 35 · sent while it works, and stopped, only when you said so ────────────
+# While a session works, a reply goes into Claude Code's queue for the turn,
+# and Escape stops the turn — each only once you answered the page's question,
+# and only into what each is for. A reply while it works needs the boolean the
+# page sends with your answer; neither key goes into a session asking you
+# something, whose dialog would take it as an answer, nor into one on its own
+# command, a dead one, or one whose terminal another process holds. Pinned:
+#
+#   - a busy reply is refused without the confirmation, and only `true` itself
+#     confirms; with it, it reaches the script as the same argv item
+#   - `waiting`, `shell`, an ended process and a shell in the foreground are
+#     refused even with it, and say which check
+#   - stop is refused unless the session works, `waiting` above all, and after
+#     the guard's second reading; it sends exactly one key, Escape, by the
+#     script's own text, and no words, whatever the page sends
+#   - the server takes `whileWorking` only from a reply, behind the gate, and a
+#     refusal says the status it found
+#   - the dry seam never reaches osascript
+#
+# The processes are /bin/sleep through links named `claude` and `zsh`, each in
+# a pseudo-terminal of its own, as in test 32; nothing here talks to iTerm.
+python3 - "$WORK" "$REPO" >"$WORK/working-keys.txt" 2>&1 <<'PYEOF'
+import json, os, plistlib, pty, re, signal, subprocess, sys, time, urllib.error, urllib.request
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+base = os.path.join(work, "keys"); os.makedirs(base, exist_ok=True)
+sdir = os.path.join(base, "sessions"); os.makedirs(sdir, exist_ok=True)
+os.environ.update(RUBRICATOR_CLAUDE_SESSIONS=sdir, RUBRICATOR_DRY_LAUNCH="1",
+                  RUBRICATOR_CONFIG=os.path.join(base, "config.json"),
+                  RUBRICATOR_CLAUDE_HISTORY=os.path.join(base, "history.jsonl"),
+                  RUBRICATOR_CLAUDE_PROJECTS=os.path.join(base, "projects"))
+os.environ.pop("RUBRICATOR_ALLOW_LAUNCH", None)
+bindir = os.path.join(base, "bin"); os.makedirs(bindir, exist_ok=True)
+for n in ("claude", "zsh"):
+    os.symlink("/bin/sleep", os.path.join(bindir, n))
+ITERM = os.path.join(base, "Applications", "iTerm.app")
+os.makedirs(os.path.join(ITERM, "Contents"), exist_ok=True)
+with open(os.path.join(ITERM, "Contents", "Info.plist"), "wb") as f:
+    plistlib.dump({"CFBundleIdentifier": "com.googlecode.iterm2", "CFBundleName": "iTerm2"}, f)
+
+sys.path.insert(0, os.path.join(repo_root, "share"))
+import actions as A
+scripted, real_run = [], subprocess.run
+def watched(argv, *a, **k):
+    if any("osascript" in str(x) for x in (argv if isinstance(argv, (list, tuple)) else [argv])):
+        scripted.append(list(argv)); raise RuntimeError("osascript reached")
+    return real_run(argv, *a, **k)
+A.subprocess.run = watched
+A._host = lambda pid: ITERM
+
+kids = []
+def in_pty(front_is_claude=True):
+    pid, fd = pty.fork()
+    if pid == 0:
+        if front_is_claude:
+            os.execv(os.path.join(bindir, "claude"), ["claude", "300"])
+        g = os.fork()
+        if g == 0:
+            os.setpgid(0, 0)
+            os.execv(os.path.join(bindir, "claude"), ["claude", "300"])
+        os.write(1, ("%d\n" % g).encode())
+        os.execv(os.path.join(bindir, "zsh"), ["-zsh", "300"])
+    kids.append(pid)
+    if front_is_claude:
+        return pid
+    got = b""
+    while not got.endswith(b"\n"): got += os.read(fd, 64)
+    kids.append(int(got.split()[-1]))
+    return kids[-1]
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+def session(n, pid, status):
+    open(os.path.join(sdir, "%d.json" % pid), "w").write(json.dumps(
+        {"pid": pid, "sessionId": sid(n), "status": status, "name": "keys-%d" % n, "cwd": base}))
+ended = subprocess.Popen([os.path.join(bindir, "claude"), "0"]); ended.wait()
+session(1, in_pty(), "busy")                   # working, in the foreground
+session(2, in_pty(), "waiting")                # asking you something
+session(3, in_pty(), "shell")                  # its own command still running
+session(4, in_pty(), "idle")                   # your turn
+session(5, ended.pid, "busy")                  # its process has ended
+session(6, in_pty(False), "busy")              # the shell holds the foreground
+time.sleep(0.4)
+
+def tried(n, verb="write", text="hello", working=False):
+    try:
+        return A.to_terminal(sid(n), verb, text, working=working)
+    except A.Refused as r:
+        return (r.check, r.why, r.status)
+checks = {}
+try:
+    r = tried(1)
+    checks["a busy reply is refused without the confirmation"] = isinstance(r, tuple) and r[0] == "status" and r[2] == "busy"
+    for v in ("true", 1, "yes"):
+        r = tried(1, working=v)
+        checks["only true confirms, not %r" % (v,)] = isinstance(r, tuple) and r[0] == "status"
+    r = tried(1, text="also the neap tides", working=True)
+    checks["confirmed, a busy reply reaches the script as its argv item"] = (
+        isinstance(r, dict) and r.get("dry") and r["argv"][3:] == ["write", "also the neap tides"]
+        and r.get("status") == "busy")
+    r = tried(4, working=True)
+    checks["confirmed on your turn, it is an ordinary reply"] = isinstance(r, dict) and r["argv"][3] == "write"
+    r = tried(2, working=True)
+    checks["waiting is refused even confirmed, its dialog answered in its tab"] = (
+        isinstance(r, tuple) and r[0] == "status" and r[2] == "waiting" and "its tab" in r[1])
+    r = tried(3, working=True)
+    checks["shell is refused even confirmed"] = isinstance(r, tuple) and r[0] == "status" and r[2] == "shell"
+    r = tried(5, working=True)
+    checks["an ended process is refused even confirmed"] = isinstance(r, tuple) and r[0] == "running"
+    r = tried(6, working=True)
+    checks["a shell in the foreground is refused even confirmed"] = isinstance(r, tuple) and r[0] == "foreground"
+
+    # stop: Escape, only into a turn
+    r = tried(1, "stop", text="words the page should not have sent")
+    checks["stop on a working session sends one key and no words"] = (
+        isinstance(r, dict) and r.get("dry") and r["argv"][:2] == ["osascript", "-"]
+        and r["argv"][3:] == ["stop"] and r.get("text") == "")
+    for n, status in ((2, "waiting"), (4, "idle"), (3, "shell")):
+        r = tried(n, "stop")
+        checks["stop is refused on %s" % status] = isinstance(r, tuple) and r[0] == "status" and r[2] == status
+    r = tried(2, "stop")
+    checks["stop says why Escape stays out of a dialog"] = isinstance(r, tuple) and "Escape would answer" in r[1]
+    checks["stop is refused on an ended process"] = (tried(5, "stop") or ("",))[0] == "running"
+    checks["stop is refused when the shell holds the foreground"] = (tried(6, "stop") or ("",))[0] == "foreground"
+    real_held, seen = A.held, []
+    def turning(s, writing=True):
+        seen.append(writing)
+        if len(seen) == 2: raise A.Refused("status", "its turn is over", "idle")
+        return real_held(s, writing)
+    A.held = turning
+    r = tried(1, "stop")
+    A.held = real_held
+    checks["stop reads the guard again just before the key"] = (
+        len(seen) == 2 and seen[0] == A.STOPPABLE and isinstance(r, tuple) and r[0] == "status")
+
+    # the key itself is the script's: one write, of character id 27, no line ending
+    body = A.ITERM_SCRIPT.split('if theVerb is "stop" then', 1)[1].split("end if", 1)[0]
+    writes = re.findall(r"write text .*", body)
+    checks["the stop branch writes exactly one Escape, with no line ending"] = (
+        writes == ["write text (character id 27) newline no"] and "theText" not in body
+        and A.ITERM_SCRIPT.count("character id 27") == 1)
+
+    # the server: the gate, the flag only from a reply, the status in a refusal
+    import workspace as W
+    repo = os.path.join(base, "repo"); os.makedirs(repo, exist_ok=True)
+    open(os.path.join(repo, "README.md"), "w").write("# keys\n")
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+    srv = W.serve_workspace([repo], False, Path(repo_root) / "share", "", idle=10 ** 9)
+    def call(body):
+        q = urllib.request.Request(srv.base + "/act", data=json.dumps(body).encode(),
+                                   headers={"Content-Type": "application/json"})
+        try: return json.load(urllib.request.urlopen(q, timeout=30)), 200
+        except urllib.error.HTTPError as e: return json.load(e), e.code
+    try:
+        got, code = call({"verb": "stop", "id": sid(1)})
+        checks["without the gate stop is refused"] = code == 403
+        os.environ["RUBRICATOR_ALLOW_LAUNCH"] = "1"
+        got, code = call({"verb": "reply", "id": sid(1), "text": "queued"})
+        checks["the server refuses a busy reply without the flag, naming the status"] = (
+            code == 409 and got.get("refused") == "status" and got.get("status") == "busy")
+        got, code = call({"verb": "reply", "id": sid(1), "text": "queued", "whileWorking": "true"})
+        checks["the flag is the boolean, not a word"] = code == 409
+        got, code = call({"verb": "reply", "id": sid(1), "text": "queued", "whileWorking": True})
+        checks["with the flag a busy reply goes through"] = code == 200 and got.get("argv", [])[3:] == ["write", "queued"]
+        got, code = call({"verb": "reply", "id": sid(2), "text": "1", "whileWorking": True})
+        checks["the server refuses waiting even with the flag"] = code == 409 and got.get("status") == "waiting"
+        got, code = call({"verb": "stop", "id": sid(1), "text": "rm -rf ~", "whileWorking": True})
+        checks["the server's stop carries no words, whatever the page sends"] = (
+            code == 200 and got.get("argv", [])[3:] == ["stop"])
+        got, code = call({"verb": "stop", "id": sid(2)})
+        checks["the server's stop refuses waiting"] = code == 409 and got.get("status") == "waiting"
+    finally:
+        os.environ.pop("RUBRICATOR_ALLOW_LAUNCH", None)
+        srv.stop.set()
+        try: srv.httpd.shutdown()
+        except Exception: pass
+    checks["the dry seam never reached osascript"] = scripted == []
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    for k in kids:
+        try: os.kill(k, signal.SIGTERM)
+        except Exception: pass
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "35 · sent while it works only once confirmed, stopped with one Escape only while it works"
+else
+  no "35 · sending while it works or stopping is wrong" "$(grep '^XX' "$WORK/working-keys.txt" | tr '\n' ' ')$(tail -2 "$WORK/working-keys.txt")"
+fi
+
+# ── 36 · what a working session is doing, read from the end ─────────────────
+# The band at the foot of a working session says what it is doing, read from
+# the end of its transcript: the tool calls of Claude's latest message whose
+# results have not come back, or that it thinks, after what; and how many
+# calls and output tokens the turn has taken since its status turned busy.
+# Transcripts reach 1.4 GB, so this pins how much is read:
+#
+#   - the first look reads a quarter of a megabyte of a 3 MB transcript when
+#     the turn is in it, and the calls from before the turn do not count
+#   - a later look reads only what was written since, and a line still being
+#     written waits for the next look
+#   - a turn longer than sixteen megabytes is read to there and no further,
+#     and its counts say "at least"
+#   - each message's tokens count once, however many records carry them;
+#     parallel calls are all running; a file tool says its file, a command its
+#     own description, and a path is not mangled by the scrubber
+#   - a session that is not working has its transcript left alone, and the
+#     server answers only with consent and only for a session id
+python3 - "$WORK" "$REPO" >"$WORK/doing.txt" 2>&1 <<'PYEOF'
+import json, os, subprocess, sys, time, urllib.error, urllib.request
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+base = os.path.join(work, "doing")
+sdir = os.path.join(base, "sessions"); os.makedirs(sdir, exist_ok=True)
+pdir = os.path.join(base, "projects", "-doing"); os.makedirs(pdir, exist_ok=True)
+os.environ.update(RUBRICATOR_CLAUDE_SESSIONS=sdir, RUBRICATOR_CLAUDE_PROJECTS=os.path.join(base, "projects"),
+                  RUBRICATOR_CLAUDE_HISTORY=os.path.join(base, "history.jsonl"))
+bindir = os.path.join(base, "bin"); os.makedirs(bindir, exist_ok=True)
+fake = os.path.join(bindir, "claude"); os.symlink("/bin/sleep", fake)
+procs = []
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+def iso(t): return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".%03dZ" % int((t % 1) * 1000)
+now = time.time()
+SINCE = now - 300
+def session(n, status, since=SINCE):
+    p = subprocess.Popen([fake, "300"]); procs.append(p)
+    open(os.path.join(sdir, "%d.json" % p.pid), "w").write(json.dumps(
+        {"pid": p.pid, "sessionId": sid(n), "status": status, "cwd": "/w", "name": "doing-%d" % n,
+         "statusUpdatedAt": int(since * 1000)}))
+k = [0]
+def call(t, name, inp, out, back=True, mid=None, cwd="/w"):
+    k[0] += 1
+    mid = mid or "msg_%d" % k[0]; tid = "toolu_%d" % k[0]
+    recs = [{"type": "assistant", "cwd": cwd, "timestamp": iso(t), "message": {"id": mid, "usage": {"output_tokens": out},
+             "content": [{"type": "thinking", "thinking": "hm"}]}},
+            {"type": "assistant", "cwd": cwd, "timestamp": iso(t + 0.5), "message": {"id": mid, "usage": {"output_tokens": out},
+             "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}]}}]
+    if back:
+        recs.append({"type": "user", "cwd": cwd, "timestamp": iso(t + 1), "message": {"content": [
+            {"type": "tool_result", "tool_use_id": tid, "content": "x" * 200}]}})
+    return recs
+def lines(recs): return "".join(json.dumps(r, separators=(",", ":")) + "\n" for r in recs)
+def pad(size, t):
+    one = json.dumps({"type": "api-request", "timestamp": iso(t), "params": "p" * 2000}) + "\n"
+    return one * (size // len(one))
+
+checks = {}
+try:
+    sys.path.insert(0, os.path.join(repo_root, "share"))
+    import waiting as Wt
+    # 1 · 3 MB before the turn, calls of an earlier turn among them, then the turn
+    early = lines(call(SINCE - 900, "Bash", {"command": "make", "description": "EARLY call"}, 999))
+    turn = lines([{"type": "user", "cwd": "/w", "timestamp": iso(SINCE + 1), "promptSource": "prompt",
+                   "message": {"content": "do the thing"}}]
+                 + call(SINCE + 5, "Read", {"file_path": "/w/src/tide/table.ts"}, 100)
+                 + call(SINCE + 9, "Grep", {"pattern": "ebb", "path": "/w"}, 50)
+                 + call(SINCE + 12, "Bash", {"command": "./tests/smoke.sh --browser",
+                                             "description": "Run the smoke suite with the browser tests"}, 700, back=False))
+    path1 = os.path.join(pdir, sid(1) + ".jsonl")
+    open(path1, "w").write(pad(1_500_000, SINCE - 1000) + early + pad(1_500_000, SINCE - 800) + turn)
+    session(1, "busy")
+    j = Wt.doing(sid(1))
+    size1 = os.path.getsize(path1)
+    checks["the first look reads a quarter of a megabyte of 3 MB"] = 0 < j.get("read", 0) <= 262144 < size1
+    checks["it reached the turn's start"] = j.get("whole") is True and j.get("counted") is True
+    checks["the calls before the turn do not count"] = j.get("calls") == 3
+    checks["each message's tokens count once"] = j.get("tokens") == 850
+    checks["the call without its result is what runs now, by its description"] = (
+        j.get("now") == [{"tool": "Bash", "what": "Run the smoke suite with the browser tests"}])
+    checks["the latest call that came back is named"] = (j.get("last") or {}).get("tool") == "Grep"
+
+    # 2 · what was written since: only that is read; a half-written line waits
+    more = lines([{"type": "user", "cwd": "/w", "timestamp": iso(SINCE + 40), "message": {"content": [
+                     {"type": "tool_result", "tool_use_id": "toolu_%d" % k[0], "content": "done"}]}}]
+                 + call(SINCE + 41, "Edit", {"file_path": "/w/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w.ts"}, 300, back=False, mid="msg_par")
+                 + call(SINCE + 41.2, "Read", {"file_path": "/w/README.md"}, 300, back=False, mid="msg_par"))
+    half = json.dumps({"type": "assistant", "timestamp": iso(SINCE + 50), "message": {"id": "msg_half",
+                       "content": [{"type": "tool_use", "id": "toolu_half", "name": "Write", "input": {}}]}})
+    with open(path1, "a") as f:
+        f.write(more + half[:40])
+    j = Wt.doing(sid(1))
+    checks["a later look reads only what was written since"] = j.get("read") == len((more + half[:40]).encode())
+    checks["parallel calls are all running, and a long path keeps its slashes"] = (
+        [x["tool"] for x in j.get("now", [])] == ["Edit", "Read"]
+        and j["now"][0]["what"].endswith("/t/u/v/w.ts") and "[" not in j["now"][0]["what"])
+    checks["a message's tokens count once, its calls each"] = j.get("calls") == 5 and j.get("tokens") == 1150
+    checks["the half-written line is not read yet"] = j.get("calls") == 5
+    with open(path1, "a") as f:
+        f.write(half[40:] + "\n")
+    j = Wt.doing(sid(1))
+    checks["and is read once whole"] = j.get("calls") == 6 and [x["tool"] for x in j.get("now", [])] == ["Write"]
+
+    # 3 · thinking: every call of the latest message came back
+    path2 = os.path.join(pdir, sid(2) + ".jsonl")
+    open(path2, "w").write(lines(call(SINCE + 5, "Agent", {"description": "Survey the docks", "prompt": "long"}, 40)))
+    session(2, "busy")
+    j = Wt.doing(sid(2))
+    checks["between calls it is thinking, after the last one"] = (
+        j.get("now") == [] and j.get("last") == {"tool": "Agent", "what": "Survey the docks"})
+
+    # 4 · a turn longer than sixteen megabytes: read to there, counts "at least"
+    path3 = os.path.join(pdir, sid(3) + ".jsonl")
+    with open(path3, "w") as f:
+        f.write(lines(call(SINCE - 900, "Bash", {"description": "before"}, 1)))
+        one = lines(call(SINCE + 2, "Read", {"file_path": "/w/x"}, 1)) + pad(400_000, SINCE + 3)
+        for _ in range(int(18_000_000 / len(one)) + 1):
+            f.write(one)
+    session(3, "busy")
+    j = Wt.doing(sid(3))
+    checks["a turn past sixteen megabytes is read to there and no further"] = (
+        j.get("read") == 16 * 1024 * 1024 and j.get("whole") is False and j.get("calls", 0) > 0)
+
+    # 5 · not working: nothing read
+    open(os.path.join(pdir, sid(4) + ".jsonl"), "w").write(turn)
+    session(4, "idle")
+    j = Wt.doing(sid(4))
+    checks["a session that is not working has its transcript left alone"] = (
+        j.get("running") is True and j.get("status") == "idle" and "read" not in j and "now" not in j)
+    checks["a session that is not running says so"] = Wt.doing(sid(99)) == {"sid": sid(99), "running": False}
+
+    # 6 · the server: consent, and a session id
+    import workspace as W
+    repo = os.path.join(base, "repo"); os.makedirs(repo, exist_ok=True)
+    open(os.path.join(repo, "README.md"), "w").write("# doing\n")
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+    share = Path(repo_root) / "share"
+    srvs = [W.serve_workspace([repo], False, share, "", idle=10 ** 9),
+            W.serve_workspace([repo], True, share, "", idle=10 ** 9)]
+    def get(srv, q):
+        try: return json.load(urllib.request.urlopen(srv.base + "/working?id=" + q, timeout=20)), 200
+        except urllib.error.HTTPError as e: return json.load(e), e.code
+    try:
+        got, code = get(srvs[0], sid(1))
+        checks["without consent the server reads nothing"] = got.get("allowed") is False and "now" not in got
+        got, code = get(srvs[1], sid(1))
+        checks["with it, the band's reading comes back"] = code == 200 and got.get("status") == "busy" and got.get("calls") == 6
+        got, code = get(srvs[1], "../../etc/passwd")
+        checks["an id that is not a session id is refused"] = code == 400
+    finally:
+        for s_ in srvs:
+            s_.stop.set()
+            try: s_.httpd.shutdown()
+            except Exception: pass
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    for q in procs: q.terminate()
+for k_, v in checks.items(): print(("ok " if v else "XX ") + k_)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "36 · what a working session does is read from the end, and then only what was written since"
+else
+  no "36 · the band's reading is wrong" "$(grep '^XX' "$WORK/doing.txt" | tr '\n' ' ')$(tail -2 "$WORK/doing.txt")"
+fi
+
+# ── 37 · the band, the two questions, and a server that has gone ────────────
+# The page's half, lifted from the shipped source the way tests 30b and 33 are,
+# around stand-ins for the server and the DOM. Pinned:
+#
+#   - Send on a working session asks, inline — the button turns into "Send
+#     while it works? Send · Cancel", never a dialog — and sends nothing until
+#     answered; the answer sends `whileWorking: true`; a reply on your turn
+#     goes without it; a session found working by the server is asked about
+#     too; an open question is answered by its buttons, not a second Enter,
+#     and Escape puts it away
+#   - Stop asks the same way, and only its answer sends `stop`, with no words
+#   - the band says what runs, how long, how many calls and tokens, or that it
+#     thinks, after what; it asks what the session does only for a band on
+#     screen in a window in front, never twice at once, and once every few
+#     seconds at most
+#   - an Open now row keeps its second line one line, the names taking what is
+#     left, and a session started elsewhere that works here says so
+#   - a request that reaches no server says plainly that md's server has
+#     stopped; look again looks again, says it is looking, and says when
+#     nothing answered; a look that never came back does not hold the next
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("function api(path, body, cb, fail){", "/* document bodies are left on disk"),
+    sl("var WAIT = null, RUN = {}, waitLoading", "/* the list is only as current as the last look"),
+    sl("function waited(ts, short)", "/* a link in a reply leaves this window"),
+    sl("/* What a running session is doing, in the order it needs you", "function waitCard(r)"),
+    sl("/* ── answering a running session in its own terminal", "function sessionSurface(sid, q)"),
+]))' "$REPO/share/workspace.js" "$WORK/band.js"
+  { cat <<'JSEOF'
+var CAPS = { waiting: 1, live: 1, launch: 1 }, BASE = 'http://127.0.0.1:1/t';
+function can(c){ return !!CAPS[c]; }
+function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function shortRepo(p){ return (p || '?').split('/').pop() || '?'; }
+function hits(){ return true; } function sessionScore(){ return { s: 0 }; }
+var D = { sessions: {} }, sesScope = 'here', statted = 0, toasted = [], looked = 0, drawn = 0;
+function stat(){ statted++; } function toast(m){ toasted.push(m); }
+function lookAgain(){ looked++; }
+function afterWaiting(){ drawn++; }
+function openSession(){} var Shell = { refresh: function(){} };
+var listeners = {};
+var document = { hidden: false, bands: [], addEventListener: function(k, f){ (listeners[k] = listeners[k] || []).push(f); },
+  querySelectorAll: function(sel){ return sel === '[data-wband]' ? this.bands : []; } };
+var RB = { table: function(spec){ var f = function(){}; f.spec = spec; return f; } };
+/* the server, held: each request waits for the test to answer it */
+var asked = [];
+function answer(i, ok, j){ var a = asked[i]; return ok ? a.cb(j) : a.fail(j); }
+var realApi;
+JSEOF
+    cat "$WORK/band.js"
+    cat <<'JSEOF'
+
+realApi = api;
+api = function(path, body, cb, fail){ asked.push({ path: path, body: body, cb: cb, fail: fail }); };
+var fail = [];
+function want(c, why){ if (!c) fail.push(why); }
+var sid = 'aaaaaaaa-0000-4000-8000-000000000001', now = Math.floor(Date.now() / 1000);
+RUN = {}; RUN[sid] = { sid: sid, on: 'working', status: 'busy', since: now - 252, pid: 9, name: 'harbour-3f' };
+
+/* Send while it works: the question, inline, and nothing sent until it is answered */
+var input = { value: 'also the neap tides', focus: function(){} };
+sendReply(sid, input);
+want(asked.length === 0, 'Send on a working session sent without asking');
+var h = sendHTML(sid);
+want(/Send while it works\?/.test(h) && /data-rsendok=/.test(h) && /data-rsendno=/.test(h),
+     'the button did not turn into the question: ' + h);
+var lifted = require('fs').readFileSync(process.argv[2], 'utf8');
+want(!/\bconfirm\s*\(/.test(lifted), 'a browser confirm() dialog is used');
+var el = { closest: function(){ return { querySelector: function(){ return input; } }; } };
+REPLYVERBS.spec.rsendok(sid, el);
+want(asked.length === 1 && asked[0].body.verb === 'reply' && asked[0].body.whileWorking === true &&
+     asked[0].body.text === 'also the neap tides', 'the answer did not send the flag: ' + JSON.stringify(asked[0] && asked[0].body));
+want(!replyOf(sid).ask, 'the question stayed after it was answered');
+/* /signoff asks too, and names what it would send */
+sendReply(sid, null, '/signoff');
+want(asked.length === 1 && /Send <b>\/signoff<\/b> while it works\?/.test(sendHTML(sid)), '/signoff did not ask, by name');
+REPLYVERBS.spec.rsendno(sid, el);
+want(!replyOf(sid).ask && asked.length === 1, 'Cancel did not put the question away');
+/* on your turn, no question and no flag */
+RUN[sid].on = 'done'; RUN[sid].status = 'idle';
+sendReply(sid, { value: 'go on' });
+want(asked.length === 2 && !('whileWorking' in asked[1].body), 'a reply on your turn asked, or carried the flag');
+/* the server found it working: the page asks, and sends nothing more */
+answer(1, false, { status: 409, body: { refused: 'status', status: 'busy', error: 'it is working' } });
+want(replyOf(sid).ask && asked.length === 2 && looked === 1, 'a refusal for working did not turn into the question');
+/* an open question: Enter does not send, Escape puts it away */
+var kd = listeners.keydown[0], stopped = 0, prevented = 0;
+function key(k, target){ kd({ key: k, isComposing: false, target: target, preventDefault: function(){ prevented++; },
+                               stopImmediatePropagation: function(){ stopped++; } }); }
+var box = { dataset: { rbox: sid } };
+var inp = { value: 'go on', closest: function(sel){ return /data-rin/.test(sel) && !/rbox/.test(sel) ? inp : box; } };
+key('Enter', inp);
+want(asked.length === 2, 'a second Enter answered the question');
+key('Escape', inp);
+want(!replyOf(sid).ask && stopped === 1, 'Escape did not put the question away, or let it through');
+
+/* Stop: the question, and only its answer sends the key */
+RUN[sid].on = 'working'; RUN[sid].status = 'busy';
+want(/data-rstop=/.test(stopHTML(sid)) && !/Stop it\?/.test(stopHTML(sid)), 'Stop is not a button first');
+REPLYVERBS.spec.rstop(sid, { closest: function(){ return null; } });
+want(/Stop it\?/.test(stopHTML(sid)) && /data-rstopok=/.test(stopHTML(sid)) && /data-rstopno=/.test(stopHTML(sid)) &&
+     asked.length === 2, 'Stop did not turn into its question, or sent before the answer');
+REPLYVERBS.spec.rstopno(sid);
+want(!STOPASK[sid] && asked.length === 2, 'Cancel sent a stop');
+REPLYVERBS.spec.rstop(sid, { closest: function(){ return null; } });
+REPLYVERBS.spec.rstopok(sid);
+want(asked.length === 3 && asked[2].body.verb === 'stop' && asked[2].body.id === sid && !asked[2].body.text,
+     'the answer did not send one stop, without words: ' + JSON.stringify(asked[2] && asked[2].body));
+
+/* the band's words */
+DOING[sid] = { j: { status: 'busy', since: now - 252, counted: true, whole: true, calls: 37, tokens: 30330,
+                    now: [{ tool: 'Bash', what: 'Run the smoke suite' }], last: { tool: 'Read', what: 'a.md' } }, at: Date.now() };
+var t = bandText(sid);
+want(/>Working</.test(t) && /4m 1\ds/.test(t) && /37 tool calls/.test(t) && /30\.3k tokens written/.test(t) &&
+     />Bash</.test(t) && /Run the smoke suite/.test(t), 'the band does not say what runs: ' + t);
+DOING[sid].j.now = []; DOING[sid].j.whole = false;
+t = bandText(sid);
+want(/thinking/.test(t) && /after Read · a\.md/.test(t) && /at least 37 tool calls/.test(t), 'thinking, or "at least", is not said: ' + t);
+DOING[sid].j.since = now - 9999;
+want(/reading what it is doing/.test(bandText(sid)), 'a reading of another turn is shown as this one');
+want(/class="quill"/.test(bandHTML(sid)) && !/ hidden/.test(bandHTML(sid).split('>')[0]), 'a working band has no quill, or is hidden');
+RUN[sid].on = 'done';
+want(/ hidden/.test(bandHTML(sid).split('>')[0]), 'the band shows for a session that is not working');
+RUN[sid].on = 'working';
+
+/* what it does is asked for a band on screen, in front, once at a time, every few seconds */
+function band(shown){
+  var part = { dataset: { wclock: String(now - 5) }, textContent: '', innerHTML: '',
+               classList: { contains: function(){ return false; }, toggle: function(){} } };
+  return { hidden: false, offsetParent: shown ? {} : null, dataset: { wband: sid },
+           querySelector: function(){ return part; } };
+}
+DOING = {}; asked = [];
+var T = Date.now(), realNow = Date.now; Date.now = function(){ return T; };
+document.bands = [band(false)]; tickBands();
+want(asked.length === 0, 'a band not on screen asked the server');
+document.bands = [band(true)]; document.hidden = true; tickBands();
+want(asked.length === 0, 'a window in the background asked the server');
+document.hidden = false; tickBands(); tickBands();
+want(asked.length === 1 && /^working\?id=/.test(asked[0].path), 'a band on screen did not ask, or asked twice at once');
+answer(0, true, { status: 'busy', since: now - 252, now: [], counted: true, calls: 1 });
+T += 1000; tickBands();
+want(asked.length === 1, 'it asked again within a second');
+T += DOING_EVERY; tickBands();
+want(asked.length === 2, 'it did not ask again after a few seconds');
+document.bands = [band(true), band(true)]; answer(1, true, {}); T += DOING_EVERY; tickBands();
+want(asked.length === 3, 'two copies of one band asked twice');
+Date.now = realNow;
+
+/* Open now: the second line's names take what is left; elsewhere-but-here says so */
+var row = openRow({ sid: 'b', pid: 1, on: 'working', status: 'busy', name: 'repositories-aa', cwd: '/Users/x/Repositories',
+                    since: now - 60, first: 'tidy the notes', inRepo: true, worksHere: true, named: [9, 0] }, '', '');
+want(/<span class="rwhere">started in ~\/Repositories, works here<\/span>/.test(row) && /class="dot working"><span class="quill mini"/.test(row),
+     'a session working here does not say where it began, or wears no quill: ' + row);
+var css = require('fs').readFileSync(process.argv[3], 'utf8');
+want(/\.srow\.run \.rst\{[^}]*flex-wrap:nowrap/.test(css) && /\.srow\.run \.rst \.nms\{flex:1 1 0;[^}]*text-overflow:ellipsis/.test(css),
+     'an Open now row\'s second line may wrap, or its names do not give way');
+
+/* the server gone */
+var realFetch = typeof fetch === 'function' ? fetch : null;
+globalThis.fetch = function(){ return Promise.reject(new TypeError('Failed to fetch')); };
+GONE = 0; WAIT = { allowed: true, state: 'ok', sessions: [] }; asked = [];
+api = realApi;
+loadWaiting(false);
+setTimeout(function(){
+  want(GONE && statted > 0, 'a request that reached nothing did not mark the server gone');
+  want(WAIT.state === 'gone' && /md\u2019s server has stopped; run md again/.test(runTrouble()) &&
+       /data-wlook/.test(runTrouble()) && /no answer at \d\d:\d\d:\d\d/.test(runTrouble()) &&
+       !/did not answer/.test(runTrouble()), 'a server that has gone is not said plainly: ' + runTrouble());
+  var first = WAIT.at, fetched = 0;
+  globalThis.fetch = function(){ fetched++; return Promise.reject(new TypeError('Failed to fetch')); };
+  lookAgainNow();
+  want(/Looking again/.test(runTrouble()) && fetched === 1, 'look again did not look, or did not say so');
+  setTimeout(function(){
+    want(WAIT.state === 'gone' && WAIT.at >= first && !WAIT.looking, 'looking again did not say what came of it');
+    /* a look that never came back does not hold the next one for good */
+    globalThis.fetch = function(){ fetched++; return new Promise(function(){}); };
+    loadWaiting(false); loadWaiting(false);
+    want(fetched === 2, 'a second look went while the first was out');
+    var T0 = Date.now(), rn = Date.now; Date.now = function(){ return T0 + 16000; };
+    loadWaiting(false);
+    Date.now = rn;
+    want(fetched === 3, 'a look that never came back held the next one');
+    globalThis.fetch = function(){ return Promise.resolve({ ok: true, json: function(){ return Promise.resolve({ ok: 1 }); } }); };
+    realApi('ping', {}, function(){
+      want(!GONE, 'an answer did not clear the server gone');
+      console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+    });
+  }, 20);
+}, 20);
+JSEOF
+  } > "$WORK/band-run.js"
+  res=$(node "$WORK/band-run.js" "$WORK/band.js" "$REPO/share/workspace.html" 2>&1)
+  case "$res" in ok*) ok "37 · the band, Send's and Stop's questions, and a server that has gone, on the page" ;;
+                 *)   no "37 · the page's band or its questions are wrong" "$res" ;; esac
+else
+  skip "37 · the band on the page" "no node"
+fi
+
+# ── 38 · the server stays while its window does ─────────────────────────────
+# A window in the background, or on a Mac that slept, sends no heartbeat — the
+# browser holds its timers back — and the server used to stop under it after
+# its idle time, leaving a window whose every request reached nothing. A
+# window holds its event stream open for as long as it is open, so the server
+# lives while any stream is open, and stops once none is and nothing has asked
+# for the idle time. Pinned, with an idle time of one second:
+#
+#   - a stream open well past the idle time keeps the server, with no request
+#   - once it closes, the server stops within a few idle times
+#   - with no stream and no request, the server stops
+python3 - "$WORK" "$REPO" >"$WORK/stays.txt" 2>&1 <<'PYEOF'
+import os, socket, subprocess, sys, time, urllib.request
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+repo = os.path.join(work, "stays"); os.makedirs(repo, exist_ok=True)
+open(os.path.join(repo, "README.md"), "w").write("# stays\n")
+subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+sys.path.insert(0, os.path.join(repo_root, "share"))
+import workspace as W
+share = Path(repo_root) / "share"
+checks = {}
+def stopped_within(srv, secs):
+    end = time.time() + secs
+    while time.time() < end:
+        if srv.stop.is_set(): return True
+        time.sleep(0.1)
+    return srv.stop.is_set()
+srvs = []
+try:
+    srv = W.serve_workspace([repo], False, share, "", idle=1); srvs.append(srv)
+    s = socket.create_connection(("127.0.0.1", srv.port), timeout=5)
+    s.sendall(("GET /%s/events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" % srv.token).encode())
+    got = b""
+    while b": watching" not in got:
+        got += s.recv(4096)
+    checks["a window's stream opens"] = b"200" in got.split(b"\r\n", 1)[0]
+    time.sleep(4)
+    checks["a stream open past the idle time keeps the server"] = not srv.stop.is_set() and srv.streams == 1
+    s.settimeout(3)
+    try:
+        heard = s.recv(4096)
+    except socket.timeout:
+        heard = b""
+    checks["the stream says it is there while nothing changes"] = b": here" in heard
+    s.close()
+    checks["once the window's stream closes, the server stops"] = stopped_within(srv, 8) and srv.streams == 0
+    lone = W.serve_workspace([repo], False, share, "", idle=1); srvs.append(lone)
+    checks["with no stream and no request the server stops"] = stopped_within(lone, 4)
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    for s_ in srvs:
+        s_.stop.set()
+        try: s_.httpd.shutdown()
+        except Exception: pass
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "38 · the server lives while a window holds its stream open, and stops when none does"
+else
+  no "38 · the server's lifetime is wrong" "$(grep '^XX' "$WORK/stays.txt" | tr '\n' ' ')$(tail -2 "$WORK/stays.txt")"
+fi
+
+# ── 39 · a session started elsewhere that works here is this repository's ───
+# A session belongs to the repository it was started in, and to the one it
+# works in: started in a folder above a checkout and working on that checkout
+# and its trees, its cwd says nothing, and the places its latest tool calls
+# work in say where it is. Pinned, on sessions started in the folder above the
+# repository:
+#
+#   - one whose calls work in the repository and its worktree counts as the
+#     repository's, says it works here and how the vote went, working or not,
+#     and a working one still has no reply read
+#   - one whose calls work mostly elsewhere stays out, as does one with too
+#     few calls here to say
+#   - scratch space and the tools' own folders do not vote
+#   - one started in the repository counts by its cwd, as before
+python3 - "$WORK" "$REPO" >"$WORK/workshere.txt" 2>&1 <<'PYEOF'
+import json, os, subprocess, sys, time
+work, repo_root = sys.argv[1], sys.argv[2]
+home = os.environ["HOME"]
+above = os.path.join(home, "Repositories")
+repo = os.path.join(above, "harbour"); tree = os.path.join(above, "harbour-trees", "tides")
+other = os.path.join(above, "lighthouse")
+os.makedirs(repo, exist_ok=True); os.makedirs(other, exist_ok=True)
+def git(*a): subprocess.run(["git", "-C", repo] + list(a), check=True, capture_output=True)
+open(os.path.join(repo, "README.md"), "w").write("# harbour\n")
+git("init", "-q"); git("add", "."); git("-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qm", "one")
+git("worktree", "add", "-q", "--detach", tree)
+base = os.path.join(work, "workshere")
+sdir = os.path.join(base, "sessions"); os.makedirs(sdir, exist_ok=True)
+pdir = os.path.join(base, "projects", "-above"); os.makedirs(pdir, exist_ok=True)
+os.environ.update(RUBRICATOR_CLAUDE_SESSIONS=sdir, RUBRICATOR_CLAUDE_PROJECTS=os.path.join(base, "projects"),
+                  RUBRICATOR_CLAUDE_HISTORY=os.path.join(base, "history.jsonl"))
+bindir = os.path.join(base, "bin"); os.makedirs(bindir, exist_ok=True)
+fake = os.path.join(bindir, "claude"); os.symlink("/bin/sleep", fake)
+procs = []
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+def session(n, status, cwd, calls):
+    p = subprocess.Popen([fake, "300"]); procs.append(p)
+    open(os.path.join(sdir, "%d.json" % p.pid), "w").write(json.dumps(
+        {"pid": p.pid, "sessionId": sid(n), "status": status, "cwd": cwd, "name": "s-%d" % n,
+         "statusUpdatedAt": int(time.time() * 1000) - 60000}))
+    recs = []
+    for i, (name, inp, shell) in enumerate(calls):
+        recs.append({"type": "assistant", "cwd": shell or cwd, "timestamp": "2026-10-28T12:00:%02d.000Z" % i,
+                     "message": {"id": "m%d" % i, "content": [{"type": "tool_use", "id": "t%d" % i, "name": name, "input": inp}]}})
+        recs.append({"type": "user", "cwd": shell or cwd, "timestamp": "2026-10-28T12:00:%02d.500Z" % i,
+                     "message": {"content": [{"type": "tool_result", "tool_use_id": "t%d" % i, "content": "ok"}]}})
+    recs.append({"type": "assistant", "cwd": cwd, "timestamp": "2026-10-28T12:01:00.000Z",
+                 "message": {"id": "end", "content": [{"type": "text", "text": "DONE-%d" % n}]}})
+    open(os.path.join(pdir, sid(n) + ".jsonl"), "w").write("".join(json.dumps(r) + "\n" for r in recs))
+here = [("Read", {"file_path": repo + "/README.md"}, None),
+        ("Edit", {"file_path": tree + "/src/tide.ts"}, None),
+        ("Bash", {"command": "cd %s && git status" % repo, "description": "status"}, None),
+        ("Bash", {"command": "sed -n 1,20p src/tide.ts", "description": "read"}, tree),   # the shell is in the tree
+        ("Bash", {"command": "ls /tmp/scratch ~/.claude/x /private/tmp/y", "description": "scratch"}, None)]
+session(1, "idle", above, here)                                        # started above, works here
+session(2, "busy", above, here)                                        # the same, working
+session(3, "idle", above, here[:3] + [("Read", {"file_path": other + "/a.md"}, None)] * 4 +
+        [("Bash", {"command": "cat %s/b.md %s/c.md" % (other, other), "description": "x"}, None)])
+session(4, "idle", above, here[:2])                                    # two here: too few to say
+session(5, "idle", above, [("Bash", {"command": "cat /tmp/a /private/tmp/b ~/.claude/c ~/Library/d", "description": "x"}, None)] * 6)
+session(6, "idle", repo, [("Read", {"file_path": other + "/a.md"}, None)] * 5)   # started here, works elsewhere
+checks = {}
+try:
+    sys.path.insert(0, os.path.join(repo_root, "share"))
+    import waiting as Wt
+    rows = {r["sid"]: r for r in Wt.running([repo])["sessions"]}
+    one, two = rows.get(sid(1), {}), rows.get(sid(2), {})
+    checks["started above, working here, it is this repository's"] = one.get("inRepo") is True and one.get("worksHere") is True
+    checks["and how the vote went, and where it began, come along"] = (
+        one.get("named") == [4, 0] and one.get("began") == "~/Repositories")
+    checks["working, too, with no reply read"] = (two.get("inRepo") is True and two.get("worksHere") is True
+                                                  and "text" not in two)
+    checks["three calls here but most elsewhere, it stays out"] = rows.get(sid(3), {}).get("inRepo") is False
+    checks["too few calls here to say, it stays out"] = rows.get(sid(4), {}).get("inRepo") is False
+    checks["scratch space and the tools' folders do not vote"] = rows.get(sid(5), {}).get("inRepo") is False
+    six = rows.get(sid(6), {})
+    checks["started here, it counts by its cwd, as before"] = six.get("inRepo") is True and "worksHere" not in six
+    checks["the other repository's list does not take what works here"] = (
+        {r["sid"]: r for r in Wt.running([other])["sessions"]}.get(sid(1), {}).get("inRepo") is False)
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    for q in procs: q.terminate()
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "39 · a session started elsewhere that works here is this repository's, and says so"
+else
+  no "39 · where a session works is read wrong" "$(grep '^XX' "$WORK/workshere.txt" | tr '\n' ' ')$(tail -2 "$WORK/workshere.txt")"
+fi
+
+# ── 40 · nothing in this run scripted another application ───────────────────
 # The tripwire at the top of this file stands where `osascript` would be found.
 # A test that reached it — the hook closing a window it never opened, a reply
 # that missed the dry seam — wrote its arguments down, and that is a failure
 # whether or not the test that did it noticed.
 if [ ! -s "$WORK/osascript.log" ]; then
-  ok "35 · nothing in the suite reached osascript"
+  ok "40 · nothing in the suite reached osascript"
 else
-  no "35 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
+  no "40 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"

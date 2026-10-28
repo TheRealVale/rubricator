@@ -10,8 +10,10 @@ server, so it is built to be a small target:
   * a per-run token in every path — guessing the port is not enough
   * localhost Host header, and no cross-site request accepted
   * no referrer, no store, no sniffing
-  * it exits on its own when the window that owns it stops sending a heartbeat,
-    so nothing is left running after you close the tab
+  * it exits on its own once no window is left: while a window is open its
+    event stream is, and once none is open and nothing has asked for anything
+    for the idle time, it stops — so nothing is left running after you close
+    the tab, and nothing stops under a window that is only in the background
 
 Routes are supplied by the caller as {name: handler}. A handler is given
 (method, query, body) and returns (status, content_type, bytes) — the transport
@@ -19,7 +21,7 @@ knows nothing about what it is serving.
 """
 import http.server, json, os, secrets, sys, threading, time, urllib.parse
 
-IDLE = int(os.environ.get("RUBRICATOR_IDLE", "120"))     # seconds without a heartbeat
+IDLE = int(os.environ.get("RUBRICATOR_IDLE", "120"))     # seconds with no window and no request
 
 
 def stream(fn):
@@ -34,6 +36,8 @@ class Server:
         self.token = secrets.token_urlsafe(9)
         self.idle = idle
         self.seen = time.time()
+        self.streams = 0                  # event streams open now: a window each
+        self._count = threading.Lock()
         self.stop = threading.Event()
         self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.httpd.daemon_threads = True
@@ -56,10 +60,21 @@ class Server:
             pass
 
     def _watchdog(self):
-        while not self.stop.wait(5):
-            if time.time() - self.seen > self.idle:
+        """A window keeps the server while it holds its event stream open. A
+        window in the background, or on a Mac that slept, sends no heartbeat —
+        the browser holds back its timers — but its stream stays open, so the
+        heartbeat alone would stop the server under a window still open. With
+        no stream open, the idle time counts from the last request, or from the
+        moment the last stream closed."""
+        while not self.stop.wait(min(5, max(0.2, self.idle / 4))):
+            if self.streams == 0 and time.time() - self.seen > self.idle:
                 self.stop.set()
                 return
+
+    def beat(self):
+        """How often an open stream says something, so a window that went
+        away without a word is noticed: a write to its closed socket fails."""
+        return min(15, max(0.5, self.idle / 3))
 
     # ── transport ───────────────────────────────────────────────────────────
     def _handler(server):
@@ -126,10 +141,16 @@ class Server:
                     self.send_header("Connection", "close")
                     self.end_headers()
                     self.close_connection = True
+                    with server._count:
+                        server.streams += 1
                     try:
                         fn(self.wfile)
                     except Exception:
-                        pass
+                        pass                      # the window went away
+                    finally:
+                        with server._count:
+                            server.streams -= 1
+                        server.seen = time.time()
                     return
                 body = b""
                 if method == "POST":

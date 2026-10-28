@@ -1536,9 +1536,10 @@ measurements are in `share/waiting.py`'s header.
       bundle), and the tab from iTerm's dictionary, where every session has a
       `tty`. `write text` there is your typing: a slash command runs and the
       turn is yours, with one writer on the transcript. The guard, read before
-      and again just before: the `claude` process lives, its status is `idle` (one
-      asking you something, whose question or permission dialog would take the
-      reply's Return as its answer, is answered in its tab), and it holds its
+      and again just before: the `claude` process lives, its status is `idle` —
+      or `busy` once you confirmed sending while it works (W11); one asking you
+      something, whose question or permission dialog would take the reply's
+      Return as its answer, is answered in its tab — and it holds its
       terminal's foreground (`ps -t`, the `+`) —
       otherwise nothing is typed and the answer names the check. The words reach
       `osascript -` as an `argv` item of a constant script, on one line, with
@@ -1576,6 +1577,88 @@ measurements are in `share/waiting.py`'s header.
       1.6 s; read from the start, its first 800 would be all it held.
       *Done when:* it lands at its end, on a match, or when first shown, once —
       test 33; a long transcript keeps its latest turns — test 31.
+- [x] **W10 · A working session, at its foot.** While a session's status is
+      `busy`, a band above its reply line says so the way Claude Code's own
+      line does: the quill — a pilcrow inked in rubric red stroke by stroke,
+      dried and lifted off, inside a sweep of the same red and a slow ring of
+      prickings, CSS only and still under reduced motion; the turn's clock,
+      counted to the second on the page from `statusUpdatedAt`; what it does
+      now, the tool calls of Claude's latest message whose results have not
+      come back — a command's own `description`, a file tool's file, an
+      agent's task — or *thinking*, after the last that came back; and the
+      turn's tool calls and output tokens, a message's tokens once however
+      many records carry them. `waiting.doing` reads the end of the transcript
+      once — a quarter of a megabyte, fourfold until the first dated line is
+      older than the turn, sixteen at most, past which the counts say *at
+      least* — and then only what was written since, a half-written line left
+      for the next look: on this machine a turn of seventy calls was its last
+      4 MB, 42 ms the first time, a few kilobytes after. The page asks
+      (`/working`) when the band shows, when the session changes state, and
+      every four seconds while the band is on screen in a window in front,
+      never twice at once. Every animation in the quill divides 14 s and each
+      copy starts as far into it as the wall clock is, so one drawn again does
+      not restart; Open now's working rows wear a small one, the mark alone.
+      An Open now row keeps its second line on one line in a narrow navigator,
+      the names taking only what the state and the duration leave.
+      *Done when:* the first look reads a quarter of a megabyte of 3 MB, a
+      later one only what was written since, a turn past 16 MB says *at least*,
+      and the band asks only while on screen — tests 36 and 37.
+- [x] **W11 · Sent while it works, and stopped, each once you say so.** The
+      reply line stays usable while a session works: Send turns into *Send
+      while it works? Send · Cancel*, inline, never a dialog, and only the
+      answer sends, with `whileWorking: true`; Claude Code queues what is typed
+      during a turn. Beside the band, **Stop** turns into *Stop it? Stop ·
+      Cancel*, and its answer sends the verb `stop`: the Escape key, which
+      stops a turn in Claude Code, written by the constant script as
+      `character id 27`, once, with no line ending and no words, whatever the
+      page sends. Escape in the reply line puts either question away, and a
+      second Enter does not answer one. The guard is W7's, read before and just
+      before, with the status each key is for: a reply `idle`, or `busy` with
+      the boolean flag; a stop `busy` only. Neither goes into `waiting`, whose
+      dialog would take the Return or the Escape as its answer, nor `shell`, a
+      dead process, or a terminal whose foreground claude does not hold. A
+      session found working by the server after the page last looked turns
+      Send into the question rather than an error. Behind `allow_launch`.
+      Tested on pseudo-terminals, never on iTerm: whether `write text` of
+      `character id 27` interrupts a turn, and whether a line typed during one
+      is queued, are for the first real run to show.
+      *Done when:* a busy reply is refused without the flag, `waiting` and
+      `shell` even with it, a stop unless busy; a stop sends exactly one Escape
+      and no text; the page asks before either — tests 35 and 37, and test 40
+      finds no call to osascript.
+- [x] **W12 · The server lives while its window does.** A window in the
+      background, or on a Mac asleep, has its timers held back, so its
+      30-second heartbeat alone would let the server's idle time (120 s) run
+      out under a window still open, leaving every request of that window
+      unanswered. A window holds its event stream open for as long as it is
+      open, so the server counts the streams open and stops only once none is
+      and nothing has asked for the idle time; each stream says something
+      every few seconds, so a window that went away without a word is noticed
+      when the write fails. A request that
+      reaches no server marks the page *md's server has stopped; run md
+      again*, on its status line and wherever the running sessions show, and
+      the first answer clears it. *Look again* says it is looking, and then
+      what came of it with the time; a look that never came back does not hold
+      the next one after fifteen seconds.
+      *Done when:* a stream open past the idle time keeps the server, none
+      lets it stop — test 38; the page's words for a server that has gone, and
+      look again looking — test 37.
+- [x] **W13 · Started elsewhere, working here.** A session started in
+      `~/Repositories` that works in one checkout beside it says nothing of
+      that by its cwd, the folder above. A session the cwd leaves out is the
+      repository's when its latest tool calls work there: the end of its transcript already read for what it
+      said, or a quarter of a megabyte when it works, each call voting with the
+      places it works in — a file tool's file, a search's folder, the folder a
+      command `cd`s to and the absolute paths it names, or its shell's own
+      folder when it names none. Only places in your home folder and on other
+      volumes vote; scratch space, `~/.claude`, `~/Library` and the system do
+      not. Three votes at least, and most of them. Measured on such a session,
+      2026-10-28: six for the repository, none elsewhere. The row says
+      *started in ~/Repositories, works here*, and its tooltip how the vote
+      went.
+      *Done when:* such a session is listed here, working or not; one working
+      mostly elsewhere, or with too few calls here, stays out; scratch space
+      does not vote — test 39.
 
 ---
 
