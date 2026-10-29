@@ -44,6 +44,11 @@ the tool calls of Claude's latest message whose results have not come back,
 and how many calls and output tokens the turn has taken. A turn is read once
 from the end and then followed, a look reading only what was written since
 the last — `doing` below.
+
+Each running session's transcript is measured every second for the page's
+event stream, so that a conversation open on the page reads its new turns as
+they are written: a `stat` a session, its transcript found once and
+remembered — `lengths` below.
 """
 
 import calendar
@@ -324,6 +329,33 @@ def signature():
         except Exception:
             out.append((f.name,))                 # a file mid-write, or of another shape
     return tuple(out)
+
+
+_where = {}                                       # session id → its transcript, once found
+
+
+def lengths(sig):
+    """How long the transcript of each session a `signature` names is now, by
+    session id; a session with no transcript yet is not in it. A transcript
+    is looked for until it is found and then only measured, so a second's
+    reading is a stat for each session."""
+    out = {}
+    for row in sig or ():
+        sid = row[1] if len(row) > 1 else None
+        if not isinstance(sid, str):
+            continue
+        p = _where.get(sid) or _transcript(sid)
+        if p is None:
+            continue
+        try:
+            out[sid] = p.stat().st_size
+            _where[sid] = p
+        except OSError:
+            _where.pop(sid, None)                 # gone: looked for again next time
+    for sid in list(_where):
+        if sid not in out:
+            _where.pop(sid, None)                 # a session that ended
+    return out
 
 
 def _inside(path, roots):

@@ -1231,12 +1231,18 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         """The other half of a conversation. Read straight off disk, from
         the end, never indexed: the latest 800 turns of a 1.4 GB transcript
         are read in under two seconds, so there is nothing worth caching and
-        nothing to invalidate."""
+        nothing to invalidate. With `from`, the byte a turn the page holds
+        began at, it is the turns from that one on, as the transcript grows."""
         sid = (query.get("id") or [""])[0]
+        frm = (query.get("from") or [""])[0]
+        try:
+            at = int(frm) if frm else None
+        except ValueError:
+            return S.J({"error": "a turn is named by the byte it began at"}, 400)
         try:
             sys.path.insert(0, str(share))
             import transcript as _T
-            return S.J(_T.read(sid))
+            return S.J(_T.read(sid) if at is None else _T.since(sid, at))
         except Exception as e:
             return S.J({"id": sid, "error": str(e)[:200], "turns": []})
 
@@ -1445,17 +1451,31 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         except Exception:
             return None
 
+    def lengths(ran):
+        """How long the transcript of each session in a reading of the
+        session files is now; None while they may not be read."""
+        if ran is None:
+            return None
+        try:
+            import waiting as _W
+            return _W.lengths(ran)
+        except Exception:
+            return None
+
     @S.stream
     def events(wfile):
         """Watch mode. The page asked to be told when a document changes, so tell
         it — one line per change, until the window goes away. A Claude Code
         session starting, ending or changing state is told the same way, as
-        `running`, and the page looks at the running sessions again. The open
+        `running`, and the page looks at the running sessions again; a running
+        session's transcript growing is told as `grew`, naming the sessions,
+        and a conversation open on one of them reads its new turns. The open
         stream is what keeps the server for its window, so it says something
         every few seconds even when nothing changed: the write that fails is
         how a window that went away is noticed."""
         last = snapshot()
         ran = running_now()
+        long_ = lengths(ran)
         wfile.write(b": watching\n\n")
         wfile.flush()
         said = time.time()
@@ -1471,6 +1491,13 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
                 wfile.write(b'data: {"running": true}\n\n')
                 wfile.flush()
             ran = now_ran
+            now_long = lengths(ran)
+            if now_long is not None and long_ is not None:
+                grew = [s for s, n in now_long.items() if n != long_.get(s)]
+                if grew:
+                    wfile.write(b"data: " + json.dumps({"grew": grew}).encode() + b"\n\n")
+                    wfile.flush()
+            long_ = now_long
             now_ = snapshot()
             changed = [r for r, t in now_.items()
                        if t and last.get(r) is not None and t != last[r]]

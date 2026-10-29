@@ -275,7 +275,11 @@ a search for something you said.
 A session opens at its end, where the latest turns are; opened from a search hit or a prompt
 you jumped to, it opens on that match instead, and wherever it opened, it stays where you
 leave it. The transcript is read from its end, so a session of a gigabyte opens on its latest
-800 turns in a second or two and says that earlier ones are not shown.
+800 turns in a second or two and says that earlier ones are not shown. A running session's
+conversation grows as its transcript does: the server says within a second that it was written
+to, and what is new is read from where the latest turn shown began — on a 1.4 GB transcript,
+its last half a megabyte, in 2 ms. The turns before it stay as they were drawn, with whatever
+you opened in them; a view at its end stays at its end, and one read further up is not moved.
 
 `⌘F` searches the session. Every match is counted in each of the parts a session has — what
 you said, what Claude said, what reached it from others, the files it touched, the tools it
@@ -600,8 +604,8 @@ share/workspace.*   the repo index, and what each surface looks like
 share/serve.py      the local server: ephemeral port, per-run token, gone with its window
 share/actions.py    the verb allowlist — the only place the page can cause anything
 share/extract.py    PDF and Word into text, cached on mtime and size
-share/transcript.py one conversation, read from its end on demand; its pictures, and the pages
-                    it published
+share/transcript.py one conversation, read from its end on demand and on from a turn as it
+                    grows; its pictures, and the pages it published
 share/waiting.py    which sessions are running, which wait on you, and what a working one does
 share/hook.py       blocking review server for --review and --hook
 .claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook

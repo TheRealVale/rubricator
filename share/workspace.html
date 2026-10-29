@@ -405,8 +405,11 @@ pre.dossier{
 
 /* the reply line at the foot of a running session, and in a Waiting card */
 .sreply{margin:26px 0 0;padding:16px 0 0;border-top:1px solid var(--border-soft);scroll-margin-bottom:18px}
-/* the reply line stays at the foot of the pane however far up the conversation is read */
+/* the reply line stays at the foot of the pane however far up the conversation is read,
+   and at its end the view ends on it: a sticky line cannot sink into the room a document
+   keeps below its last line, and would stand mid-pane over a blank */
 .sreply:not(.off){position:sticky;bottom:0;z-index:2;padding:14px 0 16px;background:var(--bg)}
+.surf .sdet:has(> .sreply:not(.off)){padding-bottom:0}
 .sreply.off .qnote{margin:0 0 0 4px}
 .rbox{display:flex;flex-direction:column;gap:8px}
 .wcard .rbox{margin:12px 0 0}

@@ -1594,7 +1594,7 @@ measurements are in `share/waiting.py`'s header.
       *Done when:* each failing check refuses and says which; the words reach the
       script only as an argv item, quotes and `$(…)` intact; nothing is resolved
       without the gate; the dry seam never reaches osascript — test 32, and test
-      34 finds no call to osascript anywhere in the suite.
+      46 finds no call to osascript anywhere in the suite.
 - [x] **W8 · What is not yours is not drawn as yours.** A transcript files
       another session's message (`<cross-session-message from-name=…>`), an
       agent's report (`<agent-message>`, *[Subagent hand-back]*), a background
@@ -1611,13 +1611,20 @@ measurements are in `share/waiting.py`'s header.
       shapes names nothing — test 31.
 - [x] **W9 · A session opens at its end.** Where a session stands, and a
       running one's reply line, are at the foot of a long view, below its files
-      and its conversation. It opens there once the transcript has arrived and
-      the pane is shown, or on the match it was opened for — the first in what
-      you said — and keeps the place after. The transcript is read backwards for
-      its latest 800 turns: the last 686 MB of this machine's 1.4 GB one, in
-      1.6 s; read from the start, its first 800 would be all it held.
+      and its conversation. The reply line is sticky at the foot of the pane
+      however far up the conversation is read, and the view ends on it: a view
+      whose own child it is keeps none of the room a document keeps below its
+      last line (40vh), which a sticky line cannot sink into — kept, it stands
+      the line mid-pane over a blank that scrolls. A session opens at its end
+      once the transcript has arrived and the pane is shown, or on the match it
+      was opened for — the first in what you said — and keeps the place after;
+      a view at its foot stays there as turns arrive (W14). The transcript is
+      read backwards for its latest 800 turns: the last 686 MB of this
+      machine's 1.4 GB one, in 1.6 s; read from the start, its first 800 would
+      be all it held.
       *Done when:* it lands at its end, on a match, or when first shown, once —
-      test 33; a long transcript keeps its latest turns — test 31.
+      test 33; the view ends on its reply line — test 44; a long transcript
+      keeps its latest turns — test 31.
 - [x] **W10 · A working session, at its foot.** While a session's status is
       `busy`, a band above its reply line says so the way Claude Code's own
       line does: the quill — a pilcrow inked in rubric red stroke by stroke,
@@ -1665,7 +1672,7 @@ measurements are in `share/waiting.py`'s header.
       is queued, are for the first real run to show.
       *Done when:* a busy reply is refused without the flag, `waiting` and
       `shell` even with it, a stop unless busy; a stop sends exactly one Escape
-      and no text; the page asks before either — tests 35 and 37, and test 44
+      and no text; the page asks before either — tests 35 and 37, and test 46
       finds no call to osascript.
 - [x] **W12 · The server lives while its window does.** A window in the
       background, or on a Mac asleep, has its timers held back, so its
@@ -1700,6 +1707,35 @@ measurements are in `share/waiting.py`'s header.
       *Done when:* such a session is listed here, working or not; one working
       mostly elsewhere, or with too few calls here, stays out; scratch space
       does not vote — test 39.
+- [x] **W14 · A running session's conversation grows as it is written.** Its
+      view shows each turn as the transcript is written, without a reload.
+      Every turn carries the byte its first record's line begins at; the page
+      asks (`session?from=`) for the turns from where its latest turn began,
+      and the server reads from there to the end (`transcript.since`): that
+      turn as it grew, and every turn after it. What came before is final — a
+      turn begins on a prompt, a note, a mark, or Claude speaking again, by
+      when everything earlier is closed and its tools have answered — so these
+      are the turns a read of the whole gives from there; a file a turn wrote
+      and a picture it names are told from the folder their own record was
+      written in, so a turn reads the same from either read. Checked
+      2026-10-29 against whole reads of eight of this machine's transcripts,
+      from each of up to their last 200 turns: no difference; from the latest
+      turn, the 1.4 GB one's last half a megabyte in 2 ms. The event stream
+      says `grew`, naming the running sessions whose transcripts grew, from a
+      `stat` a second each (`waiting.lengths`); a session changing state asks
+      too. The turns that came back as they were drawn stay, element for
+      element; the rest is drawn below them, a list of tool calls or a fold
+      opened in a turn drawn again is opened again, and the count above says
+      the new numbers. A view at its foot — as its reader left it, kept as
+      they scroll — stays at its foot as turns and the band arrive; one read
+      further up is not moved; one not on screen catches up when it is shown.
+      A place where no line begins, or one past the end, is a transcript
+      written anew, and the conversation is read whole.
+      *Done when:* the turns read on from every turn are a whole read's, a
+      half-written line waits, a place no line begins at is refused, and the
+      stream names the session that grew and no other — test 45a; the page
+      asks from its latest turn, keeps what it drew and what you opened, and
+      keeps the foot — test 45b.
 
 ---
 

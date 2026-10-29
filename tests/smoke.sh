@@ -39,7 +39,7 @@ echo "rubricator smoke tests"
 # A run of this suite happens on a desk where terminals hold live sessions, and
 # one AppleScript that reached them would type into one or switch its tabs. So
 # `osascript` on the PATH is a tripwire: it scripts nothing, writes down that it
-# was called, and fails. Test 44, the last, reads what it wrote, which has to be nothing.
+# was called, and fails. Test 46, the last, reads what it wrote, which has to be nothing.
 TRIP="$WORK/tripwire"; mkdir -p "$TRIP"
 printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s"\nexit 1\n' "$WORK/osascript.log" > "$TRIP/osascript"
 chmod +x "$TRIP/osascript"
@@ -3787,15 +3787,434 @@ else
   skip "43 · the artifacts on the page" "no node, or 41 wrote nothing"
 fi
 
-# ── 44 · nothing in this run scripted another application ───────────────────
+# ── 44 · a running session's view ends on its reply line ────────────────────
+# A running session's reply line is sticky at the foot of the pane, and a
+# sticky line cannot sink into the room a document keeps below its last line:
+# kept, that room stands the line mid-pane over a blank that scrolls — 360 px
+# above the foot of a 797 px pane, measured headless on a fixture session. A
+# layout needs a browser, so the rules are read here. Pinned:
+#   - the reply line is sticky at the foot, and a document keeps room below
+#     its last line, so the case exists
+#   - a view whose own child is a sticky reply line keeps none, by a rule that
+#     wins over the document's
+#   - a running session's view ends on its reply line, indexed or not, and is
+#     the view's own child, which is what the rule's `> .sreply` finds
+python3 - "$REPO" >"$WORK/foot.txt" 2>&1 <<'PYEOF'
+import re, sys
+repo = sys.argv[1]
+css = open(repo + "/share/shell.css").read() + open(repo + "/share/workspace.html").read()
+js = open(repo + "/share/workspace.js").read()
+css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+rules = [(m.group(1).strip(), m.group(2)) for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css)]
+def decl(body, prop):
+    m = re.search(r"(?:^|;)\s*" + prop + r"\s*:\s*([^;]+)", body)
+    return m.group(1).strip() if m else None
+def spec(sel):
+    """ids, classes and pseudo-classes, elements: a :has, :not or :is counts
+    what it holds"""
+    a = b = c = 0
+    while True:
+        m = re.search(r":(has|not|is|where)\(([^()]*)\)", sel)
+        if not m:
+            break
+        if m.group(1) != "where":
+            x = spec(m.group(2))
+            a, b, c = a + x[0], b + x[1], c + x[2]
+        sel = sel[:m.start()] + sel[m.end():]
+    a += len(re.findall(r"#[\w-]+", sel))
+    b += len(re.findall(r"\.[\w-]+|\[[^\]]*\]|(?<!:):[\w-]+", sel))
+    c += len(re.findall(r"(?:^|[\s>+~])[a-zA-Z][\w-]*", sel))
+    return (a, b, c)
+checks = {}
+checks["the reply line is sticky at the foot"] = any(
+    ".sreply:not(.off)" in s and ":has" not in s and decl(b, "position") == "sticky" and decl(b, "bottom") == "0"
+    for s, b in rules)
+doc = [(s, b) for s, b in rules if s == ".surf .inner"]
+pad = (decl(doc[0][1], "padding") or "").split() if doc else []
+checks["a document keeps room below its last line"] = len(pad) >= 3 and pad[2] not in ("0", "0px")
+ends = [s for s, b in rules if re.search(r"\.(sdet|inner)\s*:has\(\s*>\s*\.sreply:not\(\.off\)\s*\)", s)
+        and decl(b, "padding-bottom") in ("0", "0px")]
+checks["a view that ends on a sticky reply line keeps no room below it"] = bool(ends)
+checks["and that rule wins over the document's"] = bool(ends and doc) and all(spec(s) > spec(doc[0][0]) for s in ends)
+i = js.index("function sessionHTML(sid, convo)")
+body = js[i:js.index("\nfunction answerThere", i)]
+checks["an indexed running session's view ends on its reply line"] = bool(re.search(
+    r"if \(RUN\[sid\]\) out\.push\(replySection\(sid\)\);\s*return out\.join\(''\);", body))
+checks["so does one the index does not hold"] = bool(re.search(r"replySection\(sid\)\]\.join\(''\);\s*\}\s*$", body))
+checks["the reply line is the view's own child"] = (
+    "box.innerHTML = sessionHTML(sid, S.slot());" in js
+    and "'<div class=\"sreply\">' + bandHTML(sid) + replyHTML(sid, 's') + '</div>'" in js)
+for k, v in checks.items():
+    print(("ok " if v else "XX ") + k)
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "44 · a running session's view ends on its reply line, at the pane's foot"
+else
+  no "44 · a running session's reply line stands above the end of its view" "$(grep '^XX' "$WORK/foot.txt" | tr '\n' ' ')$(tail -2 "$WORK/foot.txt")"
+fi
+
+# ── 45a · a conversation is read on as it grows, and the server says when ────
+# A running session's view shows each turn as it is written. Each turn says
+# the byte its first record's line begins at; the page asks for the turns from
+# where its latest began, and the event stream tells it which running
+# sessions' transcripts grew. Pinned:
+#   - the turns read on from where any turn began are the ones a read of the
+#     whole gives from there: through a reply its tools split, a reply of tools
+#     alone joined to the words after it, thinking, a note, a command, an
+#     interruption, a compaction, a picture named by its path, a file written
+#     from another folder, and a call still waiting on its result
+#   - a half-written last line waits, and is read once whole
+#   - a place where no line begins is refused, and so is one past the end
+#   - the route reads on from `from`, and refuses one that is not a number
+#   - the event stream says `grew` for the session written to and no other
+python3 - "$WORK" "$REPO" >"$WORK/follow.txt" 2>&1 <<'PYEOF'
+import http.client, json, os, subprocess, sys, time, urllib.error, urllib.request
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+base = os.path.join(work, "follow")
+sdir = os.path.join(base, "sessions"); os.makedirs(sdir, exist_ok=True)
+pdir = os.path.join(base, "projects", "-follow"); os.makedirs(pdir, exist_ok=True)
+os.environ.update(RUBRICATOR_CLAUDE_SESSIONS=sdir, RUBRICATOR_CLAUDE_PROJECTS=os.path.join(base, "projects"),
+                  RUBRICATOR_CLAUDE_HISTORY=os.path.join(base, "history.jsonl"))
+bindir = os.path.join(base, "bin"); os.makedirs(bindir, exist_ok=True)
+fake = os.path.join(bindir, "claude"); os.symlink("/bin/sleep", fake)
+procs = []
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+def iso(t): return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".%03dZ" % int((t % 1) * 1000)
+def session(n, status):
+    p = subprocess.Popen([fake, "300"]); procs.append(p)
+    open(os.path.join(sdir, "%d.json" % p.pid), "w").write(json.dumps(
+        {"pid": p.pid, "sessionId": sid(n), "status": status, "cwd": "/w", "statusUpdatedAt": int(time.time() * 1000)}))
+t = [time.time() - 3600]
+def rec(kind, content=None, cwd="/w", **kw):
+    t[0] += 7
+    r = {"type": kind, "cwd": cwd, "sessionId": sid(1), "timestamp": iso(t[0])}
+    if content is not None:
+        r["message"] = {"role": kind, "content": content}
+    r.update(kw)
+    return json.dumps(r, separators=(",", ":")) + "\n"
+def you(text): return rec("user", text, promptSource="prompt")
+def said(mid, *blocks, cwd="/w"):
+    return rec("assistant", cwd=cwd, message={"id": mid, "role": "assistant", "content": list(blocks)})
+def use(tid, name, inp): return {"type": "tool_use", "id": tid, "name": name, "input": inp}
+def back(tid, cwd="/w", made=None):
+    return rec("user", [{"type": "tool_result", "tool_use_id": tid, "content": "ok"}], cwd=cwd,
+               **({"toolUseResult": {"type": "create", "filePath": made}} if made else {}))
+text = lambda s: {"type": "text", "text": s}
+lines = "".join([
+    you("look at the tides"),
+    said("m1", {"type": "thinking", "thinking": "hm"}), said("m1", use("t1", "Read", {"file_path": "/w/tides.md"})),
+    back("t1"),
+    said("m2", text("Read it; writing the table.")), said("m2", use("t2", "Write", {"file_path": "/w/tree/table.md"}), cwd="/w/tree"),
+    back("t2", cwd="/w/tree", made="/w/tree/table.md"),
+    said("m3", text("Wrote it.")),
+    json.dumps({"type": "api-request", "params": "p" * 500}) + "\n",
+    rec("user", "<task-notification><status>completed</status><summary>the build is done</summary></task-notification>",
+        promptSource="system", origin={"kind": "task-notification"}),
+    said("m4", text("Noted; see /w/shot.png for the quay.")),
+    you("/signoff"),
+    said("m5", use("t5", "Bash", {"command": "ls", "description": "List them"})),
+    rec("user", [{"type": "tool_result", "tool_use_id": "t5", "content": "x", "is_error": True},
+                 {"type": "text", "text": "[Request interrupted by user for tool use]"}]),
+    rec("system", subtype="compact_boundary"),
+    you("go on with the neap tides"),
+    said("m6", use("t6", "Grep", {"pattern": "neap", "path": "/w"})),
+])
+checks = {}
+try:
+    sys.path.insert(0, os.path.join(repo_root, "share"))
+    import transcript as T
+    T.PROJECTS = Path(base) / "projects"
+    p = Path(pdir) / (sid(1) + ".jsonl")
+    p.write_text(lines)
+    whole = T.read(sid(1), path=p)["turns"]
+    kinds = [x["who"] + ("/" + x["kind"] if x.get("kind") else "") for x in whole]
+    checks["the fixture holds each kind of turn: " + " ".join(kinds)] = all(
+        k in kinds for k in ("note/task", "mark/command", "mark/interrupted", "mark/compact")) and len(whole) >= 10
+    ats = [x.get("at") for x in whole]
+    checks["every turn says where it began, in order"] = all(isinstance(a, int) for a in ats) and ats == sorted(set(ats))
+    checks["a reply of tools alone is joined to the words after it"] = any(
+        x["who"] == "claude" and x["text"].startswith("Read it") and [y["n"] for y in x["tools"]] == ["Read", "Write"]
+        and x["thinking"] == 1 for x in whole)
+    checks["a file written from another folder is told from that folder"] = any(
+        x.get("wrote") == ["table.md"] for x in whole)
+    differ = [i for i, x in enumerate(whole) if T.since(sid(1), x["at"], path=p)["turns"] != whole[i:]]
+    checks["read on from where each turn began, the turns are a whole read's from there%s" % (
+        " (not from %s)" % differ if differ else "")] = not differ
+    last = whole[-1]["at"]
+    line = said("m7", text("Found three."))
+    with p.open("a") as f:
+        f.write(line[:40])
+    got = T.since(sid(1), last, path=p)
+    checks["a half-written line waits"] = got["turns"] == whole[-1:] and got["bytes"] == p.stat().st_size
+    with p.open("a") as f:
+        f.write(line[40:])
+    got = T.since(sid(1), last, path=p)["turns"]
+    checks["and is read once whole, the call before it joined to its words"] = (
+        len(got) == 1 and got[0]["text"] == "Found three." and got[0]["at"] == last
+        and [y["n"] for y in got[0]["tools"]] == ["Grep"])
+    checks["a place where no line begins is refused"] = T.since(sid(1), last + 3, path=p).get("error") == "no line begins there"
+    checks["and so is one past the end"] = bool(T.since(sid(1), p.stat().st_size + 1, path=p).get("error"))
+    checks["the end itself is no turn"] = T.since(sid(1), p.stat().st_size, path=p)["turns"] == []
+
+    # the route, and the event stream
+    import workspace as W
+    repo = os.path.join(base, "repo"); os.makedirs(repo, exist_ok=True)
+    open(os.path.join(repo, "README.md"), "w").write("# follow\n")
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+    q = Path(pdir) / (sid(2) + ".jsonl")
+    q.write_text(you("a second session"))
+    session(1, "busy"); session(2, "idle")
+    srv = W.serve_workspace([repo], False, Path(repo_root) / "share", "", idle=10 ** 9, waiting=True)
+    conn = None
+    try:
+        def get(path):
+            try: return json.load(urllib.request.urlopen(srv.base + path, timeout=20)), 200
+            except urllib.error.HTTPError as e: return json.load(e), e.code
+        got, code = get("/session?id=%s&from=%d" % (sid(1), last))
+        checks["the route reads on from a turn"] = code == 200 and got.get("turns") == T.since(sid(1), last, path=p)["turns"]
+        got, code = get("/session?id=%s&from=x" % sid(1))
+        checks["and refuses a place that is not a number"] = code == 400
+        conn = http.client.HTTPConnection("127.0.0.1", srv.port, timeout=8)
+        conn.request("GET", "/" + srv.token + "/events", headers={"Host": "127.0.0.1"})
+        res = conn.getresponse()
+        def told(within):
+            end = time.time() + within
+            while time.time() < end:
+                try:
+                    ln = res.fp.readline().decode().strip()
+                except OSError:
+                    return None                    # nothing said before the socket's timeout
+                if ln.startswith("data:") and "grew" in ln:
+                    return json.loads(ln[5:])["grew"]
+            return None
+        checks["the stream opens"] = res.fp.readline().decode().strip() == ": watching"
+        time.sleep(1.5)
+        with p.open("a") as f:
+            f.write(you("and the spring tides"))
+        checks["a transcript that grew is told, by its session alone"] = told(8) == [sid(1)]
+        with q.open("a") as f:
+            f.write(you("more"))
+        checks["and the other's, when it grows"] = told(8) == [sid(2)]
+    finally:
+        if conn: conn.close()
+        srv.stop.set()
+        try: srv.httpd.shutdown()
+        except Exception: pass
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    for pr in procs: pr.terminate()
+for k_, v in checks.items(): print(("ok " if v else "XX ") + k_)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "45a · a conversation is read on from a turn as its transcript grows, and the stream says which grew"
+else
+  no "45a · a growing conversation is not read on, or not told" "$(grep '^XX' "$WORK/follow.txt" | tr '\n' ' ')$(tail -2 "$WORK/follow.txt")"
+fi
+
+# ── 45b · the page draws a conversation on as it grows ───────────────────────
+# sessionSurface, the conversation's drawing and the event stream's receiver,
+# lifted from the shipped source around a stand-in for the DOM whose
+# conversation box holds one element for each top-level tag drawn into it.
+# Pinned:
+#   - told its session grew, a view asks for the turns from where its latest
+#     began; one ask at a time, and once more if told again meanwhile; a view
+#     not on screen asks once it is shown
+#   - what came back as it was drawn stays as it is, element for element; the
+#     rest is drawn below it, the count above says the new numbers, and a list
+#     of tool calls opened in a turn drawn again is open again
+#   - a view at its foot is kept at its foot; one read further up is not moved
+#   - an answer that finds no turn there reads the conversation whole
+#   - `grew` reaches the views open on those sessions, and no other
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("function sessionSurface(sid, q)", "/* Where a session opens."),
+    sl("function renderConvo(c)", "function didHTML(t)"),
+    sl("function didHTML(t)", "function clock(ts)"),
+    sl("/* Whether a pane is at its foot", "function bandShown(b)"),
+    sl("/* where each pane was left", "/* ── E1 · watch"),
+]))' "$REPO/share/workspace.js" "$WORK/follow-page.js"
+  { cat <<'JSEOF'
+var D = { sessions: {} }, RUN = {}, CAPS = { conversation: 1, launch: 1 }, BASE = 'http://127.0.0.1:1/t';
+function can(c){ return !!CAPS[c]; }
+function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+var marked = { parse: function(t){ return '<p>' + esc(t) + '</p>'; } };
+var MD = { sanitise: function(){} };
+function clock(){ return '12:00'; } function docBy(){ return null; }
+function grabCaret(){ return null; } function putCaret(){}
+function foldLong(){} function unfold(){}
+function sesTitle(s){ return s; } function clip(s){ return s; }
+function landing(host){ host.scrollTop = host.scrollHeight; }
+function makeFind(){ return { on: false, after: function(){}, open: function(){}, hint: function(){ return ''; } }; }
+function sessionHTML(sid, convo){ return 'ABOUT<div class="convo">' + (convo || '') + '</div>'; }
+var timers = [];
+function setTimeout(fn){ timers.push(fn); }
+function flush(){ while (timers.length) timers.shift()(); }
+var asked = [], fail = [];
+function api(path, body, cb, fail){ asked.push({ path: path, cb: cb, fail: fail }); }
+function answer(j){
+  var a = asked.shift();
+  if (!a) return fail.push('nothing was asked for the answer ' + JSON.stringify(j).slice(0, 60));
+  a.cb(j);
+}
+var tabs = [];
+var Shell = { paint: function(){}, each: function(fn){ tabs.forEach(function(t){ fn(t); }); } };
+
+/* a stand-in for the DOM: what is drawn into a box becomes one element for
+   each of its top-level tags */
+var VOID = { img: 1, br: 1, hr: 1, input: 1, wbr: 1 };
+function split(h){
+  var out = [], depth = 0, start = 0, re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g, m;
+  while ((m = re.exec(h))){
+    if (VOID[m[2].toLowerCase()]){ if (!depth) out.push(m[0]); continue; }
+    if (!m[1]){ if (!depth) start = m.index; depth++; }
+    else if (!--depth) out.push(h.slice(start, re.lastIndex));
+  }
+  return out;
+}
+function El(html, box){
+  var e = { html: html, details: /<details class="tools">/.test(html) ? { open: false } : null,
+            c: /^<div class="grp">/.test(html) ? { innerHTML: '' } : null };
+  e.querySelector = function(sel){ return sel === 'details.tools' ? e.details : null; };
+  e.remove = function(){ var i = box.children.indexOf(e); if (i >= 0) box.children.splice(i, 1); };
+  return e;
+}
+function Box(){
+  var b = { children: [] };
+  b.insertAdjacentHTML = function(where, h){ split(h).forEach(function(x){ b.children.push(El(x, b)); }); };
+  b.querySelector = function(sel){ return sel === '.grp .c' && b.children[0] && b.children[0].c || null; };
+  return b;
+}
+var document = {
+  createElement: function(){
+    var d = { _h: '', children: [] };
+    Object.defineProperty(d, 'innerHTML', { get: function(){ return d._h; },
+      set: function(v){ d._h = v; d.children = split(v); } });
+    return d;
+  },
+  addEventListener: function(){}
+};
+/* a pane, which records each time it is scrolled */
+function Host(){
+  var h = { offsetHeight: 600, clientHeight: 600, scrollHeight: 5000, top: 0, sets: [] };
+  var box = Box(), inner = {};
+  Object.defineProperty(inner, 'innerHTML', { set: function(v){
+    box.children = [];
+    var i = v.indexOf('<div class="convo">');
+    if (i >= 0) box.insertAdjacentHTML('beforeend', v.slice(i + 19, v.lastIndexOf('</div>')));
+  } });
+  Object.defineProperty(h, 'scrollTop', { get: function(){ return h.top; },
+    set: function(v){ h.top = v; h.sets.push(v); } });
+  Object.defineProperty(h, 'innerHTML', { set: function(){} });
+  h.querySelector = function(sel){ return sel === '.inner' ? inner : sel === '.convo' ? box : null; };
+  h.box = box;
+  return h;
+}
+JSEOF
+    cat "$WORK/follow-page.js"
+    cat <<'JSEOF'
+
+function want(ok, why){ if (!ok) fail.push(why); }
+var sid = 'aaaaaaaa-0000-4000-8000-000000000001';
+RUN[sid] = { pid: 1, transcript: true, on: 'working' };
+function you(at, text){ return { who: 'you', t: 1, text: text, at: at }; }
+function claude(at, text, tools){
+  return { who: 'claude', t: 1, text: text, thinking: 0, wrote: [], edited: [], at: at,
+           tools: (tools || []).map(function(n){ return { n: n, b: 'x' }; }) };
+}
+function copy(x){ return JSON.parse(JSON.stringify(x)); }
+var S = sessionSurface(sid, ''), host = Host();
+tabs = [{ kind: 'session', id: sid, el: host, surf: S }, { kind: 'doc', id: 'x', el: {}, surf: {} }];
+S.render(host); flush();
+answer(copy({ id: sid, you: 2, claude: 2, notes: 0,
+  turns: [you(0, 'first'), claude(100, 'read it', ['Read']), you(300, 'second'), claude(400, 'on it', ['Bash'])] }));
+var box = host.box, kids = box.children.slice();
+want(kids.length === 5 && /class="grp"/.test(kids[0].html), 'the conversation is not its count and four turns: ' + kids.length);
+kids[4].details.open = true;                   // the tool calls of the turn still growing, opened
+host.top = host.scrollHeight - host.clientHeight;
+host.sets = [];
+
+/* not on screen: nothing is asked until it is shown */
+host.offsetHeight = 0;
+followTranscripts([sid]);
+want(asked.length === 0, 'a view not on screen asked');
+host.offsetHeight = 600;
+S.focus();
+want(asked.length === 1 && asked[0].path === 'session?id=' + sid + '&from=400',
+     'shown, it did not ask from where its latest turn began: ' + (asked[0] || {}).path);
+followTranscripts([sid]);
+want(asked.length === 1, 'it asked twice at once');
+
+/* the latest turn grew a call, and two turns came after it */
+answer(copy({ id: sid, from: 400,
+  turns: [claude(400, 'on it', ['Bash', 'Edit']), you(700, 'third'), claude(800, 'done')] }));
+var now = box.children;
+want(now.length === 7 && now[1] === kids[1] && now[2] === kids[2] && now[3] === kids[3],
+     'what came back as it was drawn was drawn again: ' + now.length + ' elements');
+want(now[4] !== kids[4] && /2 tool calls/.test(now[4].html) && /third/.test(now[5].html) && /done/.test(now[6].html),
+     'the turn that grew, or the turns after it, are not drawn below');
+want(now[4].details && now[4].details.open, 'the tool calls opened in the turn drawn again are shut');
+want(/3 from you · 3 from Claude/.test(now[0].c.innerHTML) && S.conv.turns.length === 6,
+     'the count does not say the new numbers: ' + now[0].c.innerHTML);
+want(host.sets.length && host.sets[host.sets.length - 1] === host.scrollHeight, 'a view at its foot was not kept at its foot');
+want(asked.length === 1 && /&from=800$/.test(asked[0].path), 'told again meanwhile, it did not ask once more from its new latest turn');
+
+/* nothing new: nothing is drawn, nothing moves */
+var before = box.children.slice();
+host.sets = [];
+answer(copy({ id: sid, from: 800, turns: [claude(800, 'done')] }));
+want(box.children.length === 7 && box.children.every(function(e, i){ return e === before[i]; }) && !host.sets.length,
+     'an answer with nothing new drew something, or moved the view');
+
+/* read further up: the new turn is drawn, and the view is not moved */
+host._foot = false;
+followTranscripts([sid]);
+answer(copy({ id: sid, from: 800, turns: [claude(800, 'done'), you(900, 'fourth')] }));
+want(box.children.length === 8 && box.children[6] === before[6] && /fourth/.test(box.children[7].html) && !host.sets.length,
+     'read further up, the view was moved, or the turn not drawn');
+
+/* no turn begins there: the transcript was written anew, and is read whole */
+followTranscripts([sid]);
+answer({ id: sid, error: 'no line begins there', turns: [] });
+want(asked.length === 1 && asked[0].path === 'session?id=' + sid,
+     'a refused place did not read the conversation whole: ' + (asked[0] || {}).path);
+asked = [];
+
+/* a session not open is not asked about */
+followTranscripts(['bbbbbbbb-0000-4000-8000-000000000002']);
+want(asked.length === 0, 'a session not open was asked about');
+
+/* the event stream's grew reaches them */
+var page = require('fs').readFileSync(process.argv[2], 'utf8');
+want(/if \(j\.grew\) return followTranscripts\(j\.grew\);/.test(page), 'the event stream\'s grew reaches no conversation');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/follow-run.js"
+  res=$(node "$WORK/follow-run.js" "$REPO/share/workspace.js" 2>&1)
+  case "$res" in ok*) ok "45b · a conversation is drawn on as it grows, what you opened stays open, and the foot is kept" ;;
+                 *)   no "45b · a growing conversation is not drawn on" "$res" ;; esac
+else
+  skip "45b · a growing conversation on the page" "no node"
+fi
+
+# ── 46 · nothing in this run scripted another application ───────────────────
 # The tripwire at the top of this file stands where `osascript` would be found.
 # A test that reached it — the hook closing a window it never opened, a reply
 # that missed the dry seam — wrote its arguments down, and that is a failure
 # whether or not the test that did it noticed.
 if [ ! -s "$WORK/osascript.log" ]; then
-  ok "44 · nothing in the suite reached osascript"
+  ok "46 · nothing in the suite reached osascript"
 else
-  no "44 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
+  no "46 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"

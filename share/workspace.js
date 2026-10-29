@@ -2148,6 +2148,9 @@ function lookAgain(){ if (WAIT && WAIT.allowed) loadWaiting(false); }
 function afterWaiting(was){
   Shell.each(function(t, focused, p){
     if (!t.el) return;
+    /* a session whose state moved wrote to its transcript as it did */
+    if (t.kind === 'session' && t.surf.follow && (was[t.id] || {}).status !== (RUN[t.id] || {}).status)
+      t.surf.follow();
     var redo = t.kind === 'waiting' ||
                (t.kind === 'session' && (was[t.id] || {}).pid !== (RUN[t.id] || {}).pid);
     if (!redo) return;
@@ -2706,6 +2709,8 @@ function paintBand(sid){
   if (!on) STOPASK[sid] = false;
   [].forEach.call(document.querySelectorAll('[data-wband]'), function(b){
     if (b.dataset.wband !== sid) return;
+    /* the band grows the line at the foot: a view at its foot stays there */
+    var surf = b.closest && b.closest('.surf'), foot = !!surf && atFoot(surf);
     b.hidden = !on;
     var t = b.querySelector('.wtext');
     if (t) t.innerHTML = bandText(sid);
@@ -2714,7 +2719,15 @@ function paintBand(sid){
       x.classList.toggle('asking', asking);
       x.innerHTML = stopHTML(sid);
     }
+    if (foot) surf.scrollTop = surf.scrollHeight;
   });
+}
+/* Whether a pane is at its foot, as its reader left it: kept as they scroll
+   (`_foot`, below), so that what grows under them while they are there — a
+   new turn, the band — keeps them there rather than leaving them above it. */
+var FOOT = 24;
+function atFoot(surf){
+  return surf._foot != null ? surf._foot : surf.scrollHeight - surf.scrollTop - surf.clientHeight < FOOT;
 }
 function bandShown(b){ return !b.hidden && !!b.offsetParent && !document.hidden; }
 function lookDoing(sid){
@@ -2880,7 +2893,8 @@ function sessionSurface(sid, q){
   };
   /* Where it opens, once its body is whole — the conversation arrives after
      the view does — and the pane is shown, since a pane never shown cannot
-     be scrolled. After that the place is yours: nothing here moves it. */
+     be scrolled. After that the place is yours: nothing here moves it, but a
+     view left at its foot stays at its foot as new turns arrive. */
   S.whole = function(){
     var m = D.sessions[sid] || {};
     var there = m.live || (RUN[sid] && RUN[sid].transcript);
@@ -2892,7 +2906,8 @@ function sessionSurface(sid, q){
     landing(S.host, F);
   };
   /* history.jsonl only ever held your half. The other half is in the
-     transcript, which is read once, on opening, and kept for this tab. */
+     transcript, which is read on opening and kept for this tab; what is
+     written to it while the tab is open is read as it comes (`follow`). */
   S.load = function(){
     var m = D.sessions[sid] || {};
     var there = m.live || (RUN[sid] && RUN[sid].transcript);
@@ -2909,6 +2924,97 @@ function sessionSurface(sid, q){
       S.err = 'could not read the transcript';
       if (S.host){ S.refresh(S.host); S.place(); }
     });
+  };
+  /* A running session's transcript grows while its view is open, and the
+     view grows with it. The server says when (`grew`, on the event stream),
+     and what is new is read from where the latest turn shown began: that
+     turn as it grew, and every turn after it. The turns that came back as
+     they were drawn are left alone and the rest is drawn again below them,
+     so what you opened further up stays open, and a turn drawn again opens
+     its tool calls and its fold again if you had. A view at its foot stays
+     at its foot; one read further up is not moved. A view not on screen
+     catches up when it is shown, and a transcript written anew is read
+     whole. */
+  S.follow = function(){
+    if (!S.conv){
+      /* nothing was readable when it opened: a transcript not written yet */
+      if (S.err && !S.loading){ S.err = ''; S.load(); }
+      return;
+    }
+    if (!S.host || !S.host.offsetHeight){ S.stale = true; return; }
+    if (S.following){ S.again = true; return; }
+    var turns = S.conv.turns, last = turns[turns.length - 1];
+    if (!last || typeof last.at !== 'number') return;
+    S.stale = false;
+    S.following = true;
+    api('session?id=' + encodeURIComponent(sid) + '&from=' + last.at, undefined, function(j){
+      S.following = false;
+      if (S.conv && S.conv.turns === turns){
+        if (j && j.turns && j.turns.length && j.turns[0].at === last.at) S.grow(turns.length - 1, j.turns);
+        else if (j && j.error){ S.conv = null; S.load(); }
+      }
+      if (S.again){ S.again = false; S.follow(); }
+    }, function(){ S.following = false; S.again = false; });
+  };
+  /* turns `k` on, as they are now */
+  S.grow = function(k, now){
+    var c = S.conv, host = S.host, box = host.querySelector('.convo');
+    var old = c.turns.slice(k), same = 0;
+    while (same < old.length && same < now.length &&
+           JSON.stringify(old[same]) === JSON.stringify(now[same])) same++;
+    if (same === old.length && same === now.length) return;
+    var foot = atFoot(host);
+    /* the elements each turn drawn again was drawn as, and what was open in them */
+    var from = k + same, counts = [], n = 0, i;
+    for (i = from; i < c.turns.length; i++){ counts.push(turnNodes(c, i)); n += counts[counts.length - 1]; }
+    var take = function(){
+      c.turns = c.turns.slice(0, k).concat(now);
+      c.you = c.claude = c.notes = 0;
+      c.turns.forEach(function(t){
+        if (t.who === 'you') c.you++;
+        else if (t.who === 'claude') c.claude++;
+        else if (t.who === 'note') c.notes++;
+      });
+    };
+    /* a box that is not as it was drawn is drawn whole */
+    if (!box || n > box.children.length){
+      take();
+      S.refresh(host);
+      if (foot) host.scrollTop = host.scrollHeight;
+      return Shell.paint();
+    }
+    var gone = [].slice.call(box.children, box.children.length - n), was = {}, at = 0;
+    counts.forEach(function(cnt, x){
+      var els = gone.slice(at, at + cnt);
+      at += cnt;
+      was[c.turns[from + x].at] = {
+        tools: els.some(function(el){ var d = el.querySelector('details.tools'); return !!(d && d.open); }),
+        fold: els.some(function(el){ return !!el.querySelector('.clamp.open'); }) };
+    });
+    gone.forEach(function(el){ el.remove(); });
+    take();
+    var drawn = [];
+    for (i = from; i < c.turns.length; i++){
+      var before = box.children.length;
+      box.insertAdjacentHTML('beforeend', turnsHTML(c, i, i + 1));
+      drawn.push([c.turns[i], [].slice.call(box.children, before)]);
+    }
+    var count = box.querySelector('.grp .c');
+    if (count) count.innerHTML = convoCount(c);
+    S.fold();
+    drawn.forEach(function(x){
+      var w = was[x[0].at];
+      if (!w) return;
+      x[1].forEach(function(el){
+        var d = el.querySelector('details.tools');
+        if (w.tools && d) d.open = true;
+        var f = el.querySelector('.clamp');
+        if (w.fold && f) unfold(f, true);
+      });
+    });
+    F.after();
+    if (foot) host.scrollTop = host.scrollHeight;
+    Shell.paint();                         // the strip says how long it is
   };
   S.slot = function(){
     if (S.conv) return renderConvo(S.conv);
@@ -2932,8 +3038,14 @@ function sessionSurface(sid, q){
     putCaret(c);                           // a reply being typed keeps its caret
   };
   /* a pane that was never shown could not be measured, so the folds are cut
-     the first time it is looked at, and it is placed then */
-  S.focus = function(){ S.fold(); S.place(); };
+     the first time it is looked at, and it is placed then. One left at its
+     foot is at its foot again, whatever grew under it while it was away, and
+     what was written while it was not on screen is read now. */
+  S.focus = function(){
+    S.fold(); S.place();
+    if (S.host && S.host._foot && S.host.offsetHeight) S.host.scrollTop = S.host.scrollHeight;
+    if (S.stale) S.follow();
+  };
   S.find = function(dir){ F.open(dir); };
   S.label = function(){
     var t = sesTitle(sid);
@@ -3003,15 +3115,29 @@ function landing(host, F){
    quiet line under the bubble — thinking as a count, tools behind a
    disclosure, and the files it wrote as chips you can open. */
 function renderConvo(c){
-  var out = ['<div class="grp">The conversation <span class="c">' +
-    c.you + ' from you · ' + c.claude + ' from Claude' +
-    (c.notes ? ' · ' + c.notes + ' from elsewhere' : '') +
-    (c.earlier ? ' · its latest ' + c.turns.length + ' turns' : '') + '</span></div>'];
+  var out = ['<div class="grp">The conversation <span class="c">' + convoCount(c) + '</span></div>'];
   /* the transcript is read from its end, so a long one begins mid-way, and
      says so rather than passing its latest turns off as all of it */
   if (c.earlier) out.push('<div class="cmark earlier"><span>the turns before these are not shown</span></div>');
-  var last = '';
-  c.turns.forEach(function(t){
+  return out.join('') + turnsHTML(c, 0);
+}
+function convoCount(c){
+  return c.you + ' from you · ' + c.claude + ' from Claude' +
+    (c.notes ? ' · ' + c.notes + ' from elsewhere' : '') +
+    (c.earlier ? ' · its latest ' + c.turns.length + ' turns' : '');
+}
+/* how many of the conversation box's elements turn `i` is drawn as */
+function turnNodes(c, i){
+  var b = document.createElement('div');
+  b.innerHTML = turnsHTML(c, i, i + 1);
+  return b.children.length;
+}
+/* the turns from `from` up to `to`, or to the end, each drawn knowing the one
+   before it: a conversation that grows is drawn on from where it was */
+function turnsHTML(c, from, to){
+  var out = [], prev = c.turns[from - 1];
+  var last = prev && (prev.who === 'you' || prev.who === 'claude') ? prev.who : '';
+  c.turns.slice(from, to == null ? c.turns.length : to).forEach(function(t){
     if (t.who === 'mark'){
       last = '';
       out.push('<div class="cmark ' + esc(t.kind) + '"><span>' + esc(t.text || t.kind) + '</span></div>' +
@@ -3892,6 +4018,19 @@ function scopeToWhatExists(){
   sesScope = 'all';
 }
 
+/* where each pane was left: at its foot or not */
+document.addEventListener('scroll', function(e){
+  var s = e.target;
+  if (s && s.classList && s.classList.contains('surf'))
+    s._foot = s.scrollHeight - s.scrollTop - s.clientHeight < FOOT;
+}, true);
+/* the conversations open on these sessions read what was written to them */
+function followTranscripts(sids){
+  Shell.each(function(t){
+    if (t.kind === 'session' && t.el && sids.indexOf(t.id) >= 0 && t.surf.follow) t.surf.follow();
+  });
+}
+
 /* ── E1 · watch: the server tells us when a document changed on disk ─────── */
 /* The open stream is also what keeps the server for this window, through a
    window left in the background and a Mac that slept, when the heartbeat's
@@ -3907,6 +4046,8 @@ if (can('watch') && window.EventSource){
       try { j = JSON.parse(ev.data); } catch(e){ return; }
       /* a Claude Code session started, ended or changed state */
       if (j.running) return lookAgain();
+      /* a running session's transcript grew */
+      if (j.grew) return followTranscripts(j.grew);
       var changed = j.changed || [];
       changed.forEach(function(rel){ var d = docBy(rel); if (d) d.text = null; });
       if ((j.added || []).length || (j.gone || []).length) return reindex();

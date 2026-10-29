@@ -20,6 +20,19 @@ unparsed, and a tool's output is dropped as soon as it is parsed. On this
 machine's largest, 1.4 GB, the last 800 turns are its last 686 MB, read in
 1.6 s; a 160 MB one is read whole in 0.8 s.
 
+A conversation open on the page follows its transcript as it grows, and that
+is read from a turn rather than from the end. Every turn carries the byte its
+first record's line begins at, and `since` reads from there: the page asks
+from where its latest turn began, which takes in that turn as it grows and
+every turn after it, and reads no more than they are. What came before that
+turn is final — a turn begins on your prompt, on a note, on a mark, or on
+Claude speaking again, and by then everything earlier is closed and its tools
+have answered — so the turns read from there are the ones a read of the whole
+would give from there. A file a turn wrote, and a picture it names, are told
+relative to the folder their own record was written in, which a session that
+moves between folders changes, so a turn reads the same whichever read it
+came from.
+
 Not every record that wears the user's role is the user's. Another session's
 message, an agent's report, a background task's notice and the harness's own
 notes arrive as `type: user` too, and `voice` says which each is; they become
@@ -149,7 +162,44 @@ def read(sid, path=None):
     # are kept, so its first one, which may be the end of a turn, is never
     # among them; that there were earlier ones is said rather than hidden.
     earlier = len(turns) > MAX_TURNS
-    turns = turns[-MAX_TURNS:]
+    turns = _finish(turns[-MAX_TURNS:], cwd)
+    return {"id": sid, "title": title, "project": cwd, "turns": turns,
+            "you": sum(1 for t in turns if t["who"] == "you"),
+            "claude": sum(1 for t in turns if t["who"] == "claude"),
+            "notes": sum(1 for t in turns if t["who"] == "note"),
+            "truncated": earlier, "earlier": earlier, "bytes": size,
+            "read": size - start, "took": round(time.time() - t0, 2)}
+
+
+def since(sid, at, path=None):
+    """The turns from the one that began at byte `at` to the end of the
+    transcript, newest last: what a conversation open on the page reads as
+    the transcript grows. `at` is where a turn the page holds began; a place
+    where no line begins is refused, and so is one past the end, which is a
+    transcript written anew."""
+    t0 = time.time()
+    p = path or find(sid)
+    if not p or not p.is_file():
+        return {"id": sid, "error": "no transcript on disk", "turns": []}
+    size = p.stat().st_size
+    if not isinstance(at, int) or not 0 <= at <= size:
+        return {"id": sid, "error": "that place is not in the transcript", "turns": []}
+    if at:
+        with p.open("rb") as f:
+            f.seek(at - 1)
+            if f.read(1) != b"\n":
+                return {"id": sid, "error": "no line begins there", "turns": []}
+    # from the line break before it, which _records passes over as the end of
+    # a line that began earlier, so the line at `at` is the first one read
+    recs, _ = _records(p, max(0, at - 1), size)
+    title, cwd, turns = _turns(recs)
+    return {"id": sid, "from": at, "title": title, "turns": _finish(turns, cwd),
+            "bytes": size, "read": size - at, "took": round(time.time() - t0, 3)}
+
+
+def _finish(turns, cwd):
+    """Turns as the page gets them: scrubbed, once the cut is made, and each
+    picture told by its place and whether it can be shown."""
     looked = {}
     for t in turns:
         for k in ("text", "from"):
@@ -161,12 +211,7 @@ def read(sid, path=None):
                 x["imgs"] = [_shot(s, cwd, looked, x["n"], x["b"]) for s in x["imgs"]]
         if t.get("imgs"):
             t["imgs"] = [_shot(s, cwd, looked) for s in t["imgs"]]
-    return {"id": sid, "title": title, "project": cwd, "turns": turns,
-            "you": sum(1 for t in turns if t["who"] == "you"),
-            "claude": sum(1 for t in turns if t["who"] == "claude"),
-            "notes": sum(1 for t in turns if t["who"] == "note"),
-            "truncated": earlier, "earlier": earlier, "bytes": size,
-            "read": size - start, "took": round(time.time() - t0, 2)}
+    return turns
 
 
 def _records(p, start, end):
@@ -192,7 +237,9 @@ def _records(p, start, end):
             except Exception:
                 continue
             if isinstance(d, dict):
-                out.append(_slim(d, at))
+                r = _slim(d, at)
+                r["_at"] = at               # its line's first byte, which a turn it begins carries
+                out.append(r)
     return out, min(first, end)
 
 
@@ -200,7 +247,9 @@ def _slim(d, at=0):
     """A record without what no turn shows — a tool's output, a file's
     content, an image's bytes — so a gigabyte of transcript is a few
     megabytes held. What stays of an image is where it is."""
-    ims = [dict(k=im["k"], at=at, i=i, **{x: im[x] for x in ("tid", "path") if x in im})
+    here = {"cwd": d["cwd"]} if isinstance(d.get("cwd"), str) and d["cwd"] else {}
+    ims = [dict(k=im["k"], at=at, i=i, **{x: im[x] for x in ("tid", "path") if x in im},
+                **(here if "path" in im else {}))
            for i, im in enumerate(images_of(d))]
     if ims:
         d = dict(d, _im=ims)
@@ -250,10 +299,12 @@ def _turns(recs):
 
     def mark(kind, text=""):
         close()
-        turns.append({"who": "mark", "kind": kind, "text": text})
+        turns.append({"who": "mark", "kind": kind, "text": text, "at": here})
 
+    here = 0                        # the byte the record being read begins at
     for d in recs:
         kind = d.get("type")
+        here = d.get("_at", 0)
 
         if kind == "ai-title":
             title = d.get("aiTitle") or title
@@ -294,7 +345,8 @@ def _turns(recs):
                         if isinstance(res, dict) and res.get("type") in ("create", "update"):
                             fp = res.get("filePath") or ""
                             if fp and cur:
-                                cur["wrote" if res["type"] == "create" else "edited"].append(short(fp, cwd))
+                                cur["wrote" if res["type"] == "create" else "edited"].append(
+                                    short(fp, d.get("cwd") or cwd))
                     elif b.get("type") == "text":
                         said.append(b.get("text") or "")
                 text = "\n".join(x for x in said if x.strip()).strip()
@@ -326,13 +378,13 @@ def _turns(recs):
                     said_it(mark, text)
                 else:
                     close()
-                    turns.append({"who": "you", "t": stamp(d), "text": text[:MAX_TEXT]})
+                    turns.append({"who": "you", "t": stamp(d), "text": text[:MAX_TEXT], "at": here})
                     if pasted:
                         turns[-1]["imgs"] = pasted
             elif v:
                 close()
                 turns.append({"who": "note", "t": stamp(d), "kind": v[0], "from": v[1],
-                              "about": v[2], "text": v[3][:MAX_TEXT]})
+                              "about": v[2], "text": v[3][:MAX_TEXT], "at": here})
                 shots = [s for s in ims if s["k"] == "path"]
                 if shots:
                     turns[-1]["imgs"] = shots
@@ -343,7 +395,7 @@ def _turns(recs):
         if kind == "assistant" and isinstance(content, list):
             if cur is None:
                 cur = {"who": "claude", "t": stamp(d), "text": "", "thinking": 0,
-                       "tools": [], "wrote": [], "edited": []}
+                       "tools": [], "wrote": [], "edited": [], "at": here}
             for b in content:
                 if not isinstance(b, dict):
                     continue
@@ -358,7 +410,7 @@ def _turns(recs):
                     if cur["text"] or cur["tools"]:
                         close()
                         cur = {"who": "claude", "t": stamp(d), "text": "", "thinking": 0,
-                               "tools": [], "wrote": [], "edited": []}
+                               "tools": [], "wrote": [], "edited": [], "at": here}
                     # scrubbed like your half, once the cut is made
                     cur["text"] = chunk[:MAX_TEXT]
                 elif bt == "thinking":
@@ -388,7 +440,7 @@ def _turns(recs):
             t["thinking"] += prev["thinking"]
             t["wrote"] = prev["wrote"] + t["wrote"]
             t["edited"] = prev["edited"] + t["edited"]
-            t["t"] = prev["t"]
+            t["t"], t["at"] = prev["t"], prev["at"]
         merged.append(t)
     for t in merged:
         if t["who"] == "claude":
@@ -632,7 +684,7 @@ def _shot(s, cwd, looked, tool="", brief_=""):
             looked[p] = look(p)
         out["state"] = looked[p]
         out["name"] = scrub(os.path.basename(p))
-        out["where"] = scrub(short(p, cwd))
+        out["where"] = scrub(short(p, s.get("cwd") or cwd))
     else:
         out["state"] = "ok"
     if tool:
