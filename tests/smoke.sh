@@ -39,7 +39,7 @@ echo "rubricator smoke tests"
 # A run of this suite happens on a desk where terminals hold live sessions, and
 # one AppleScript that reached them would type into one or switch its tabs. So
 # `osascript` on the PATH is a tripwire: it scripts nothing, writes down that it
-# was called, and fails. Test 46, the last, reads what it wrote, which has to be nothing.
+# was called, and fails. Test 48, the last, reads what it wrote, which has to be nothing.
 TRIP="$WORK/tripwire"; mkdir -p "$TRIP"
 printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s"\nexit 1\n' "$WORK/osascript.log" > "$TRIP/osascript"
 chmod +x "$TRIP/osascript"
@@ -1741,6 +1741,8 @@ function curSid(){ return ''; }
 function promptsWithheld(){ return false; }
 function sessionsOff(){ return '<div class="empty">HISTORY-OFF</div>'; }
 function replySection(){ return ''; }
+var TESTS = {};                                   // the test runs: test 47
+function testChip(){ return ''; } function testTip(){ return ''; } function rowBar(){ return ''; }
 function dayLabel(){ return 'Earlier'; }
 function inRepo(p){ return p.indexOf('/repo') === 0; }
 function sessionList(){
@@ -3843,7 +3845,7 @@ checks["an indexed running session's view ends on its reply line"] = bool(re.sea
 checks["so does one the index does not hold"] = bool(re.search(r"replySection\(sid\)\]\.join\(''\);\s*\}\s*$", body))
 checks["the reply line is the view's own child"] = (
     "box.innerHTML = sessionHTML(sid, S.slot());" in js
-    and "'<div class=\"sreply\">' + bandHTML(sid) + replyHTML(sid, 's') + '</div>'" in js)
+    and "'<div class=\"sreply\">' + testsHTML(sid) + bandHTML(sid) + replyHTML(sid, 's') + '</div>'" in js)
 for k, v in checks.items():
     print(("ok " if v else "XX ") + k)
 sys.exit(0 if all(checks.values()) else 1)
@@ -4206,15 +4208,341 @@ else
   skip "45b · a growing conversation on the page" "no node"
 fi
 
-# ── 46 · nothing in this run scripted another application ───────────────────
+# ── 46 · a test run, found on the machine and counted ───────────────────────
+# What runs under a session is found by its command line, how far it is by its
+# output, and how long it took before by the transcripts. Pinned:
+#
+#   - the runners' lines, from npm scripts to pytest under any python, are test
+#     runs, named from the runner's own word; a shell's command string, the
+#     shell's own test, inline code, builds and readers of test files are not
+#   - each runner's way of counting is read: a share it printed, a fraction, a
+#     count announced up front or announced per binary and summed, the lines
+#     that pass and fail; a summary stops the counting; colours and carriage
+#     returns are passed over; a count announced in another unit is dropped
+#   - an output is read on from where the last look left it, a line still being
+#     written waits, a file written anew is read anew, and a large one from
+#     near its end, its counts then "at least"
+#   - on the machine: a run under a session, writing to a file, says how far,
+#     its call by the description of the Bash call still running — the
+#     background call whose task file it writes, where one does, and the
+#     foreground call where its task file names no background call — and the
+#     run before from the session's transcript or another of its project; one
+#     writing into a pipe says so; a session running none, and a run under no
+#     session, are not listed; a later look reads on
+#   - the server answers only with consent
+python3 - "$WORK" "$REPO" >"$WORK/testruns.txt" 2>&1 <<'PYEOF'
+import json, os, signal, subprocess, sys, time, urllib.error, urllib.request
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+base = os.path.join(work, "testruns")
+sdir = os.path.join(base, "sessions"); os.makedirs(sdir, exist_ok=True)
+pdir = os.path.join(base, "projects", "-runs"); os.makedirs(pdir, exist_ok=True)
+tdir = os.path.join(base, "tasks"); os.makedirs(tdir, exist_ok=True)
+os.environ.update(RUBRICATOR_CLAUDE_SESSIONS=sdir, RUBRICATOR_CLAUDE_PROJECTS=os.path.join(base, "projects"),
+                  RUBRICATOR_CLAUDE_HISTORY=os.path.join(base, "history.jsonl"))
+bindir = os.path.join(base, "bin"); os.makedirs(bindir, exist_ok=True)
+fake = os.path.join(bindir, "claude"); os.symlink("/bin/bash", fake)
+script = os.path.join(base, "run_tests.sh")
+open(script, "w").write('#!/bin/bash\necho "4 to run"\necho "✓ a"\necho "✗ b"\nsleep 2\necho "✓ c"\nsleep 60\n')
+os.chmod(script, 0o755)
+procs = []
+def sid(n): return "%08d-0000-4000-8000-%012d" % (n, n)
+def iso(t): return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".%03dZ" % int((t % 1) * 1000)
+def session(n, command):
+    p = subprocess.Popen([fake, "-c", "cd %s && %s; true" % (base, command)], start_new_session=True)
+    procs.append(p)
+    open(os.path.join(sdir, "%d.json" % p.pid), "w").write(json.dumps(
+        {"pid": p.pid, "sessionId": sid(n), "status": "busy", "cwd": base, "statusUpdatedAt": int(time.time() * 1000)}))
+    return p
+def bash(t, tid, command, desc):
+    return {"type": "assistant", "timestamp": iso(t), "message": {"id": "m" + tid, "content": [
+        {"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": command, "description": desc}}]}}
+def result(t, tid, stdout="", bg=None):
+    res = {"stdout": stdout, "stderr": "", "interrupted": False}
+    text = stdout
+    if bg:
+        res["backgroundTaskId"] = bg
+        text = "Command running in background with ID: %s. Output is being written to: %s/%s.output." % (bg, tdir, bg)
+    return {"type": "user", "timestamp": iso(t), "toolUseResult": res,
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": text}]}}
+def write(n, recs):
+    open(os.path.join(pdir, sid(n) + ".jsonl"), "w").write("".join(json.dumps(r) + "\n" for r in recs))
+
+checks = {}
+try:
+    sys.path.insert(0, os.path.join(repo_root, "share"))
+    import testruns as T
+
+    # 1 · what runs tests
+    RUNS = ["npm run test:affected", "/opt/homebrew/bin/node scripts/test.ts --affected", "node --test tests/x.test.ts",
+            "/usr/bin/python3 -m pytest -x tests", "/usr/local/bin/python3.12 /usr/local/bin/pytest -q",
+            "node /p/node_modules/.bin/vitest run", "node /p/node_modules/jest/bin/jest.js --ci",
+            "node /p/node_modules/@playwright/test/cli.js test", "cargo test --all", "go test ./...", "npm exec vitest run",
+            "npx jest", "yarn test:unit", "pnpm run test", "bun test", "bun scripts/test.ts", "make -j4 test",
+            "./gradlew :app:test", "mvn -q verify", "/bin/bash ./run_tests.sh", "ctest -j8", "rspec spec/a_spec.rb",
+            "node /opt/homebrew/lib/node_modules/pnpm/bin/pnpm.cjs run test"]
+    NOT = ["/bin/zsh -c source x && npm test", "cat tests/a.test.ts", "node build.js", "test -f x", "[ -f x ]",
+           "tail -f .tree/affected.log", "node -e require('./test.js')", "python3 -c import pytest", "vim test.py",
+           "npm run build", "go build ./...", "trial bench.mjs", "tsc --noEmit", "grep -r test src"]
+    checks["every runner's line is a test run"] = [a for a in RUNS if not T.runner(a)] == []
+    checks["and nothing else is: %s" % [a for a in NOT if T.runner(a)]] = [a for a in NOT if T.runner(a)] == []
+    checks["a run is named from the runner's own word"] = (
+        T.runner("node /p/node_modules/.bin/vitest run") == "vitest run" and T.runner("npm exec vitest run") == "vitest run"
+        and T.runner("/usr/local/bin/python3.12 /usr/local/bin/pytest -q") == "pytest -q")
+
+    # 2 · how far, from what it printed
+    c = T.counted
+    checks["pytest's own share is taken, and its collected count"] = (
+        c("collected 40 items\n\ntests/a.py ....  [ 10%]\n") == {"done": 0, "failed": 0, "total": 40, "pct": 10})
+    checks["ctest's, playwright's and phpunit's fractions are taken"] = (
+        c("    1/12 Test  #1: a ....   Passed\n    2/12 Test  #2: b ***Failed\n")["total"] == 12
+        and c("Running 50 tests using 4 workers\n[7/50] [chromium] › a.spec.ts:3:1 › x\n")["done"] == 7
+        and c("...F.  5 / 120 (  4%)\n")["total"] == 120)
+    checks["a count announced up front, and the lines that pass and fail"] = (
+        c("324 to run, in a pool of 10 slots\n✓ tests/a.test.ts  1.2s\n✗ tests/b.test.ts  0.4s\n")
+        == {"done": 2, "failed": 1, "total": 324, "pct": None})
+    checks["TAP's plan at the top level, its subtests passed over"] = (
+        c("TAP version 13\n1..2\n    ok 1 - sub\n    1..1\nok 1 - a\nnot ok 2 - b\n") == {"done": 2, "failed": 1, "total": 2, "pct": None})
+    checks["cargo's counts per binary are summed"] = (
+        c("running 3 tests\ntest a ... ok\ntest b ... FAILED\nrunning 2 tests\ntest c ... ok\n") == {"done": 3, "failed": 1, "total": 5, "pct": None})
+    checks["jest's and go's lines count"] = (
+        c("PASS src/a.test.js\nFAIL src/b.test.js\n")["done"] == 2
+        and c("ok  \tx/a\t0.12s\nFAIL\tx/b\t0.30s\nok  \tx/c\t(cached)\n") == {"done": 3, "failed": 1, "total": None, "pct": None})
+    checks["a summary stops the counting"] = (
+        c("✔ a (1ms)\n✖ b (2ms)\nℹ tests 2\nℹ fail 1\n✖ failing tests:\n\n✖ b (2ms)\n") == {"done": 2, "failed": 1, "total": None, "pct": None})
+    checks["colours and carriage returns are passed over"] = c("\x1b[32m✓\x1b[39m a\nloading 10%\rloading 20%\r✓ b\n")["done"] == 2
+    checks["a count announced in another unit is dropped"] = c("1..1\n✓ a\n✓ b\n")["total"] is None
+
+    # 3 · an output read as it grows
+    f = os.path.join(base, "grow.log")
+    open(f, "w").write("3 to run\n✓ a\n✓ b")
+    o = T._Out(f); o.look()
+    checks["a line still being written waits"] = o.count.result()["done"] == 1
+    open(f, "a").write("\n✗ c\n"); o.look()
+    checks["a later look reads on"] = o.count.result() == {"done": 3, "failed": 1, "total": 3, "pct": None}
+    os.remove(f); open(f, "w").write("✓ a\n"); o.look()
+    checks["a file written anew is read anew"] = o.count.result()["done"] == 1 and o.count.result()["total"] is None
+    most, T.OUT_MOST = T.OUT_MOST, 64
+    open(f, "w").write("50 to run\n" + "✓ x\n" * 100)
+    o = T._Out(f); o.look()
+    T.OUT_MOST = most
+    # 64 bytes from the end are ten and a bit lines of six: the bit is cut off, and so is the count up front
+    checks["a large file is read from near its end, at least"] = (
+        o.whole is False and o.count.result()["done"] == 10 and o.count.result()["total"] is None)
+
+    # 4 · on the machine
+    now = time.time()
+    write(1, [bash(now - 200, "toolu_a", "cd x && ./run_tests.sh", "Run the tests"),
+              result(now - 170, "toolu_a", "4 to run\n✓ a\n✓ b\n✓ c\n✓ d\n"),
+              bash(now - 5, "toolu_b", "./run_tests.sh > out1.log 2>&1", "Run the tests again")])
+    write(2, [bash(now - 4, "toolu_c", "./run_tests.sh | cat", "Run the tests into a pipe")])
+    write(4, [bash(now - 9, "toolu_d", "./run_tests.sh", "Run them in the background"),
+              result(now - 9, "toolu_d", bg="bgtask01"),
+              bash(now - 3, "toolu_e", "sleep 5", "Wait a little")])
+    write(5, [bash(now - 3, "toolu_f", "./run_tests.sh", "Run them in the foreground")])
+    session(1, "./run_tests.sh > out1.log 2>&1")
+    session(2, "./run_tests.sh | cat > /dev/null")
+    session(3, "sleep 60")
+    session(4, "./run_tests.sh > %s/bgtask01.output 2>&1" % tdir)
+    session(5, "./run_tests.sh > %s/fgtask02.output 2>&1" % tdir)
+    alone = subprocess.Popen([script], stdout=subprocess.DEVNULL, start_new_session=True); procs.append(alone)
+    time.sleep(1.2)
+    got = T.runs()["runs"]
+    one = (got.get(sid(1)) or [{}])[0]
+    checks["a run under a session is found, and says how far: %s" % one] = (
+        one.get("label") == "bash ./run_tests.sh" and one.get("out") == "file"
+        and (one.get("done"), one.get("failed"), one.get("total")) == (2, 1, 4))
+    checks["its call is the Bash call still running, by its description"] = one.get("what") == "Run the tests again"
+    checks["the run before is the same command's, its time and its count"] = one.get("last") == {"secs": 30, "done": 4}
+    two = (got.get(sid(2)) or [{}])[0]
+    checks["a run into a pipe says so, by its stdout: %s" % two] = two.get("out") == "pipe" and two.get("done") == 0
+    checks["the run before is found in another transcript of its project"] = (two.get("last") or {}).get("secs") == 30
+    checks["a session running none is not listed"] = sid(3) not in got
+    checks["a run under no session is not listed"] = all(r["pid"] != alone.pid for rs in got.values() for r in rs)
+    checks["a background run's call is the one whose task file it writes"] = (
+        (got.get(sid(4)) or [{}])[0].get("what") == "Run them in the background")
+    checks["a task file no background call names is a foreground call's"] = (
+        (got.get(sid(5)) or [{}])[0].get("what") == "Run them in the foreground")
+    time.sleep(2.2)
+    got = T.runs()["runs"]
+    checks["a later look reads on from where the last left"] = ((got.get(sid(1)) or [{}])[0].get("done")) == 3
+
+    # 5 · the server: consent
+    import workspace as W
+    repo = os.path.join(base, "repo"); os.makedirs(repo, exist_ok=True)
+    open(os.path.join(repo, "README.md"), "w").write("# runs\n")
+    subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+    share = Path(repo_root) / "share"
+    srvs = [W.serve_workspace([repo], False, share, "", idle=10 ** 9),
+            W.serve_workspace([repo], True, share, "", idle=10 ** 9)]
+    try:
+        j = json.load(urllib.request.urlopen(srvs[0].base + "/tests", timeout=20))
+        checks["without consent the server reads nothing"] = j.get("allowed") is False and "runs" not in j
+        j = json.load(urllib.request.urlopen(srvs[1].base + "/tests", timeout=20))
+        checks["with it, the runs come back"] = j.get("allowed") is True and sid(1) in j.get("runs", {})
+    finally:
+        for s_ in srvs:
+            s_.stop.set()
+            try: s_.httpd.shutdown()
+            except Exception: pass
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    for q in procs:
+        try: os.killpg(q.pid, signal.SIGTERM)
+        except Exception: pass
+for k_, v in checks.items(): print(("ok " if v else "XX ") + k_)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "46 · a test run is found under its session, counted from its output, and held to the run before"
+else
+  no "46 · the test runs are read wrong" "$(grep '^XX' "$WORK/testruns.txt" | tr '\n' ' ')$(tail -2 "$WORK/testruns.txt")"
+fi
+
+# ── 47 · the test runs on the page ──────────────────────────────────────────
+# The page's half, lifted from the shipped source around stand-ins for the
+# server and the DOM. Pinned:
+#
+#   - a row says how far in as few words as it can: the runner's share, what
+#     finished of what it announced, or of what finished the time before,
+#     or a share of the time the run before took; failures in their own
+#     colour; another run as +1
+#   - the foot says what it is, how far, how long, and the time before; where
+#     the output cannot say how far, it says why; a share from the run before
+#     is drawn as a guess, and one past the time before as late
+#   - the runs are asked after once the running sessions are looked at and one
+#     can be running a command, and put away when none can; then every few
+#     seconds only while such a session shows on screen in a window in front;
+#     never twice at once; and not while the list is not allowed
+#   - what is on screen is rewritten in place
+if command -v node >/dev/null; then
+  python3 -c 'import sys
+src = open(sys.argv[1]).read()
+def sl(a, b):
+    i = src.index(a); return src[i:src.index(b, i)]
+open(sys.argv[2], "w").write("\n".join([
+    sl("function clockFor(since)", "function tokensFor(n)"),
+    sl("var FOOT = 24;", "function bandShown(b)"),
+    sl("/* ── the test runs a session has going", "function stopIt(sid){"),
+]))' "$REPO/share/workspace.js" "$WORK/tests-page.js"
+  { cat <<'JSEOF'
+var CAPS = { waiting: 1 }, GONE = 0;
+function can(c){ return !!CAPS[c]; }
+function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                   .replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+var WAIT = { allowed: true }, RUN = {};
+var asked = [];
+function api(path, body, cb, fail){ asked.push({ path: path, cb: cb, fail: fail }); }
+function el(attr, sid, shown){
+  var e = { dataset: {}, innerHTML: '', outerHTML: '', offsetParent: shown ? {} : null, title: 'about it',
+            closest: function(){ return null; } };
+  e.dataset[attr] = sid; return e;
+}
+var onScreen = [];
+var document = { hidden: false, querySelectorAll: function(sel){
+  return onScreen.filter(function(e){ return sel.split(',').some(function(s){
+    var k = s.replace(/^\[data-|\]$/g, '').replace(/-(.)/g, function(_, c){ return c.toUpperCase(); });
+    return k in e.dataset; }); }); } };
+JSEOF
+    cat "$WORK/tests-page.js"
+    cat <<'JSEOF'
+
+var fail = [];
+function want(c, why){ if (!c) fail.push(why); }
+var A = 'aaaaaaaa-0000-4000-8000-000000000001', B = 'bbbbbbbb-0000-4000-8000-000000000002';
+testsGot = Date.now();
+function run(o){ var t = { pid: 1, label: 'npm run test:affected', what: 'Run the tests', secs: 30, cpu: 50, procs: 3,
+  out: 'file', done: 0, failed: 0, total: null, pct: null, whole: true, last: null };
+  for (var k in o) t[k] = o[k]; return t; }
+
+/* a row: as few words as say how far */
+TESTS = {}; TESTS[A] = [run({ done: 38, total: 324 })];
+want(testChip(A) === 'tests 38/324', 'what finished of what it announced: ' + testChip(A));
+TESTS[A] = [run({ pct: 45, done: 0 })];
+want(testChip(A) === 'tests 45%', 'the runner\'s own share: ' + testChip(A));
+TESTS[A] = [run({ done: 12, failed: 1, last: { secs: 40, done: 15 } })];
+want(/^tests 12\/~15 <span class="tfail">1 failed<\/span>$/.test(testChip(A)), 'of what finished the time before: ' + testChip(A));
+TESTS[A] = [run({ done: 7 })];
+want(testChip(A) === 'tests 7 done', 'a count alone: ' + testChip(A));
+TESTS[A] = [run({ secs: 30, last: { secs: 60, done: null } }), run({ pid: 2 })];
+want(/^tests ~50% <span class="tmore">\+1<\/span>$/.test(testChip(A)), 'a share of the time before, and another run: ' + testChip(A));
+want(testChip(B) === '', 'a session running no tests says nothing');
+
+/* the foot: what, how far, how long, the time before, or why it cannot say */
+var words = testWords(run({ done: 3, whole: false, total: 9, last: { secs: 20 }, secs: 30, cpu: 0 })).join(' | ');
+want(/at least 3 of 9 finished/.test(words) && /running 30s/.test(words) && /longer than the 20s the time before took/.test(words)
+     && /using no CPU just now/.test(words), 'the words of a run: ' + words);
+want(/into a pipe/.test(testWords(run({ out: 'pipe' })).join()), 'a pipe does not say why');
+want(/to a terminal/.test(testWords(run({ out: 'terminal' })).join()), 'a terminal does not say why');
+want(/nothing counted in its output yet/.test(testWords(run({ out: 'file' })).join()), 'an empty file does not say so');
+want(/could not be read/.test(testWords(run({ out: 'unknown' })).join()), 'an unread output does not say so');
+var s = testShare(run({ done: 5, last: { done: 10, secs: 99 } }));
+want(s.est && s.p === 0.5, 'a count of the time before is not drawn as a guess: ' + JSON.stringify(s));
+s = testShare(run({ secs: 90, last: { secs: 60 } }));
+want(s.est && s.late && s.p === 1, 'a run past the time before is not late: ' + JSON.stringify(s));
+want(!testShare(run({ done: 3, total: 9 })).est, 'what it announced is drawn as a guess');
+TESTS[A] = [run({ done: 3, total: 4 })];
+var h = testsHTML(A);
+want(!/ hidden/.test(h.split('>')[0]) && /data-tclock="/.test(h) && /class="trbar" style="--p:0.750"/.test(h), 'the foot: ' + h);
+want(/ hidden>/.test(testsHTML(B)), 'the foot shows for a session running none');
+
+/* asked after: once a session can be running a command, every few seconds while it shows, never twice */
+TESTS = {}; asked = []; testsAt = 0; testsOut = false;
+RUN = {}; RUN[A] = { sid: A, on: 'done' };
+afterRunning();
+want(asked.length === 0, 'asked although no session can be running a command');
+RUN[A].on = 'background';
+afterRunning();
+want(asked.length === 1 && asked[0].path === 'tests', 'not asked once a session can be running one');
+afterRunning();
+want(asked.length === 1, 'asked twice at once');
+var row = el('rtest', A, true), line = el('rtline', A, true), foot = el('tband', A, true), rowEl = { title: 'about it' };
+row.closest = function(sel){ return sel === '.srow' ? rowEl : null; };
+onScreen = [row, line, foot];
+var got = {}; got[A] = [run({ done: 2, total: 8 })];
+asked[0].cb({ runs: got, allowed: true });
+want(row.innerHTML === 'tests 2/8' && /^about it\n— tests —\nRun the tests · 2 of 8 finished/.test(rowEl.title),
+     'the row was not rewritten: ' + row.innerHTML + ' / ' + rowEl.title);
+want(/class="rtline" data-rtline="aaaaaaaa[^"]*" style="--p:0.250"/.test(line.outerHTML), 'the hairline was not rewritten: ' + line.outerHTML);
+want(/data-tband/.test(foot.outerHTML) && /2 of 8 finished/.test(foot.outerHTML), 'the foot was not rewritten: ' + foot.outerHTML);
+tickTests();
+want(asked.length === 1, 'asked again before a few seconds were up');
+testsAt = Date.now() - TESTS_EVERY;
+document.hidden = true; tickTests();
+want(asked.length === 1, 'asked from a window not in front');
+document.hidden = false; row.offsetParent = foot.offsetParent = null; tickTests();
+want(asked.length === 1, 'asked for sessions not on screen');
+row.offsetParent = {}; RUN[A].on = 'done'; tickTests();
+want(asked.length === 1, 'asked for a session that can be running nothing');
+RUN[A].on = 'working'; tickTests();
+want(asked.length === 2, 'not asked every few seconds while it shows');
+asked[1].cb({ runs: {} });
+WAIT.allowed = false; testsAt = 0; tickTests();
+want(asked.length === 2, 'asked while the list is not allowed');
+WAIT.allowed = true;
+RUN[A].on = 'done'; TESTS[A] = [run({})]; afterRunning();
+want(!TESTS[A] && asked.length === 2, 'the runs were not put away once no session could be running one');
+console.log(fail.length ? 'XX ' + fail.join('; ') : 'ok');
+JSEOF
+  } > "$WORK/tests-page-run.js"
+  res=$(node "$WORK/tests-page-run.js" 2>&1)
+  case "$res" in ok*) ok "47 · the page says how far each run is, asks only while one shows, and says why where it cannot" ;;
+                 *)   no "47 · the test runs on the page are wrong" "$res" ;; esac
+else
+  skip "47 · the test runs on the page" "no node"
+fi
+
+# ── 48 · nothing in this run scripted another application ───────────────────
 # The tripwire at the top of this file stands where `osascript` would be found.
 # A test that reached it — the hook closing a window it never opened, a reply
 # that missed the dry seam — wrote its arguments down, and that is a failure
 # whether or not the test that did it noticed.
 if [ ! -s "$WORK/osascript.log" ]; then
-  ok "46 · nothing in the suite reached osascript"
+  ok "48 · nothing in the suite reached osascript"
 else
-  no "46 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
+  no "48 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"

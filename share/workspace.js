@@ -45,6 +45,7 @@ function serverBack(){ GONE = 0; afterGone(); }
 function afterGone(){
   if (typeof stat === 'function') stat();
   if (typeof paintBands === 'function') paintBands();
+  if (typeof paintTests === 'function') paintTests();
 }
 var GONE_SAID = 'md\u2019s server has stopped; run md again';
 
@@ -2169,6 +2170,7 @@ function afterWaiting(was){
     if (r && !el.classList.contains(r.on)) el.outerHTML = runDot(r.on, el.dataset.rundot);
   });
   paintBands(was);
+  afterRunning();
   if (Shell.navMode() === 'sessions') Shell.nav();
   Shell.paint();
 }
@@ -2322,7 +2324,8 @@ function openRow(r, q, sel){
   var tip = t + '\n' + (g.word || r.status) + ' for ' + waited(r.since) + ': ' + g.note +
             (r.waitingFor ? ' (' + r.waitingFor + ')' : '') +
             '\n' + where.replace(/^\/Users\/[^/]+/, '~') + ' · pid ' + r.pid +
-            (r.worksHere ? '\n' + startedIn(r) + ': ' + worksWhy(r) : '');
+            (r.worksHere ? '\n' + startedIn(r) + ': ' + worksWhy(r) : '') +
+            (TESTS[r.sid] ? '\n— tests —\n' + testTip(r.sid) : '');
   /* what it is about gets the whole first line, as on every session row; under
      it the state, the terminal's name and how long the state has held; and for
      a session started elsewhere that works here, where it began, under that */
@@ -2336,12 +2339,13 @@ function openRow(r, q, sel){
     runDot(g.on) +
     '<span class="ttl">' + esc(t) + '</span>' + acts +
     '<span class="rst"><span class="rstate ' + esc(g.on) + '">' + esc(g.word || r.status || '?') + '</span>' +
+      '<span class="rtest" data-rtest="' + esc(r.sid) + '">' + testChip(r.sid) + '</span>' +
       '<span class="nms">' + [t !== r.name && r.name ? '<span class="nm">' + esc(r.name) + '</span>' : '',
                               showRepo ? '<span>' + esc(repo) + '</span>' : '']
                              .filter(Boolean).join(' · ') + '</span>' +
       '<span class="dur" data-since="' + (+r.since || 0) + '">' + waited(r.since, true) + '</span>' +
     '</span>' +
-    (r.worksHere ? '<span class="rwhere">' + esc(startedIn(r)) + '</span>' : '') + '</div>';
+    (r.worksHere ? '<span class="rwhere">' + esc(startedIn(r)) + '</span>' : '') + rowBar(r.sid) + '</div>';
 }
 /* ── the quill ─────────────────────────────────────────────────────────────
    What a working session wears wherever it shows: a pilcrow, the rubricator's
@@ -2546,14 +2550,15 @@ function askSend(sid, fixed){
   replyOf(sid).ask = { fixed: fixed == null ? '' : fixed };
   paintSend(sid);
 }
-/* at the foot of a running session's view: the band while it works, and the
+/* at the foot of a running session's view: its test runs, the band while it
+   works, and the
    reply line; without the gate, what would open the reply line */
 function replySection(sid){
   if (!can('launch'))
-    return '<div class="sreply off">' + bandHTML(sid) + '<div class="qnote">Replying from here types into ' +
+    return '<div class="sreply off">' + testsHTML(sid) + bandHTML(sid) + '<div class="qnote">Replying from here types into ' +
       'its terminal, which the page may do only with <span class="f">md --allow-launch</span> or ' +
       'Settings → What the page may start.</div></div>';
-  return '<div class="sreply">' + bandHTML(sid) + replyHTML(sid, 's') + '</div>';
+  return '<div class="sreply">' + testsHTML(sid) + bandHTML(sid) + replyHTML(sid, 's') + '</div>';
 }
 function replySay(sid, text, bad){
   var R = replyOf(sid);
@@ -2777,6 +2782,146 @@ function tickBands(){
       lookDoing(sid);
     }
   });
+}
+
+/* ── the test runs a session has going ─────────────────────────────────────
+   A session running its tests says so wherever it shows: on its Open now row,
+   after its state, how far the run is, with a hairline under the row filled
+   as far; and at the foot of its view, a line for each run above the band.
+   The server finds them on the machine (`tests`): the processes under the
+   session that run a test runner, what their output has counted, and how long
+   the same command took the time before. It is asked when the running
+   sessions have been looked at, and every few seconds while a session that
+   can be running a command shows in Open now or at a view's foot, on screen,
+   in a window in front; never twice at once. How far a run is comes from the
+   runner where it says so, and from the run before where it does not, and a
+   share worked out from the run before is drawn as the guess it is. */
+var TESTS = {}, testsAt = 0, testsGot = 0, testsOut = false, TESTS_EVERY = 5000;
+var TESTING = { working: 1, background: 1, asking: 1 };   // states a command can run in
+function lookTests(){
+  if (testsOut || GONE || !can('waiting') || !(WAIT && WAIT.allowed)) return;
+  testsOut = true; testsAt = Date.now();
+  api('tests', undefined, function(j){
+    testsOut = false;
+    TESTS = (j && j.runs) || {};
+    testsGot = Date.now();
+    paintTests();
+  }, function(){ testsOut = false; });
+}
+/* the second a run began, from how long it had run when the server looked */
+function testSince(t){ return Math.floor(testsGot / 1000) - (t.secs || 0); }
+function testSecs(t){ return Math.max(0, Math.floor(Date.now() / 1000) - testSince(t)); }
+/* how far a run is, as a share: the one the runner printed, what finished of
+   what it announced, or, from the run before, what finished of what finished
+   then, or the time it has run of the time that took — `est`, a guess */
+function testShare(t){
+  if (t.pct != null) return { p: t.pct / 100 };
+  if (t.total) return { p: Math.min(1, t.done / t.total) };
+  var last = t.last || {};
+  if (last.done && t.done) return { p: Math.min(1, t.done / last.done), est: true };
+  if (last.secs) return { p: Math.min(1, testSecs(t) / last.secs), est: true, late: testSecs(t) > last.secs };
+  return null;
+}
+/* on an Open now row: as few words as say how far */
+function testChip(sid){
+  var rs = TESTS[sid] || [], t = rs[0];
+  if (!t) return '';
+  var s = testShare(t), at = t.whole === false ? '≥' : '';
+  var how = t.pct != null ? t.pct + '%'
+          : t.total ? at + t.done + '/' + t.total
+          : t.done && t.last && t.last.done ? at + t.done + '/~' + t.last.done
+          : t.done ? at + t.done + ' done'
+          : s ? '~' + Math.round(s.p * 100) + '%' : '';
+  return 'tests' + (how ? ' ' + how : '') +
+    (t.failed ? ' <span class="tfail">' + t.failed + ' failed</span>' : '') +
+    (rs.length > 1 ? ' <span class="tmore">+' + (rs.length - 1) + '</span>' : '');
+}
+function testTip(sid){
+  return (TESTS[sid] || []).map(function(t){ return testWords(t).join(' · '); }).join('\n');
+}
+/* what is known of one run, in words: what it is, how far, how long, and
+   what the run before says; and where its output cannot say how far, why */
+function testWords(t){
+  var w = [t.what || t.label], at = t.whole === false ? 'at least ' : '';
+  if (t.pct != null) w.push(t.pct + '% by its own count');
+  else if (t.total) w.push(at + t.done + ' of ' + t.total + ' finished');
+  else if (t.done) w.push(at + t.done + ' finished' + (t.last && t.last.done ? ' of ' + t.last.done + ' the time before' : ''));
+  else if (t.out === 'pipe') w.push('its output goes into a pipe, which says nothing until it ends');
+  else if (t.out === 'terminal') w.push('its output goes to a terminal, which cannot be read');
+  else if (t.out === 'file') w.push('nothing counted in its output yet');
+  else w.push('where its output goes could not be read');
+  if (t.failed) w.push(t.failed + ' failed');
+  w.push('running ' + clockFor(testSince(t)));
+  if (t.last && t.last.secs){
+    var then = clockFor(Math.floor(Date.now() / 1000) - t.last.secs);
+    w.push(testSecs(t) > t.last.secs ? 'longer than the ' + then + ' the time before took' : 'the time before took ' + then);
+  }
+  if (t.cpu < 1) w.push('using no CPU just now');
+  return w;
+}
+function testBar(t, cls, sid){
+  var s = testShare(t);
+  return '<span class="' + cls + (s && s.est ? ' est' : '') + (s && s.late ? ' late' : '') + '"' +
+    (sid ? ' data-rtline="' + esc(sid) + '"' : '') +
+    (s ? ' style="--p:' + s.p.toFixed(3) + '"' : ' hidden') + '></span>';
+}
+/* on an Open now row: its hairline, empty while the session runs no tests */
+function rowBar(sid){
+  var t = (TESTS[sid] || [])[0];
+  return t ? testBar(t, 'rtline', sid) : '<span class="rtline" data-rtline="' + esc(sid) + '" hidden></span>';
+}
+/* at the foot of a session's view, a line for each run, above the band */
+function testsHTML(sid){
+  var rs = TESTS[sid] || [];
+  return '<div class="tband" data-tband="' + esc(sid) + '"' + (rs.length && !GONE ? '' : ' hidden') + '>' +
+    rs.map(function(t){
+      var w = testWords(t);
+      return '<div class="trun"><div class="trl"><span class="tword">Tests</span>' +
+        '<span class="twhat" title="' + esc(t.label) + '">' + esc(w[0]) + '</span>' +
+        w.slice(1).map(function(x){
+          return /^running /.test(x) ? '<span class="tclock" data-tclock="' + testSince(t) + '">' + esc(x) + '</span>'
+               : /failed$/.test(x) ? '<span class="tfail">' + esc(x) + '</span>' : '<span>' + esc(x) + '</span>';
+        }).join('') + '</div>' + testBar(t, 'trbar') + '</div>';
+    }).join('') + '</div>';
+}
+/* the rows, the hairlines and the lines at the foot are rewritten in place */
+function paintTests(){
+  [].forEach.call(document.querySelectorAll('[data-rtest]'), function(el){
+    var sid = el.dataset.rtest, row = el.closest && el.closest('.srow');
+    el.innerHTML = testChip(sid);
+    if (row) row.title = row.title.split('\n— tests —')[0] + (TESTS[sid] ? '\n— tests —\n' + testTip(sid) : '');
+  });
+  [].forEach.call(document.querySelectorAll('[data-rtline]'), function(el){
+    el.outerHTML = rowBar(el.dataset.rtline);
+  });
+  [].forEach.call(document.querySelectorAll('[data-tband]'), function(el){
+    var surf = el.closest && el.closest('.surf'), foot = !!surf && atFoot(surf);
+    el.outerHTML = testsHTML(el.dataset.tband);
+    if (foot) surf.scrollTop = surf.scrollHeight;
+  });
+}
+/* whether a session that can be running a command shows anywhere on screen */
+function testsWanted(){
+  var els = document.querySelectorAll('[data-rtest],[data-tband]');
+  for (var i = 0; i < els.length; i++){
+    var r = RUN[els[i].dataset.rtest || els[i].dataset.tband];
+    if (r && TESTING[r.on] && els[i].offsetParent) return true;
+  }
+  return false;
+}
+/* the clocks count every second, and the runs are asked after every few */
+function tickTests(){
+  if (document.hidden) return;
+  [].forEach.call(document.querySelectorAll('[data-tclock]'), function(c){
+    c.textContent = 'running ' + clockFor(+c.dataset.tclock);
+  });
+  if (Date.now() - testsAt >= TESTS_EVERY && testsWanted()) lookTests();
+}
+/* after a look at the running sessions: the runs are asked after at once
+   when a session can be running a command, and put away when none can */
+function afterRunning(){
+  if (Object.keys(RUN).some(function(sid){ return TESTING[RUN[sid].on]; })) lookTests();
+  else if (Object.keys(TESTS).length){ TESTS = {}; paintTests(); }
 }
 function stopIt(sid){
   STOPASK[sid] = false;
@@ -4337,6 +4482,7 @@ setInterval(function(){
   });
 }, 30000);
 setInterval(tickBands, 1000);
+setInterval(tickTests, 1000);
 
 window.__ws = { data: D, dossier: buildDossier, caps: CAPS,
                 reindex: reindex, ensureText: ensureText, ensureAllText: ensureAllText,

@@ -523,6 +523,35 @@ html[data-theme="bone"],html[data-theme="light"]{--rubric:#a8341c}
   background:var(--rubric);color:#fff}
 .sreply.off .wband{margin-bottom:10px}
 
+/* ── a session's test runs ──────────────────────────────────────────────────
+   After an Open now row's state, how far its run is, and under the row a
+   hairline filled as far; at the foot of its view, a line for each run above
+   the band, and its rule. A share worked out from the run before is a guess
+   and is drawn as one, paler; one that has run past the time before, in the
+   colour of what waits. */
+/* the row's second line gives way names first, then how far, then the state */
+.srow.run .rst .rtest{flex:0 6 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--fg-muted);
+  font-variant-numeric:tabular-nums}
+.srow.run .rst .rtest:empty{display:none}
+.rtest .tfail,.tband .tfail{color:var(--red);font-weight:600}
+.rtest .tmore{color:var(--fg-dim)}
+.rtline,.trbar{--fill:var(--rubric);
+  background:linear-gradient(to right,var(--fill) calc(var(--p,0) * 100%),var(--border-soft) 0)}
+.rtline.est,.trbar.est{--fill:color-mix(in srgb,var(--rubric) 42%,transparent)}
+.rtline.late,.trbar.late{--fill:color-mix(in srgb,var(--yellow) 60%,transparent)}
+.rtline[hidden],.trbar[hidden],.tband[hidden]{display:none}
+.srow.run .rtline{flex:0 0 calc(100% - 33.5px);margin:4px 0 0 33.5px;height:2px;border-radius:1px}
+.tband{display:flex;flex-direction:column;gap:10px;margin:0 0 13px;padding:0 2px 12px 1px;
+  border-bottom:1px solid var(--border-soft)}
+.tband .trun{display:flex;flex-direction:column;gap:6px}
+.tband .trl{display:flex;flex-wrap:wrap;gap:2px 7px;align-items:baseline;font-size:11.5px;color:var(--fg-dim);
+  line-height:1.4}
+.tband .trl > span + span + span::before{content:"· ";opacity:.6}
+.tband .tword{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--rubric)}
+.tband .twhat{font-size:13px;color:var(--fg)}
+.tband .tclock{font-variant-numeric:tabular-nums}
+.tband .trbar{display:block;height:3px;border-radius:2px}
+
 /* ── searching inside one session ────────────────────────────────────────
    Pinned to the top of the surface, because what you are looking for is
    almost never what you are looking at. */

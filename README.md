@@ -207,7 +207,9 @@ colour and a shape of its own: *asking you* (a permission or a question is open 
 terminal), *your turn*, *on its own command* (its turn ended with a background command still
 running), or *working*, whose dot is the quill — a pilcrow, the rubricator's own mark, inked
 in rubric red stroke by stroke and lifted off again. In a narrow navigator the names give way
-first and end in an ellipsis, so a row keeps its two lines. A session counts as this
+first and end in an ellipsis, so a row keeps its two lines. A session running its tests says
+how far after its state — *tests 38/324* — with a hairline under the row filled as far, and
+that gives way before the state does. A session counts as this
 repository's when it was started in it or one of its worktrees, or when it works there: one
 started in the folder above, whose latest tool calls work mostly in this repository, is listed
 here and says *started in ~/Repositories, works here*. The group is read from Claude Code's own
@@ -315,6 +317,24 @@ reading only what was written since the last. The reply line stays usable: Send 
 turn. Beside the band is **Stop**, which asks the same way — *Stop it? Stop · Cancel* — and
 sends the Escape key to its tab, which is how a turn is stopped in Claude Code. Neither asks
 in a dialog, and Escape puts either question away.
+
+A session running its tests says so above the band, a line for each run and a rule filled as
+far as it is, whatever state the session is in: what the run is, by the description of the
+Bash call that started it; how far; how many failed; how long it has run; and how long the
+same command took the time before. Nothing in Claude Code says a command runs tests, so the
+machine is asked, the same way in any project: the processes under the session whose
+command line is a test runner's — pytest, jest, vitest, `node --test`, `cargo test`,
+`go test`, an npm, make or gradle test target, a script named as tests are — and the file
+each writes its output to, read on from where the last look left it. How far comes from the
+runner where it counts as it goes — a share it prints, *3/12*, a count it announces up front
+— and otherwise from the run before, found in the session's transcript or the latest others
+of its project: what finished of what finished then, or the time it has run of the time
+that took, drawn paler, as the guess it is. Where nothing can say how far, the line says
+why: its output goes into a pipe, as `| tail` sends it, and no other process can read a
+pipe; or nothing has been counted yet. A run that detaches itself from its session's shell
+belongs to no session and is not shown. The page asks (`/tests`) once the running sessions
+are looked at, and every five seconds while a session that can be running a command shows
+in Open now or at a view's foot, on screen, in a window in front.
 
 **Notes** collects your marks across every document — every open Question, everything marked
 Cut — because what you are hunting is often your own reaction, not the text. Its **copy**
@@ -607,11 +627,12 @@ share/extract.py    PDF and Word into text, cached on mtime and size
 share/transcript.py one conversation, read from its end on demand and on from a turn as it
                     grows; its pictures, and the pages it published
 share/waiting.py    which sessions are running, which wait on you, and what a working one does
+share/testruns.py   the test runs each running session has going, and how far each one is
 share/hook.py       blocking review server for --review and --hook
 .claude-plugin/     the Claude Code plugin manifest; hooks/hooks.json is the hook
 ```
 
-Twenty-one files, about thirteen and a half thousand lines, plus five vendored render libraries. No build
+Twenty-two files, about fourteen and a half thousand lines, plus five vendored render libraries. No build
 step, no runtime dependency beyond what macOS ships. `./tests/smoke.sh` drives the whole
 thing from a throwaway install; CI runs it on every push.
 

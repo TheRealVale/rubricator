@@ -1584,11 +1584,27 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         got["allowed"] = True
         return S.J(got)
 
+    def tests_route(method, query, body):
+        """The test runs the running sessions have going and how far each is,
+        for Open now and the foot of a session's view, which ask every few
+        seconds while one of them shows: the machine read again each time, a
+        run's output only from where the last look left it. The same consent as
+        the list it comes from."""
+        if not (look[0] or want[0]):
+            return S.J({"allowed": False})
+        try:
+            import testruns as _T
+            got = _T.runs()
+        except Exception as e:
+            got = {"runs": {}, "error": str(e)[:200]}
+        got["allowed"] = True
+        return S.J(got)
+
     routes = {"": page, "text": text, "asset": asset, "reindex": reindex,
               "notes": notes, "act": act, "events": events, "settings": settings,
               "session": session, "sessions": sessions_route, "waiting": waiting_route,
-              "working": working_route, "image": image, "artifacts": artifacts_route,
-              "artifact": artifact_route}
+              "working": working_route, "tests": tests_route, "image": image,
+              "artifacts": artifacts_route, "artifact": artifact_route}
     srv = S.Server(routes, idle=idle if idle is not None else S.IDLE)
     if port:
         srv.httpd.server_close()

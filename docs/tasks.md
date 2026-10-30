@@ -1594,7 +1594,7 @@ measurements are in `share/waiting.py`'s header.
       *Done when:* each failing check refuses and says which; the words reach the
       script only as an argv item, quotes and `$(…)` intact; nothing is resolved
       without the gate; the dry seam never reaches osascript — test 32, and test
-      46 finds no call to osascript anywhere in the suite.
+      48 finds no call to osascript anywhere in the suite.
 - [x] **W8 · What is not yours is not drawn as yours.** A transcript files
       another session's message (`<cross-session-message from-name=…>`), an
       agent's report (`<agent-message>`, *[Subagent hand-back]*), a background
@@ -1672,7 +1672,7 @@ measurements are in `share/waiting.py`'s header.
       is queued, are for the first real run to show.
       *Done when:* a busy reply is refused without the flag, `waiting` and
       `shell` even with it, a stop unless busy; a stop sends exactly one Escape
-      and no text; the page asks before either — tests 35 and 37, and test 46
+      and no text; the page asks before either — tests 35 and 37, and test 48
       finds no call to osascript.
 - [x] **W12 · The server lives while its window does.** A window in the
       background, or on a Mac asleep, has its timers held back, so its
@@ -1736,6 +1736,48 @@ measurements are in `share/waiting.py`'s header.
       stream names the session that grew and no other — test 45a; the page
       asks from its latest turn, keeps what it drew and what you opened, and
       keeps the foot — test 45b.
+- [x] **W15 · A session's test runs, and how far each is.** Nothing in Claude
+      Code's files says a command runs tests or how far it has got; the
+      machine does, the same way in any project. Measured on 2.1.312 to
+      2.1.314, 2026-10-30, against twelve sessions in one repository: every
+      command a session runs is a process under the session's own, in a shell
+      Claude Code starts for each Bash call; that shell writes the command's
+      output to a file of the session's own (`tasks/<id>.output`), foreground
+      call or background, as it is written, and a background call's `<id>` is
+      the `backgroundTaskId` its result carries; a command can send its output
+      into a log it names, a file too, or into a pipe, which no other process
+      can read; and a process that detaches from its shell belongs to no
+      session. One `ps` over 709 processes took 30 ms, one `lsof` 30 ms.
+      `share/testruns.py` takes a run to be a process under a session whose
+      command line is a runner's and none of whose parents is: a table of
+      runners, subcommands, build targets, package scripts and scripts named as
+      tests are, the program by name under any interpreter. Its output — its
+      stdout's file, and its stderr's, where some runners count — is read on
+      from where the last look left it, and counted the same way whatever the
+      runner: a share it prints, a fraction, a count announced up front or per
+      binary and summed, the lines that pass and fail, until a summary. Its
+      call is the background call whose task file its shell writes, or else
+      the Bash call still running, by its description; the run before, the
+      same command's latest that ended, in the session's transcript read from
+      its end or the latest six of its project, two megabytes each: from its
+      call to its result or to its `<task-notification>`, and what its output
+      counted, unless it was piped. Both are looked up once a run. Open now's
+      row says how far after the state and draws a hairline under the row;
+      the foot of a session's view gives each run a line and a rule above the
+      band, whatever the session's state. A share from the run before is drawn
+      paler; where nothing can say how far — a pipe, nothing counted yet — the
+      line says which. The page asks (`/tests`, the list's consent) once the
+      running sessions are looked at and every five seconds while a session
+      that can run a command shows on screen in a window in front, never twice
+      at once. A look over twelve sessions with two runs took 0.36 s the first
+      time, the transcripts read for the runs before among it.
+      *Done when:* the runners' lines are runs and nothing else is; each way of
+      counting is read; an output is read on, a file written anew read anew; a
+      run under a session is found, linked to its call, the background call
+      before the foreground one, held to the run before from its own or another
+      transcript, and a pipe says so — test 46; the page's words, its guesses
+      drawn as guesses, and its asking only while on screen — test 47. Each of
+      seven planted bugs turned one of them red.
 
 ---
 
