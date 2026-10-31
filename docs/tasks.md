@@ -166,7 +166,10 @@ start a process, and it should look like it.
 
 ## Phase E — extensions ✅
 
-- [x] **E1 · Watch mode over SSE** — `docs/watch-plan.md`, now a small addition.
+- [x] **E1 · Watch mode over SSE** — `docs/watch-plan.md`. An indexed document's
+      mtime is read every second; a document written or deleted is found by a
+      listing of the tree every `LIST_EVERY` seconds (`share/workspace.py`), so it
+      joins or leaves the index and the search without a reindex — test 49.
 - [x] **E2 · Per-file timeline** — commits and sessions on one axis.
 - [–] **E3 · Correlation graph** — **removed 2026-08-26 (P3).** Built, shipped,
       and deleted for a reason that is not the one first given. It was *not* slow:
@@ -1594,7 +1597,7 @@ measurements are in `share/waiting.py`'s header.
       *Done when:* each failing check refuses and says which; the words reach the
       script only as an argv item, quotes and `$(…)` intact; nothing is resolved
       without the gate; the dry seam never reaches osascript — test 32, and test
-      48 finds no call to osascript anywhere in the suite.
+      50 finds no call to osascript anywhere in the suite.
 - [x] **W8 · What is not yours is not drawn as yours.** A transcript files
       another session's message (`<cross-session-message from-name=…>`), an
       agent's report (`<agent-message>`, *[Subagent hand-back]*), a background
@@ -1672,7 +1675,7 @@ measurements are in `share/waiting.py`'s header.
       is queued, are for the first real run to show.
       *Done when:* a busy reply is refused without the flag, `waiting` and
       `shell` even with it, a stop unless busy; a stop sends exactly one Escape
-      and no text; the page asks before either — tests 35 and 37, and test 48
+      and no text; the page asks before either — tests 35 and 37, and test 50
       finds no call to osascript.
 - [x] **W12 · The server lives while its window does.** A window in the
       background, or on a Mac asleep, has its timers held back, so its

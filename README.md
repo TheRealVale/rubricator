@@ -392,8 +392,10 @@ then.
 
 ### Live files
 
-The workspace watches what it indexed: change a file on disk and the page says so; change
-the one you are reading and it reloads in place, keeping your scroll position. Every
+The workspace watches the repository while its window is open: change a file on disk and the
+page says so; change the one you are reading and it reloads in place, keeping your scroll
+position. A document written or deleted joins or leaves the index, and the search, within
+about twenty seconds. Every
 document carries a timeline of commits, the sessions that touched it, and its last edit.
 
 ### More than one project

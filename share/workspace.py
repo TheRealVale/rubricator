@@ -152,7 +152,27 @@ def find_docs(root):
                 yield p, str(p.relative_to(root)), False
 
 
-HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.M)
+# How often the watcher lists the tree for documents that came or went, in
+# seconds. The mtimes of indexed documents are read every second, but a listing
+# is two git calls and a walk of every directory git does not ignore: ~48 ms of
+# CPU on a 3,700-file repository, all from the kernel's cache, nothing read from
+# or written to disk. A listing slower than that waits longer, so the watch
+# never costs more than ~2% of a core — a directory without git is walked.
+LIST_EVERY = 20
+
+
+def listed(roots):
+    """The paths a fresh `build` would index, keyed the way it keys them, found
+    without reading one document."""
+    roots = [Path(r) for r in (roots if isinstance(roots, (list, tuple)) else [roots])]
+    out = set()
+    for r in roots:
+        pre = (r.name + "/") if (len(roots) > 1 and r != roots[0]) else ""
+        out.update(pre + rel for _path, rel, _untracked in find_docs(r))
+    return out
+
+
+HEADING =re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$", re.M)
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)")
 MERMAID_FENCE = re.compile(r"^[ \t]*(?:```|~~~)[ \t]*mermaid\b", re.M)
 WORD = re.compile(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9_-]{2,}")
@@ -1465,7 +1485,15 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
     @S.stream
     def events(wfile):
         """Watch mode. The page asked to be told when a document changes, so tell
-        it — one line per change, until the window goes away. A Claude Code
+        it — one line per change, until the window goes away. An indexed
+        document's mtime is read every second; a document that came or went is
+        found by listing the tree every LIST_EVERY seconds, against the index
+        the stream opened on, so one written while the stream was down is told
+        on its first listing. A path is told as added once per stream even if
+        the index cannot read it, so it cannot ask for a reindex every listing.
+        `added` and `gone` also report the server's own reindexes, which keeps
+        a second window on the same server current; the page that asked for one
+        already has it and does not reindex again. A Claude Code
         session starting, ending or changing state is told the same way, as
         `running`, and the page looks at the running sessions again; a running
         session's transcript growing is told as `grew`, naming the sessions,
@@ -1474,6 +1502,8 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
         every few seconds even when nothing changed: the write that fails is
         how a window that went away is noticed."""
         last = snapshot()
+        seen = set(last)
+        looked, every = time.time(), LIST_EVERY
         ran = running_now()
         long_ = lengths(ran)
         wfile.write(b": watching\n\n")
@@ -1501,9 +1531,21 @@ def serve_workspace(roots, with_sessions, share, open_rel, deep=False, port=0, i
             now_ = snapshot()
             changed = [r for r, t in now_.items()
                        if t and last.get(r) is not None and t != last[r]]
-            added = [r for r in now_ if r not in last]
-            gone = [r for r in last if r not in now_]
+            added = {r for r in now_ if r not in last}
+            gone = {r for r in last if r not in now_}
             last = now_
+            if time.time() - looked >= every:
+                t0 = time.time()
+                try:
+                    now_seen = listed(roots)
+                except Exception:
+                    now_seen = seen
+                looked = time.time()
+                every = max(LIST_EVERY, 50 * (looked - t0))
+                added |= now_seen - seen
+                gone |= seen - now_seen
+                seen = now_seen
+            added, gone = sorted(added), sorted(gone)
             if changed or added or gone:
                 for d in state["data"]["docs"]:
                     if d["rel"] in changed:

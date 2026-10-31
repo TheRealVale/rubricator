@@ -39,7 +39,7 @@ echo "rubricator smoke tests"
 # A run of this suite happens on a desk where terminals hold live sessions, and
 # one AppleScript that reached them would type into one or switch its tabs. So
 # `osascript` on the PATH is a tripwire: it scripts nothing, writes down that it
-# was called, and fails. Test 48, the last, reads what it wrote, which has to be nothing.
+# was called, and fails. Test 50, the last, reads what it wrote, which has to be nothing.
 TRIP="$WORK/tripwire"; mkdir -p "$TRIP"
 printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s"\nexit 1\n' "$WORK/osascript.log" > "$TRIP/osascript"
 chmod +x "$TRIP/osascript"
@@ -4534,15 +4534,94 @@ else
   skip "47 · the test runs on the page" "no node"
 fi
 
-# ── 48 · nothing in this run scripted another application ───────────────────
+# ── 49 · a document that came or went is told to the page ───────────────────
+# The watch reads the mtimes of what it indexed every second, and finds what
+# came or went by listing the tree every LIST_EVERY seconds — one here, so the
+# test does not wait twenty. Pinned:
+#   - a listing keys paths as `build` does, a second root's under its name
+#   - a document written after the index is told as added, and an ignored one
+#     beside it is not
+#   - it is told once, though the index still lacks it
+#   - a document deleted from disk is told as gone
+python3 - "$WORK" "$REPO" >"$WORK/listing.txt" 2>&1 <<'PYEOF'
+import http.client, json, os, subprocess, sys, time
+from pathlib import Path
+work, repo_root = sys.argv[1], sys.argv[2]
+share = os.path.join(repo_root, "share")
+sys.path.insert(0, share)
+import workspace as W
+base = os.path.join(work, "listing")
+def repo(name, files):
+    r = os.path.join(base, name); os.makedirs(r, exist_ok=True)
+    for f, s in files.items():
+        open(os.path.join(r, f), "w").write(s)
+    subprocess.run(["git", "-C", r, "init", "-q"], check=True)
+    subprocess.run(["git", "-C", r, "add", "-A"], check=True)
+    return r
+checks = {}
+srv = conn = None
+try:
+    one = repo("one", {"a.md": "# a\n", "b.md": "# b\n", ".gitignore": "ignored.md\n"})
+    two = repo("two", {"c.md": "# c\n"})
+    built = {d["rel"] for d in W.build([one, two], False)["docs"]}
+    checks["a listing keys paths as the index does"] = W.listed([one, two]) == built == {"a.md", "b.md", "two/c.md"}
+
+    W.LIST_EVERY = 1
+    # an idle of three makes the stream say it is there every second, so a
+    # read never times out (which would end the response for good) and a
+    # quiet stretch is read as quiet
+    srv = W.serve_workspace([one], False, Path(share), "", idle=3)
+    conn = http.client.HTTPConnection("127.0.0.1", srv.port, timeout=4)
+    conn.request("GET", "/" + srv.token + "/events", headers={"Host": "127.0.0.1"})
+    res = conn.getresponse()
+    def told(within):
+        end, out = time.time() + within, []
+        while time.time() < end:
+            ln = res.fp.readline().decode().strip()
+            if ln.startswith("data:"):
+                j = json.loads(ln[5:])
+                if j.get("added") or j.get("gone"):
+                    out.append(j)
+                    if within > 3:
+                        break
+        return out
+    checks["the stream opens"] = res.fp.readline().decode().strip() == ": watching"
+    open(os.path.join(one, "ignored.md"), "w").write("# ignored\n")
+    open(os.path.join(one, "new.md"), "w").write("# new\n")
+    got = told(6)
+    checks["a new document is told as added, the ignored one is not"] = \
+        len(got) == 1 and got[0]["added"] == ["new.md"] and got[0]["gone"] == []
+    checks["and only once, though the index still lacks it"] = told(2.5) == []
+    os.remove(os.path.join(one, "b.md"))
+    got = told(6)
+    checks["a deleted document is told as gone"] = len(got) == 1 and got[0]["gone"] == ["b.md"]
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+finally:
+    if conn: conn.close()
+    if srv:
+        srv.stop.set()
+        try: srv.httpd.shutdown()
+        except Exception: pass
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "49 · a document written or deleted while the window is open is told to the page"
+else
+  no "49 · a document that came or went is not told" "$(grep '^XX' "$WORK/listing.txt" | tr '\n' ' ')$(tail -2 "$WORK/listing.txt")"
+fi
+
+# ── 50 · nothing in this run scripted another application ───────────────────
 # The tripwire at the top of this file stands where `osascript` would be found.
 # A test that reached it — the hook closing a window it never opened, a reply
 # that missed the dry seam — wrote its arguments down, and that is a failure
 # whether or not the test that did it noticed.
 if [ ! -s "$WORK/osascript.log" ]; then
-  ok "48 · nothing in the suite reached osascript"
+  ok "50 · nothing in the suite reached osascript"
 else
-  no "48 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
+  no "50 · something in the suite called osascript" "$(head -3 "$WORK/osascript.log" | tr '\n' ' ')"
 fi
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"

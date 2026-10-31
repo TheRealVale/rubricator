@@ -4195,7 +4195,10 @@ if (can('watch') && window.EventSource){
       if (j.grew) return followTranscripts(j.grew);
       var changed = j.changed || [];
       changed.forEach(function(rel){ var d = docBy(rel); if (d) d.text = null; });
-      if ((j.added || []).length || (j.gone || []).length) return reindex();
+      /* a document came or went that this page does not know of yet; one it
+         already has is its own reindex, told back */
+      if ((j.added || []).some(function(r){ return !docBy(r); }) ||
+          (j.gone || []).some(function(r){ return docBy(r); })) return reindex();
       if (!changed.length) return;
       var reloaded = 0;
       Shell.each(function(t){
@@ -4249,7 +4252,7 @@ function openProject(id){
     if (j.error) return toast(j.error);
     if (j.cancelled) return;
     toast('opened ' + (j.opened || '').split('/').pop() + ' in its own window');
-  }, function(){ toast('could not open that project'); });
+  }, function(e){ toast((e.body && e.body.error) || 'could not open that project'); });
 }
 
 $('wname').textContent = D.name;
