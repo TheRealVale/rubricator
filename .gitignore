@@ -3,3 +3,6 @@ share/vendor/
 .DS_Store
 __pycache__/
 *.pyc
+# marks on this repository's own documents: working notes, kept out of it. Here
+# and not in .git/info/exclude, whose `.rubricator/` line unexclude() takes back
+.rubricator/
