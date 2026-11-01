@@ -238,11 +238,16 @@ ws_run() {
   if [ "$doopen" = 1 ] && [ -z "$out" ] && [ "${WS_STATIC:-0}" != 1 ]; then
     local urlfile
     urlfile="$(mktemp "$CACHE/.serve.XXXXXX")"
+    # The server outlives the terminal it was started from, so it must not hold
+    # that terminal as its stdin: once the tab closes the descriptor is revoked,
+    # every process the server starts inherits it, and a python3 handed a
+    # revoked stdin dies before its first line ("init_sys_streams: Bad file
+    # descriptor"), so a project opened from that window would never open.
     RUBRICATOR_HOME="$SHARE" RUBRICATOR_BIN="$_BIN/md" RUBRICATOR_THEME="$THEME" RUBRICATOR_OPEN="$opendoc" \
       RUBRICATOR_TERM="${TERM_PROGRAM:-}" RUBRICATOR_ALLOW_LAUNCH="${ALLOW_LAUNCH:-0}" \
       RUBRICATOR_SESSIONS="$([ "$SESSIONS_EXPLICIT" = 1 ] && { [ -n "$sessions" ] && echo 1 || echo 0; })" \
       nohup "$PY" "$SHARE/workspace.py" "${absdirs[@]}" $sessions ${SHALLOW:+--shallow} \
-        ${WAITING:+--waiting} --serve >"$urlfile" 2>/dev/null &
+        ${WAITING:+--waiting} --serve </dev/null >"$urlfile" 2>/dev/null &
     local i=0 url=""
     while [ $i -lt 100 ]; do
       url="$(head -1 "$urlfile" 2>/dev/null || true)"

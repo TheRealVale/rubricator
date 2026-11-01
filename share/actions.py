@@ -16,7 +16,7 @@ into its own iTerm tab, the way you would type it, while Claude waits there for
 input or, once you confirm it, while it works; and a working one is stopped with
 the Escape key in that tab — see "a running session's own terminal" below.
 """
-import json, os, plistlib, re, shlex, subprocess, time
+import json, os, plistlib, re, shlex, subprocess, tempfile, time
 from pathlib import Path
 
 HOME    = Path.home()
@@ -194,9 +194,19 @@ def choose_folder():
     return path if path and os.path.isdir(path) else None
 
 
+OPEN_WAIT = 20      # seconds; md is done in under one, and past this it is building a static page
+
+
 def open_project(path, sessions=False):
     """Open a second workspace, the way an editor opens a second window. This
-    starts rubricator on a directory — never an arbitrary program."""
+    starts rubricator on a directory — never an arbitrary program.
+
+    md is done once it has asked for the window, and exits non-zero when it
+    could start no workspace at all, so this waits for it and raises what it
+    said: the page answers "opened" only for a window that is coming. Its stdin
+    is /dev/null, never this server's own, which may be a terminal closed since
+    and revoked: every python3 md runs dies on a revoked stdin before its first
+    line, and md with it."""
     md = os.environ.get("RUBRICATOR_BIN") or str(HOME / ".local/bin/md")
     if not os.path.isfile(md):
         raise RuntimeError("cannot find the md command to open a second window")
@@ -204,8 +214,20 @@ def open_project(path, sessions=False):
            if not k.startswith(("RUBRICATOR_OUT", "RUBRICATOR_OPEN", "RUBRICATOR_INJECT",
                                 "RUBRICATOR_HOME", "RUBRICATOR_JSON"))}
     argv = [md, str(path)] + (["--sessions"] if sessions else [])
-    subprocess.Popen(argv, env=env, cwd=str(path), start_new_session=True,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # a file, not a pipe: whatever md leaves running must not hold this open
+    with tempfile.TemporaryFile() as err:
+        p = subprocess.Popen(argv, env=env, cwd=str(path), start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err)
+        try:
+            code = p.wait(timeout=OPEN_WAIT)
+        except subprocess.TimeoutExpired:
+            code = 0                     # still at work on a page, which opens when done
+        if code:
+            err.seek(0)
+            said = [l.strip() for l in err.read().decode("utf-8", "replace").splitlines() if l.strip()]
+            why = next((l[4:] for l in reversed(said) if l.startswith("md: ")), None) \
+                or (said[0] if said else "md exited with %d" % code)
+            raise RuntimeError("could not open %s: %s" % (Path(path).name, why))
     remember_project(path)
     return {"ok": True, "opened": str(path)}
 

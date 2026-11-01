@@ -402,8 +402,9 @@ document carries a timeline of commits, the sessions that touched it, and its la
 
 Click the repository name in the bar to switch. The menu lists projects opened before and
 offers a folder chooser; picking one opens it in its own window, the way an editor opens a
-second project — which matters because session search already spans every repository on the
-machine, so finding the conversation is only useful if there is somewhere to go with it.
+second project, and one that cannot open says why. That matters because session search
+already spans every repository on the machine, so finding the conversation is only useful if
+there is somewhere to go with it.
 
 ```bash
 md serve --port 7777        # a workspace that stays up, on a port you can bookmark

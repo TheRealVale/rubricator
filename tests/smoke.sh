@@ -4534,6 +4534,126 @@ else
   skip "47 · the test runs on the page" "no node"
 fi
 
+# ── 48 · a project opened from a window whose terminal has closed ───────────
+# A window's server outlives the terminal `md` ran in. Once that tab closes,
+# a stdin taken from it is a revoked descriptor, every process the server
+# starts inherits it, and a python3 handed one dies before its first line
+# ("init_sys_streams: Bad file descriptor") — md at its first python3, or the
+# server md starts at once — and the window would say "opened" for a window
+# that never comes. Pinned:
+#
+#   - from a process whose stdin is a revoked terminal, a project opens: its
+#     server is running when open_project returns
+#   - md started on a terminal gives its server /dev/null as stdin
+#   - open_project gives md /dev/null as stdin
+#   - an md that fails is reported with what it said, and is not remembered
+python3 - "$WORK" "$REPO" "$MD" >"$WORK/revoked.txt" 2>&1 <<'PYEOF'
+import json, os, pty, re, subprocess, sys, time, urllib.request
+work, repo_root, md = sys.argv[1:4]
+share = os.path.join(repo_root, "share")
+sys.path.insert(0, share)
+import actions as A
+base = os.path.join(work, "revoked"); os.makedirs(base, exist_ok=True)
+def repo(name):
+    r = os.path.join(base, name); os.makedirs(r, exist_ok=True)
+    open(os.path.join(r, "README.md"), "w").write("# %s\n" % name)
+    subprocess.run(["git", "-C", r, "init", "-q"], check=True)
+    return r
+def fd0(pid):
+    out = subprocess.run(["lsof", "-nP", "-a", "-p", str(pid), "-d", "0"],
+                         capture_output=True, text=True).stdout.strip().splitlines()
+    return out[-1] if out else ""
+def servers(r):
+    out = subprocess.run(["pgrep", "-f", "workspace.py %s" % r], capture_output=True, text=True).stdout
+    return [int(x) for x in out.split()]
+os.environ.update(RUBRICATOR_NO_WINDOW="1", RUBRICATOR_NO_WATCH="1", RUBRICATOR_IDLE="2",
+                  RUBRICATOR_BIN=md)
+checks = {}
+try:
+    # the session leader of a fresh terminal starts a detached child that keeps
+    # the terminal as its stdin, waits until it is up, and exits: the kernel
+    # revokes the terminal, and the child opens a project on it
+    far, said, ready = repo("far"), os.path.join(base, "far.json"), os.path.join(base, "ready")
+    child = ("import json, os, subprocess, sys, time\n"
+             "sys.path.insert(0, %r)\n"
+             "import actions as A\n"
+             "open(%r, 'w').close()\n"
+             "end = time.time() + 10\n"
+             "while os.isatty(0) and time.time() < end: time.sleep(0.05)\n"
+             "r = {'revoked': not os.isatty(0)}\n"
+             "try: r.update(A.open_project(%r))\n"
+             "except Exception as e: r['error'] = str(e)\n"
+             "r['servers'] = subprocess.run(['pgrep', '-f', 'workspace.py ' + %r],\n"
+             "    capture_output=True, text=True).stdout.split()\n"
+             "json.dump(r, open(%r, 'w'))\n") % (share, ready, far, far, said)
+    pid, master = pty.fork()
+    if pid == 0:
+        subprocess.Popen([sys.executable, "-c", child], start_new_session=True)
+        end = time.time() + 10
+        while not os.path.exists(ready) and time.time() < end:
+            time.sleep(0.05)
+        os._exit(0)
+    os.waitpid(pid, 0)
+    os.close(master)
+    end = time.time() + 40
+    while not os.path.exists(said) and time.time() < end:
+        time.sleep(0.1)
+    got = json.load(open(said)) if os.path.exists(said) else {}
+    checks["the child's stdin was a revoked terminal"] = got.get("revoked") is True
+    checks["from a revoked stdin the project opens: %s" % (got.get("error") or "")] = \
+        got.get("ok") is True and bool(got.get("servers"))
+
+    # md on a live terminal: the server it leaves behind holds none of it
+    near = repo("near")
+    m, s = os.openpty()
+    p = subprocess.run([md, near], stdin=s, capture_output=True, text=True, timeout=30)
+    os.close(m); os.close(s)
+    url = (re.findall(r"http://127\.0\.0\.1:\d+/[A-Za-z0-9_-]+/", p.stdout) or [""])[0]
+    held = [fd0(x) for x in servers(near)]
+    checks["md's server gives up the terminal it was started on: %s" % held] = \
+        bool(held) and all("/dev/null" in h for h in held)
+    if url:
+        try: urllib.request.urlopen(urllib.request.Request(url + "bye", data=b"{}"), timeout=5)
+        except Exception: pass
+
+    # open_project, on a terminal of its own: md is handed /dev/null
+    fake = os.path.join(base, "md-fake")
+    seen = os.path.join(base, "fd0.txt")
+    open(fake, "w").write("#!/bin/bash\nlsof -nP -a -p $$ -d 0 | tail -1 > %s\n" % seen)
+    os.chmod(fake, 0o755)
+    os.environ["RUBRICATOR_BIN"] = fake
+    m, s = os.openpty()
+    keep = os.dup(0); os.dup2(s, 0)
+    try:
+        A.open_project(repo("mid"))
+    finally:
+        os.dup2(keep, 0); os.close(keep); os.close(m); os.close(s)
+    line = open(seen).read() if os.path.exists(seen) else ""
+    checks["open_project hands md /dev/null, not its own stdin: %s" % line.strip()] = "/dev/null" in line
+
+    # an md that fails says so, and the project is not remembered
+    open(fake, "w").write("#!/bin/bash\necho 'rubricator: first' >&2\n"
+                          "echo 'md: not a directory: nowhere' >&2\nexit 1\n")
+    lost = repo("lost")
+    try:
+        A.open_project(lost); why = ""
+    except RuntimeError as e:
+        why = str(e)
+    checks["an md that fails is reported with what it said: %r" % why] = \
+        why == "could not open lost: not a directory: nowhere"
+    checks["a project that did not open is not remembered"] = lost not in A.recents()
+except Exception as e:
+    import traceback; traceback.print_exc()
+    checks["the test ran: %s" % e] = False
+for k, v in checks.items(): print(("ok " if v else "XX ") + k)
+sys.exit(0 if checks and all(checks.values()) else 1)
+PYEOF
+if [ $? = 0 ]; then
+  ok "48 · a project opens from a window whose terminal has closed, and one that cannot says why"
+else
+  no "48 · opening a project is wrong" "$(grep '^XX' "$WORK/revoked.txt" | tr '\n' ' ')$(tail -2 "$WORK/revoked.txt")"
+fi
+
 # ── 49 · a document that came or went is told to the page ───────────────────
 # The watch reads the mtimes of what it indexed every second, and finds what
 # came or went by listing the tree every LIST_EVERY seconds — one here, so the

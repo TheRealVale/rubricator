@@ -376,8 +376,13 @@ Design canvas: the shell, the session reader, and the direction exploration.
       its own history.
 - [x] **F7 · Open a project.** The repository name in the bar is a switcher:
       recents the server remembered, plus a native folder chooser it opens
-      itself. A second project opens in its own window. The page never sends a
-      path — it asks for the picker or names something already on the list.
+      itself. A second project opens in its own window, through `md`; the
+      first window says "opened" once md has asked for it, and otherwise what
+      md said. The server outlives the terminal `md` ran in, so neither it nor
+      md started from it holds that terminal as stdin: once the tab closes the
+      descriptor is revoked, and python3 dies on it (test 48). The page never
+      sends a path — it asks for the picker or names something already on the
+      list.
 - [x] **F8 · Treat the document as untrusted.** Markdown carries raw HTML and
       an `<img onerror>` executed — in `review.js`'s line mapper, which parsed
       every token into a live `<div>`. Both halves fixed: the renderer sanitises
