@@ -1116,6 +1116,90 @@ else
   skip "23 · composer lifecycle" "needs --browser and Chrome"
 fi
 
+# ── 23b · a selection in a list is on its item ──────────────────────────────
+# A list is one block, and a selection inside one bullet took the whole list's
+# lines and the whole list as its anchor: the agent was pointed at every item,
+# and an edit to any other item moved the mark onto the list's longest line.
+# The ranges are built the way the browser builds them — a triple-click ends
+# at offset 0 of the next item — and the rewrite at the end grows the first
+# item by a line, which a whole-list anchor cannot survive.
+if [ "$WITH_BROWSER" = 1 ] && [ -x "$CHROME" ]; then
+  printf '# list fixture\n\n- alpha one\n  wraps on\n- beta two\n\n  loose para\n- gamma three\n  1. nested x\n     wraps\n  2. nested y\n- delta\n\nafter paragraph\nspans two lines\n' > "$WORK/list.md"
+  "$MD" -o "$WORK/list.html" "$WORK/list.md" >/dev/null 2>&1
+  python3 - "$WORK/list.html" "$WORK/list-probe.html" <<'PYEOF'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+probe = """<script>window.addEventListener('load',function(){setTimeout(function(){
+var doc=document.querySelector('article.md')||document.querySelector('.md'), out={marks:{}};
+var li=function(t){ return [].filter.call(doc.querySelectorAll('li'),function(e){ return e.firstChild && e.textContent.trim().indexOf(t)===0; })[0]; };
+function text(el, has){ var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),n; while((n=w.nextNode())) if(n.nodeValue.indexOf(has)>=0) return n; }
+function span(el, from, to){ var n=text(el, from), m=text(el, to); var r=document.createRange();
+  r.setStart(n, n.nodeValue.indexOf(from)); r.setEnd(m, m.nodeValue.indexOf(to)+to.length); return r; }
+function mark(name, r){
+  var s=getSelection(); s.removeAllRanges(); s.addRange(r);
+  document.dispatchEvent(new Event('selectionchange'));
+  var b=[].filter.call(document.querySelectorAll('#pop button'),function(b){ return /Note/.test(b.textContent); })[0];
+  b.click();
+  var t=document.getElementById('c-text'); t.value=name; t.dispatchEvent(new Event('input',{bubbles:true}));
+  t.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+}
+var r;
+mark('wrap',   span(li('alpha'), 'one', 'wraps'));
+r=document.createRange(); r.setStart(li('beta'),0); r.setEnd(li('gamma'),0); mark('triple', r);
+mark('nested', span(li('nested y'), 'nested', 'y'));
+mark('own',    span(li('gamma'), 'three', 'three'));
+r=document.createRange(); var d=text(li('delta'),'delta'), p=text(doc,'after paragraph');
+r.setStart(d,0); r.setEnd(p,5); mark('across', r);
+mark('para',   span([].filter.call(doc.children,function(e){ return e.tagName==='P'; }).pop(), 'paragraph', 'spans'));
+function items(){ var o={}; __mdReview.store.items.forEach(function(i){ o[i.note]=[i.lineStart,i.lineEnd,i.anchorState]; }); return o; }
+out.marks=items();
+out.hl=Array.from(CSS.highlights.get('md-anno')||[]).length;
+out.hover=[].filter.call(doc.children,function(e){ return e.dataset.lineStart; }).length;
+var m=window.__md, raw2=m.raw.replace('  wraps on\\n','  wraps on\\n  and grows a line\\n');
+MDReview.open({doc:m.doc, META:m.META, raw:raw2, body:raw2, fmLines:0});
+out.after=items();
+var el=document.createElement('div'); el.id='probe'; el.textContent=JSON.stringify(out); document.body.appendChild(el);
+},500);});</script>"""
+i = src.rindex("</body>")
+open(sys.argv[2], "w", encoding="utf-8").write(src[:i] + probe + src[i:])
+PYEOF
+  "$CHROME" --headless --disable-gpu --virtual-time-budget=12000 \
+    --use-mock-keychain --password-store=basic --disable-background-networking \
+    --window-size=1280,900 --dump-dom "file://$WORK/list-probe.html" \
+    >"$WORK/list.dom" 2>/dev/null
+  python3 - "$WORK/list.dom" >"$WORK/list.txt" 2>&1 <<'PYEOF'
+import html, json, re, sys
+dom = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+m = re.search(r'<div id="probe">(.*?)</div>', dom, re.S)
+if not m:
+    print("XX the page never reached the probe"); sys.exit(1)
+p = json.loads(html.unescape(m.group(1)))
+k, a = p["marks"], p["after"]
+checks = {
+  "a selection across an item's wrap is that item":     k.get("wrap") == [3, 4, "attached"],
+  "a triple-click ends on its own item, not the next":  k.get("triple") == [5, 7, "attached"],
+  "a nested item has its own line":                     k.get("nested") == [11, 11, "attached"],
+  "an item's own text takes the item and its children": k.get("own") == [8, 11, "attached"],
+  "from an item into a paragraph spans both":           k.get("across") == [12, 15, "attached"],
+  "a paragraph is still its block":                     k.get("para") == [14, 15, "attached"],
+  "each mark within one block is highlighted, wraps and all": p["hl"] == 5,
+  "hover still steps through the top-level blocks":     p["hover"] == 3,
+  "an edit to another item leaves the mark attached":   a.get("triple") == [6, 8, "attached"],
+}
+for k2, v in checks.items():
+    print(("ok " if v else "XX ") + k2 + "  " + json.dumps(p))
+sys.exit(0 if all(checks.values()) else 1)
+PYEOF
+  if [ $? = 0 ]; then
+    ok "23b · a selection in a list is on its item's lines, and stays there"
+  else
+    no "23b · a selection in a list is not on its item" \
+       "$(grep '^XX' "$WORK/list.txt" | head -2 | cut -c1-260 | tr '\n' ' ')"
+  fi
+else
+  skip "23b · list item marks" "needs --browser and Chrome"
+fi
+
 # ── 24 · a session's files can be reached, and only those ───────────────────
 # `reveal` and `edit` resolve their target through the document index, so they
 # reach the markdown in a repository and nothing else — while a session touches

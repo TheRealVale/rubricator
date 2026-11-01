@@ -104,7 +104,8 @@ Apply this feedback. Don't restructure anything I didn't mention.
 ```
 
 Paste that into any agent. Line numbers come from the markdown parser's own token offsets,
-not from guesswork.
+not from guesswork, down to the list item: a selection inside one bullet is on that bullet's
+lines, not the whole list's.
 
 A `n` Note records context rather than asking for a change, so it never appears as a
 numbered instruction — it rides along in an appendix instead. Which means a note cannot

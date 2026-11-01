@@ -110,7 +110,30 @@ function mapLines(){
       var el = doc.children[idx + i];
       if (el){ el.dataset.lineStart = start; el.dataset.lineEnd = end; }
     }
+    if (t.type === 'list' && n === 1 && doc.children[idx]) mapItems(t, doc.children[idx], start);
     idx += n;
+  });
+}
+/* A list is one block, but a selection in it is about one of its items, so
+   each item gets its own lines, nested ones too. Anchored to the whole list, a
+   mark on one bullet is `moved` by an edit to any other, onto the list's
+   longest line, which can be another bullet's. data-item-*, not data-line-*:
+   the keymap and hover step through the top-level blocks. */
+function mapItems(t, el, start){
+  var lis = [].filter.call(el.children, function(c){ return c.tagName === 'LI'; });
+  if (lis.length !== t.items.length) return;
+  t.items.forEach(function(it, k){
+    var li = lis[k];
+    li.dataset.itemStart = start;
+    li.dataset.itemEnd = start + it.raw.replace(/\s+$/, '').split('\n').length - 1;
+    /* an item's text is its source less marker and indent, line for line */
+    var subs = (it.tokens || []).filter(function(s){ return s.type === 'list'; });
+    var els = [].filter.call(li.children, function(c){ return /^[OU]L$/.test(c.tagName); });
+    if (subs.length === els.length) subs.forEach(function(s, j){
+      var at = it.text.indexOf(s.raw);
+      if (at >= 0) mapItems(s, els[j], start + it.text.slice(0, at).split('\n').length - 1);
+    });
+    start += it.raw.split('\n').length - 1;
   });
 }
 
@@ -148,6 +171,38 @@ function sectionEnd(startLine){
 function blockOf(node){
   var el = node && (node.nodeType === 1 ? node : node.parentElement);
   return el ? el.closest('[data-line-start]') : null;
+}
+/* the list item of `block` a node is in, when mapItems gave it lines */
+function itemOf(node, block){
+  var el = node && (node.nodeType === 1 ? node : node.parentElement);
+  var li = el && el.closest('[data-item-start]');
+  return li && block && block.contains(li) ? li : null;
+}
+/* the innermost element of `block` that holds lines a..b: an item, or the block */
+function itemAt(block, a, b){
+  var best = block;
+  if (block) [].forEach.call(block.querySelectorAll('[data-item-start]'), function(li){
+    if (+li.dataset.itemStart <= a && b <= +li.dataset.itemEnd) best = li;   // document order: deepest last
+  });
+  return best;
+}
+/* the text nodes holding the first and the last character a range selects. An
+   end can sit between nodes — a triple-click ends at the start of the next
+   item — and the node there holds nothing that was selected. */
+function selectedEnds(r){
+  var root = r.commonAncestorContainer;
+  if (root.nodeType === 3) return [root, root];
+  var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), first = null, last = null;
+  var n = r.startContainer;
+  w.currentNode = n;
+  if (n.nodeType !== 3) n = w.nextNode();
+  for (; n; n = w.nextNode()){
+    if (!r.intersectsNode(n)){ if (first) break; continue; }
+    var from = n === r.startContainer ? r.startOffset : 0;
+    var to = n === r.endContainer ? r.endOffset : n.nodeValue.length;
+    if (/\S/.test(n.nodeValue.slice(from, to))){ first = first || n; last = n; }
+  }
+  return first ? [first, last] : null;
 }
 
 /* ── 2. re-anchor stored items against the current source ──
@@ -249,8 +304,19 @@ function findRange(root, text){
   if (!root || !text) return null;
   var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], full = '', n;
   while ((n = w.nextNode())){ nodes.push([n, full.length]); full += n.nodeValue; }
-  var at = full.indexOf(text);
-  if (at < 0) return null;
+  /* a selection reads a wrapped source line's newline as the space it renders
+     as, and the text node keeps the newline: compare with each run of white
+     space as one, and map back. `map[k]` is where norm's k-th character is. */
+  var norm = '', map = [];
+  for (var c = 0; c < full.length; c++){
+    if (/\s/.test(full[c])){ if (norm.slice(-1) === ' ') continue; norm += ' '; }
+    else norm += full[c];
+    map.push(c);
+  }
+  var want = String(text).replace(/\s+/g, ' ').trim();
+  var hit = want ? norm.indexOf(want) : -1;
+  if (hit < 0) return null;
+  var at = map[hit], to = map[hit + want.length - 1] + 1;
   function pos(i, end){
     for (var k=0;k<nodes.length;k++){
       var node = nodes[k][0], s = nodes[k][1], len = node.nodeValue.length;
@@ -259,7 +325,7 @@ function findRange(root, text){
     var last = nodes[nodes.length-1];
     return [last[0], last[0].nodeValue.length];
   }
-  var a = pos(at, false), b = pos(at + text.length, true);
+  var a = pos(at, false), b = pos(to, true);
   var r = document.createRange();
   try { r.setStart(a[0], a[1]); r.setEnd(b[0], b[1]); } catch(e){ return null; }
   return r;
@@ -279,7 +345,8 @@ function paint(){
       }
     });
     if (HL && it.partial && it.quote){
-      var r = findRange(blockAtLine(it.lineStart), it.quote);
+      var bl = blockAtLine(it.lineStart), at = itemAt(bl, it.lineStart, it.lineEnd);
+      var r = findRange(at, it.quote) || (at !== bl ? findRange(bl, it.quote) : null);
       if (r) HL.add(r);
     }
   });
@@ -329,9 +396,13 @@ function selInfo(){
   if (!doc.contains(r.commonAncestorContainer)) return null;
   var text = String(sel).replace(/\s+$/,'');
   if (!text.trim()) return null;
-  var b1 = blockOf(r.startContainer), b2 = blockOf(r.endContainer) || b1;
+  var ends = selectedEnds(r) || [r.startContainer, r.endContainer];
+  var b1 = blockOf(ends[0]), b2 = blockOf(ends[1]) || b1;
   if (!b1) return null;
-  return { text:text, a:+b1.dataset.lineStart, b:+(b2 || b1).dataset.lineEnd,
+  var i1 = itemOf(ends[0], b1), i2 = itemOf(ends[1], b2);
+  return { text:text,
+           a: +(i1 ? i1.dataset.itemStart : b1.dataset.lineStart),
+           b: +(i2 ? i2.dataset.itemEnd : b2.dataset.lineEnd),
            block:b1, rect:r.getBoundingClientRect() };
 }
 function showPop(rect){

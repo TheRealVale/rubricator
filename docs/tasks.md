@@ -972,6 +972,16 @@ another phase waits on — N6's plan-text half. See
       *Done when:* the line is present, updates on every mark, and appears
       nowhere else. **S**
 
+- [x] **M9 · A mark in a list is on its item.** A list is one block, so a
+      selection inside one bullet took the whole list's lines and the whole
+      list as its anchor: the export pointed the agent at every item, and an
+      edit to any other item moved the mark onto the list's longest line, often
+      another bullet's. `review.js` gives each item, nested ones too, its own
+      lines from its token; a selection ends where its last selected character
+      is, because a triple-click ends at the start of the next item; and the
+      highlight finds a quote across a wrapped source line.
+      *Done when:* test 23b — and it fails on the whole-list anchor. **S**
+
 ---
 
 ## Phase N — what the tool keeps
